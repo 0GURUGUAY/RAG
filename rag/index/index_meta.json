@@ -1,0 +1,8 @@
+{
+  "backend": "faiss",
+  "backend_path": "/Users/maxpatissier/Downloads/ceibo/rag/index/faiss",
+  "embeddings_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "files_indexed": 31,
+  "chunks_indexed": 6727,
+  "files_failed": 0
+}

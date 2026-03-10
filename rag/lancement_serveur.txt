@@ -1,0 +1,29 @@
+# 1) Aller dans le dossier RAG
+cd /Users/maxpatissier/Downloads/ceibo/rag
+
+# 2) (Optionnel) Réinstaller les dépendances si besoin
+python3 -m pip install -r requirements.txt
+
+# 3) (Optionnel) Reconstruire l’index documents
+python3 build_index.py --docs-dir ./documents --backend faiss
+
+# 4) Démarrer le serveur RAG local
+
+cd /Users/maxpatissier/Downloads/ceibo
+source .venv/bin/activate
+cd rag
+python3 server.py --host 127.0.0.1 --port 8765
+
+
+
+/Users/maxpatissier/Downloads/ceibo/.venv/bin/python rag/build_index.py --docs-dir ./rag/documents --backend faiss
+
+cd /Users/maxpatissier/Downloads/ceibo
+lsof -tiTCP:8765 -sTCP:LISTEN | xargs kill -9 2>/dev/null || true
+/Users/maxpatissier/Downloads/ceibo/.venv/bin/python rag/server.py --host 127.0.0.1 --port 8765
+
+
+
+je reviens sur mon histoire d'analyse de factures qui me semble intéressant. Nous avons déjà une gestion des factures dans l'application. Mon idée serait d'avoir un bouton 'IA' dans cette partie qui analyse la facture et me renvoit son avis. Par exemple, si un mécanicien a changé un joint du moteur, que l'IA me donne des informatins et m'alerte sur d'éventuels problèmes futurs. Qu'en penses tu ?
+
+J'ai toujours un problème d'affichage du résultat final du RAG. Par exemple, la réponse se termine par : "*   **Sous voile :** La vitesse maximale sous voile est beaucoup plus variable et dépend fortement des conditions météorologiques (force et direction du vent), de l'état de la mer, du réglage des voiles et de la charge du" et tu vois bien qu'il y a plus d'information après le "du". Mais elle n'apparait pas et ce n'est pas normal.

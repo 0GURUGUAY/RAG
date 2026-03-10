@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="CEIBO Router" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Mahon Grau</name>
+  </metadata>
+  <rte>
+    <name>Mahon Grau</name>
+    <rtept lat="39.86437509785634" lon="4.313417422019588"></rtept>
+    <rtept lat="39.8730671464178" lon="4.337784246989026"></rtept>
+    <rtept lat="39.90104734952386" lon="4.311707004286621"></rtept>
+    <rtept lat="39.94598424748111" lon="4.294541712536182"></rtept>
+    <rtept lat="39.968277031017315" lon="4.28070116764173"></rtept>
+    <rtept lat="39.96844141379892" lon="4.274137568662285"></rtept>
+    <rtept lat="39.95986010437386" lon="4.2649571099590045"></rtept>
+  </rte>
+</gpx>

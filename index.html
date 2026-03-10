@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gestion du CEIBO</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="icon" type="image/jpeg" href="ceibo-favicon.jpg">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="stylesheet" href="style.css?v=20260309-05"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<div id="sidebar">
+    <div class="sidebar-tabs">
+        <button id="cloudTabBtn" class="tab-btn active" type="button">Cloud</button>
+        <button id="routesTabBtn" class="tab-btn" type="button">Routes</button>
+        <button id="routingTabBtn" class="tab-btn" type="button">Routage</button>
+        <button id="documentTabBtn" class="tab-btn" type="button">Document</button>
+        <button id="navLogTabBtn" class="tab-btn" type="button">Journal nav</button>
+        <button id="maintenanceTabBtn" class="tab-btn" type="button">Maintenance</button>
+        <button id="arrivalTabBtn" class="tab-btn" type="button">Arrivée</button>
+        <button id="waypointTabBtn" class="tab-btn" type="button">Waypoint</button>
+    </div>
+
+    <div id="routingTab" class="tab-panel">
+        <label for="departureDateTimeInput" style="display: block; margin-top: 10px; font-size: 12px;">Départ (date + heure):</label>
+        <input type="datetime-local" id="departureDateTimeInput" step="600" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+        <div class="routing-control-grid">
+            <div class="routing-control-item">
+                <label for="tackingTimeInput">Temps du bord (min):</label>
+                <select id="tackingTimeInput">
+                    <option value="0.25">15 minutes</option>
+                    <option value="0.33">20 minutes</option>
+                    <option value="0.5" selected>30 minutes</option>
+                    <option value="0.75">45 minutes</option>
+                    <option value="1">1 heure</option>
+                    <option value="1.5">1.5 heures</option>
+                    <option value="2">2 heures</option>
+                </select>
+            </div>
+
+            <div class="routing-control-item">
+                <label for="sailModeSelect">Mode voiles:</label>
+                <select id="sailModeSelect">
+                    <option value="auto" selected>Auto</option>
+                    <option value="prudent">Prudent</option>
+                    <option value="performance">Performance</option>
+                </select>
+            </div>
+
+            <div class="routing-control-item">
+                <label for="autoWpSpacingInput">Contournement côte:</label>
+                <select id="autoWpSpacingInput">
+                    <option value="off" selected>Désactivé</option>
+                    <option value="5">5 NM</option>
+                    <option value="8">8 NM</option>
+                    <option value="10">10 NM</option>
+                    <option value="12">12 NM</option>
+                    <option value="15">15 NM</option>
+                    <option value="20">20 NM</option>
+                </select>
+            </div>
+
+            <div class="routing-control-item">
+                <label for="forecastWindowDaysSelect">Fenêtre analyse:</label>
+                <select id="forecastWindowDaysSelect">
+                    <option value="2">2 jours</option>
+                    <option value="3" selected>3 jours</option>
+                    <option value="5">5 jours</option>
+                    <option value="7">7 jours</option>
+                </select>
+            </div>
+        </div>
+
+        <button id="suggestDepartureBtn" style="margin-top:8px;">Conseiller départ météo (≤ 20 kn)</button>
+        <div id="departureSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Suggestion départ: en attente</div>
+        <button id="openWeatherFromRoutingBtn" style="margin-top:8px;">Ouvrir météo routage</button>
+        <div id="routingWeatherHint" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo est accessible depuis Routage.</div>
+        <button id="suggestAiRoutesBtn" style="margin-top:8px;">Proposer routes IA (safe / perf)</button>
+        <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Routes IA: en attente</div>
+        <div id="aiRouteSuggestions"></div>
+
+        <div class="button-row">
+                <button id="computeBtn" style="flex:1;">Calculer</button>
+                <button id="saveRouteFromRoutingBtn" style="flex:1;">Sauver</button>
+                <button id="deleteSelectedWpBtn" style="flex:1;">Supprimer WP</button>
+            <button id="recenterBtn" style="flex:1;">Recentrer route</button>
+        </div>
+        <div id="windSpeedLegend"></div>
+        <div id="selectedWpInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">WP sélectionné: aucun · clic sur WP pour sélectionner · clic droit pour supprimer</div>
+
+        <div id="waypointWeatherInfo"></div>
+        <div id="info"></div>
+    </div>
+
+    <div id="routesTab" class="tab-panel">
+        <div class="page-subtabs">
+            <button id="routesManageSubtabBtn" type="button" class="page-subtab-btn active">Gestion</button>
+            <button id="routesImportExportSubtabBtn" type="button" class="page-subtab-btn">Import/Export</button>
+            <button id="routesToolsSubtabBtn" type="button" class="page-subtab-btn">Outils</button>
+        </div>
+
+        <div id="routesManagePanel" class="page-subpanel active">
+            <label for="routeNameInput" style="display: block; margin-top: 10px; font-size: 12px;">Nom de la route:</label>
+            <input type="text" id="routeNameInput" placeholder="Nom de la route" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+            <div class="button-row">
+                <button id="saveRouteBtn" style="flex:1;">Sauvegarder</button>
+                <button id="resetBtn" style="flex:1;">Reset</button>
+                <button id="reverseRouteBtn" style="flex:1;">Route retour</button>
+            </div>
+
+            <label id="savedRoutesListLabel" style="display:block; margin-top:12px; font-size:12px;">Routes sauvegardées:</label>
+            <input type="text" id="routeSearchInput" placeholder="Rechercher une route..." class="route-search-input">
+            <div id="savedRoutesList"></div>
+        </div>
+
+        <div id="routesImportExportPanel" class="page-subpanel">
+            <div class="button-row">
+                <button id="exportRouteBtn" style="flex:1;">Exporter JSON</button>
+                <button id="exportRouteGpxBtn" style="flex:1;">Exporter GPX</button>
+            </div>
+            <button id="exportVoyagePdfBtn" style="margin-top:8px;">Exporter rapport PDF</button>
+
+            <label for="importRouteInput" style="display: block; margin-top: 12px; font-size: 12px;">Importer (JSON / GPX):</label>
+            <input type="file" id="importRouteInput" accept=".json,.gpx,application/json,application/gpx+xml,text/xml,application/xml" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+        </div>
+
+        <div id="routesToolsPanel" class="page-subpanel">
+            <div class="button-row">
+                <button id="measureToggleBtn" style="flex:1;">Mesure NM: OFF</button>
+                <button id="measureClearBtn" style="flex:1;">Effacer mesure</button>
+            </div>
+            <div id="measureInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Mesure: 0.00 nm</div>
+        </div>
+    </div>
+
+    <div id="cloudTab" class="tab-panel active">
+        <div id="cloudConfigCard" class="cloud-config-card" style="margin-top:0;">
+            <div class="cloud-config-title" id="cloudMainTitle">V5 · Base de données partagée</div>
+            <input type="hidden" id="cloudUrlInput" value="https://wtavqhpntfnsklbniqzf.supabase.co">
+            <input type="hidden" id="cloudAnonKeyInput" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind0YXZxaHBudGZuc2tsYm5pcXpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NjkwNzMsImV4cCI6MjA4ODI0NTA3M30.v4T63RWtSjCHBGM5y4nFKdONpteviLSer-P_8vWAY68">
+            <input type="hidden" id="cloudProjectKeyInput" value="ceibo-main">
+
+            <div class="page-subtabs" style="margin-top:10px;">
+                <button id="cloudAccountSubtabBtn" class="page-subtab-btn active" type="button">Compte</button>
+                <button id="cloudPasswordSubtabBtn" class="page-subtab-btn" type="button">Mot de passe</button>
+                <button id="cloudStatsSubtabBtn" class="page-subtab-btn" type="button">Stats</button>
+                <button id="cloudUsersSubtabBtn" class="page-subtab-btn" type="button">Utilisateurs</button>
+            </div>
+
+            <div id="cloudAccountPanel" class="page-subpanel active">
+            <div class="button-row cloud-actions-row">
+                <button id="cloudRefreshBtn" style="flex:1;">Rafraîchir cloud</button>
+                <button id="cloudEmailSignInBtn" style="flex:1;">Se connecter email</button>
+                <button id="cloudEmailSignUpBtn" style="flex:1;">Créer compte</button>
+                <button id="cloudSignOutBtn" style="flex:1;">Se déconnecter</button>
+            </div>
+            <div class="cloud-config-title" id="cloudAccountTitle" style="margin-top:10px;">Compte utilisateur (Email + mot de passe)</div>
+            <input type="email" id="cloudEmailInput" placeholder="Email utilisateur" class="cloud-input" autocomplete="username">
+            <input type="password" id="cloudUserPasswordInput" placeholder="Mot de passe utilisateur" class="cloud-input" autocomplete="current-password">
+            <div id="cloudAuthStatus" class="cloud-status">Utilisateur: non connecté</div>
+            <div id="cloudStatus" class="cloud-status">Mode local (pas de cloud configuré)</div>
+            <div id="cloudSyncBadge" class="cloud-sync-badge cloud-sync-badge--idle">Synchro cloud: en attente</div>
+            <div id="cloudDataSourceStatus" class="cloud-status">Données routes/photos: en attente</div>
+            <div id="cloudAutoSyncInfo" class="cloud-status">Routes + photos waypoint: synchronisation cloud automatique.</div>
+            </div>
+
+            <div id="cloudPasswordPanel" class="page-subpanel">
+            <div class="cloud-config-title" id="cloudPasswordTitle" style="margin-top:10px;">Changer mon mot de passe</div>
+            <input type="password" id="cloudNewPasswordInput" placeholder="Nouveau mot de passe" class="cloud-input" autocomplete="new-password">
+            <input type="password" id="cloudConfirmPasswordInput" placeholder="Confirmer le nouveau mot de passe" class="cloud-input" autocomplete="new-password">
+            <div class="button-row">
+                <button id="cloudChangePasswordBtn" style="flex:1;">Mettre à jour le mot de passe</button>
+            </div>
+            <div id="cloudPasswordStatus" class="cloud-status">Mot de passe: en attente</div>
+            </div>
+
+            <div id="cloudStatsPanel" class="page-subpanel">
+            <div class="cloud-stats-card">
+                <div id="cloudStatsTitle" class="cloud-config-title">Tableau des enregistrements</div>
+                <table class="cloud-stats-table" aria-label="Statut cloud">
+                    <tbody>
+                        <tr><th id="cloudStatsSourceLabel">Source</th><td id="cloudStatsSourceValue">initialisation</td></tr>
+                        <tr><th id="cloudStatsProjectsLabel">Projet (projects)</th><td id="cloudStatsProjectsValue">0</td></tr>
+                        <tr><th id="cloudStatsAllowedUsersLabel">Utilisateurs autorisés (allowed_users)</th><td id="cloudStatsAllowedUsersValue">0</td></tr>
+                        <tr><th id="cloudStatsRoutesLabel">Routes sauvegardées (routes)</th><td id="cloudStatsRoutesValue">0</td></tr>
+                        <tr><th id="cloudStatsRoutePointsLabel">Points de route (route_points)</th><td id="cloudStatsRoutePointsValue">0</td></tr>
+                        <tr><th id="cloudStatsPhotosLabel">Photos waypoint (waypoint_photos)</th><td id="cloudStatsPhotosValue">0</td></tr>
+                        <tr><th id="cloudStatsMaintenanceSchemasLabel">Schémas maintenance (maintenance_schemas)</th><td id="cloudStatsMaintenanceSchemasValue">0</td></tr>
+                        <tr><th id="cloudStatsMaintenancePinsLabel">Pastilles maintenance (maintenance_pins)</th><td id="cloudStatsMaintenancePinsValue">0</td></tr>
+                        <tr><th id="cloudStatsSuppliersLabel">Fournisseurs (maintenance_suppliers)</th><td id="cloudStatsSuppliersValue">0</td></tr>
+                        <tr><th id="cloudStatsExpensesLabel">Dépenses/factures (maintenance_expenses)</th><td id="cloudStatsExpensesValue">0</td></tr>
+                        <tr><th id="cloudStatsNavLabel">Journal navigation (nav_log_entries)</th><td id="cloudStatsNavValue">0</td></tr>
+                        <tr><th id="cloudStatsEngineLabel">Journal moteur (engine_log)</th><td id="cloudStatsEngineValue">0</td></tr>
+                        <tr class="cloud-stats-total"><th id="cloudStatsTotalLabel">Total enregistrements</th><td id="cloudStatsTotalValue">0</td></tr>
+                        <tr><th id="cloudStatsStorageLabel">Taille utilisée</th><td id="cloudStatsStorageValue">0 Mo</td></tr>
+                        <tr><th id="cloudStatsQuotaLabel">Quota utilisé (500 Mo)</th><td id="cloudStatsQuotaValue">0 %</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            </div>
+
+            <div id="cloudUsersPanel" class="page-subpanel">
+                <div id="cloudUserManagementStatus" class="cloud-status">Gestion utilisateurs: connecte-toi avec un compte administrateur.</div>
+                <div class="cloud-config-title" id="cloudUserCreateTitle" style="margin-top:10px;">Créer un utilisateur autorisé</div>
+                <input type="email" id="cloudAdminUserEmailInput" placeholder="Email (clé unique)" class="cloud-input" autocomplete="off">
+                <input type="text" id="cloudAdminUserNameInput" placeholder="Nom" class="cloud-input" autocomplete="off">
+                <select id="cloudAdminUserRoleInput" class="cloud-input">
+                    <option value="utilisateur">utilisateur</option>
+                    <option value="administrateur">administrateur</option>
+                </select>
+                <div class="button-row">
+                    <button id="cloudAdminCreateUserBtn" style="flex:1;">Créer / mettre à jour user</button>
+                </div>
+                <div id="cloudUsersList" class="cloud-users-list"></div>
+                <div id="cloudUserAdminHint" class="cloud-status">Note: chaque utilisateur créé ici doit ensuite utiliser « Créer compte » pour définir son mot de passe.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="navLogTab" class="tab-panel">
+        <div class="button-row">
+            <button id="startNavLogBtn" style="flex:1;">Démarrer log GPS</button>
+            <button id="locateNowBtn" style="flex:1;">Ma position</button>
+            <button id="stopNavLogBtn" style="flex:1;">Arrêter log GPS</button>
+        </div>
+        <div class="button-row">
+            <button id="requestMotionPermissionBtn" style="flex:1;">Activer capteur inclinaison</button>
+        </div>
+        <div id="navLogStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Journal navigation: en attente</div>
+
+        <div class="button-row">
+            <button id="navLogOpenCreateBtn" style="flex:1;">Ajouter</button>
+        </div>
+
+        <label id="navLogListLabel" style="display:block; margin-top:12px; font-size:12px;">Entrées navigation:</label>
+        <div id="navLogList"></div>
+    </div>
+
+    <div id="documentTab" class="tab-panel">
+        <div class="page-subtabs" style="margin-top:8px;">
+            <button id="documentFilesSubtabBtn" type="button" class="page-subtab-btn active">FICHIERS</button>
+            <button id="documentIaSubtabBtn" type="button" class="page-subtab-btn">IA</button>
+        </div>
+
+        <div id="documentFilesPanel" class="page-subpanel active">
+            <label for="documentFileInput" style="display:block; margin-top:10px; font-size:12px;">Fichier documentaire:</label>
+            <input type="file" id="documentFileInput" class="document-file-input" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+            <label for="documentTitleInput" style="display:block; margin-top:10px; font-size:12px;">Titre:</label>
+            <input type="text" id="documentTitleInput" placeholder="Ex: Manuel moteur Volvo D2" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+            <div class="routing-control-grid">
+                <div class="routing-control-item">
+                    <label for="documentCategoryInput">Catégorie:</label>
+                    <select id="documentCategoryInput"></select>
+                </div>
+                <div class="routing-control-item">
+                    <label for="documentSubcategoryInput">Sous-catégorie:</label>
+                    <select id="documentSubcategoryInput"></select>
+                </div>
+            </div>
+
+            <label for="documentTagsInput" style="display:block; margin-top:10px; font-size:12px;">Tags (virgules):</label>
+            <input type="text" id="documentTagsInput" placeholder="sécurité, moteur, contrôle" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+            <label for="documentDescriptionInput" style="display:block; margin-top:10px; font-size:12px;">Description:</label>
+            <textarea id="documentDescriptionInput" rows="3" placeholder="Résumé utile du document" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+            <div class="button-row">
+                <button id="saveDocumentBtn" style="flex:1;">Ajouter document</button>
+                <button id="clearDocumentFormBtn" style="flex:1;">Vider</button>
+            </div>
+            <div id="documentStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Documents: en attente</div>
+
+            <label for="documentSearchInput" style="display:block; margin-top:12px; font-size:12px;">Recherche document:</label>
+            <input type="search" id="documentSearchInput" placeholder="Titre, catégorie, tags" class="route-search-input">
+            <div id="documentListNote" class="cloud-status">La liste des documents est affichée dans la partie droite.</div>
+        </div>
+
+        <div id="documentIaPanel" class="page-subpanel">
+            <div class="cloud-config-card" style="margin-top:12px;">
+                <div class="cloud-config-title">RAG local (Mac mini)</div>
+                <details id="documentGeminiConfigDetails" class="document-gemini-config" style="margin-top:10px;">
+                    <summary id="documentGeminiConfigSummary">Configuration Gemini</summary>
+
+                    <div id="documentRagStatus" class="cloud-status" style="margin-top:10px;">RAG: infrastructure locale prête.</div>
+                    <div id="documentRagHint" style="font-size:12px; opacity:0.9;">Index: lance l'analyse ici ou utilise <code>python3 rag/build_index.py --docs-dir ./rag/documents --backend faiss</code></div>
+                    <div class="button-row" style="margin-top:8px;">
+                        <button id="documentBuildRagBtn" style="flex:1;">Analyser / indexer les fichiers</button>
+                    </div>
+
+                    <div class="document-llm-row" style="margin-top:10px;">
+                        <div id="documentLlmModeRow" class="routing-control-item">
+                            <label id="documentLlmModeLabel" for="documentLlmModeSelect">Mode IA:</label>
+                            <select id="documentLlmModeSelect">
+                                <option value="local" selected>Local</option>
+                                <option value="hybrid">Hybride</option>
+                                <option value="external">Externe</option>
+                            </select>
+                        </div>
+                        <div id="documentLlmProviderRow" class="routing-control-item">
+                            <label id="documentLlmProviderLabel" for="documentLlmProviderSelect">Fournisseur externe:</label>
+                            <select id="documentLlmProviderSelect">
+                                <option value="gemini" selected>Gemini</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="routing-control-item" style="margin-top:8px;">
+                        <label id="documentLlmResponseStyleLabel" for="documentLlmResponseStyleSelect">Style de réponse:</label>
+                        <select id="documentLlmResponseStyleSelect">
+                            <option value="concise" selected>Concise</option>
+                            <option value="detailed">Détaillée</option>
+                        </select>
+                    </div>
+
+                    <label id="documentLlmModelLabel" for="documentLlmModelInput" style="display:block; margin-top:10px; font-size:12px;">Modèle externe (optionnel):</label>
+                    <input type="text" id="documentLlmModelInput" placeholder="Ex: gemini-2.0-flash" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                    <label id="documentLlmApiKeyLabel" for="documentLlmApiKeyInput" style="display:block; margin-top:10px; font-size:12px;">API key externe (optionnel):</label>
+                    <input type="password" id="documentLlmApiKeyInput" placeholder="AIza..." style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+                    <div id="documentLlmConfigHint" class="cloud-status">En mode Local, les champs externes sont ignorés.</div>
+                </details>
+
+                <label for="documentRagQuestionInput" style="display:block; margin-top:10px; font-size:12px;">Question documentaire:</label>
+                <textarea id="documentRagQuestionInput" rows="2" placeholder="Ex: Quelle huile est recommandée pour le D3-150 ?" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+                <div id="documentRagHistorySection" class="document-rag-history" style="display:none;">
+                    <div id="documentRagHistoryTitle" class="document-rag-history__title">Questions récentes</div>
+                    <div id="documentRagHistoryList" class="document-rag-history__list"></div>
+                    <button id="documentRagHistoryClearBtn" type="button" class="document-rag-history__clear">Effacer</button>
+                </div>
+                <div class="button-row">
+                    <button id="documentAskRagBtn" style="flex:1;">Poser la question</button>
+                </div>
+                <div id="documentRagLeftHint" class="cloud-status">Le résultat RAG s'affiche dans la partie droite.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="weatherTab" class="tab-panel">
+        <div class="button-row">
+            <button id="backToRoutingBtn" style="flex:1;">Retour Routage</button>
+        </div>
+        <div class="button-row weather-pointer-row">
+            <button id="placeWeatherPointerBtn" style="flex:1;">Placer pointeur météo</button>
+            <button id="useMapCenterWeatherBtn" style="flex:1;">Centre carte → pointeur</button>
+            <button id="refreshWeatherOutlookBtn" style="flex:1;">Actualiser météo</button>
+        </div>
+        <div id="weatherApiConfigSection">
+            <label for="owmApiKeyInput" style="display:block; margin-top:10px; font-size:12px;">Clé API OpenWeatherMap (isobares):</label>
+            <input type="password" id="owmApiKeyInput" placeholder="Ta clé OWM" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+            <div class="button-row">
+                <button id="testOwmApiKeyBtn" style="flex:1;">Tester clé OWM</button>
+            </div>
+            <div class="button-row">
+                <button id="saveOwmApiKeyBtn" style="flex:1;">Enregistrer clé OWM</button>
+                <button id="clearOwmApiKeyBtn" style="flex:1;">Supprimer clé OWM</button>
+            </div>
+            <div id="owmApiKeyStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Clé OWM: non testée</div>
+        </div>
+        <div id="weatherApiConfigSummary" style="margin-top:6px; font-size:12px; opacity:0.9; display:none;">API météo connectée.</div>
+        <div class="button-row">
+            <button id="toggleWeatherApiConfigBtn" style="flex:1; display:none;">Afficher API météo</button>
+        </div>
+        <div id="weatherOutlookStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo: en attente</div>
+        <div id="weatherOverlayLegend"></div>
+        <div id="weatherOutlookList"></div>
+        <div id="weatherGribSection" class="cloud-config-card" style="margin-top:10px;">
+            <div class="cloud-config-title">GRIB local</div>
+            <label for="weatherGribFileInput" style="display:block; margin-top:6px; font-size:12px;">Fichiers GRIB / JSON météo:</label>
+            <input type="file" id="weatherGribFileInput" accept=".grib,.grib2,.grb,.grb2,.json,.geojson,application/json" multiple style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+            <div class="button-row">
+                <button id="weatherImportGribBtn" style="flex:1;">Importer GRIB/JSON</button>
+                <button id="weatherConvertGribBtn" style="flex:1;">Commande conversion</button>
+                <button id="weatherClearGribBtn" style="flex:1;">Effacer GRIB</button>
+            </div>
+            <div id="weatherGribStatus" class="cloud-status">GRIB: aucun fichier chargé.</div>
+            <div id="weatherGribHint" class="cloud-status">Astuce: sélectionne GRIB + JSON converti (même nom) en une fois pour chargement auto.</div>
+        </div>
+    </div>
+
+    <div id="arrivalTab" class="tab-panel">
+        <button id="analyzeArrivalBtn">Conseiller mouillage à l'arrivée</button>
+        <div id="arrivalSummary" style="margin-top:8px; font-size:12px; opacity:0.9;">Analyse mouillage: en attente</div>
+
+        <div id="anchorageRecommendations" style="margin-top:10px;"></div>
+
+        <label id="nearbyRestaurantsLabel" style="display:block; margin-top:12px; font-size:12px;">Restaurants proches:</label>
+        <div id="nearbyRestaurants"></div>
+
+        <label id="nearbyShopsLabel" style="display:block; margin-top:12px; font-size:12px;">Magasins / courses:</label>
+        <div id="nearbyShops"></div>
+    </div>
+
+    <div id="waypointTab" class="tab-panel">
+        <label for="waypointPhotoInput" style="display: block; margin-top: 10px; font-size: 12px;">Photo mouillage:</label>
+        <input type="file" id="waypointPhotoInput" accept="image/*" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+        <div class="button-row">
+            <button id="waypointQuickCaptureBtn" type="button" style="flex:1; margin-top:8px;">📷 Prendre photo (WP auto)</button>
+            <button id="waypointImportGooglePhotosBtn" type="button" style="flex:1; margin-top:8px;">Google Photos</button>
+        </div>
+        <input type="file" id="waypointQuickCaptureInput" accept="image/*" capture="environment" style="display:none;">
+        <div id="waypointPhotoStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Coordonnées: en attente d'une photo</div>
+        <img id="waypointPhotoPreview" alt="Prévisualisation" class="waypoint-photo-preview" style="display:none;">
+        <div id="waypointEditorMap" class="waypoint-editor-map" style="display:none;"></div>
+        <a id="waypointGoogleMapLink" class="waypoint-google-link" href="#" target="_self" style="display:none;">Ouvrir dans Google Maps</a>
+
+        <label for="waypointPlaceNameInput" style="display: block; margin-top: 10px; font-size: 12px;">Nom du lieu:</label>
+        <input type="text" id="waypointPlaceNameInput" placeholder="Ex: Cala Blanca" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+        <label for="waypointCommentInput" style="display: block; margin-top: 10px; font-size: 12px;">Commentaire:</label>
+        <textarea id="waypointCommentInput" rows="3" placeholder="Ex: Bon abri par vent d'ouest, tenue correcte" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+        <div class="routing-control-grid">
+            <div class="routing-control-item">
+                <label for="waypointRatingInput">Note globale:</label>
+                <select id="waypointRatingInput">
+                    <option value="1">1 / 5</option>
+                    <option value="2">2 / 5</option>
+                    <option value="3" selected>3 / 5</option>
+                    <option value="4">4 / 5</option>
+                    <option value="5">5 / 5</option>
+                </select>
+            </div>
+
+            <div class="routing-control-item">
+                <label for="waypointCleanlinessInput">Propreté:</label>
+                <select id="waypointCleanlinessInput">
+                    <option value="1">1 / 5</option>
+                    <option value="2">2 / 5</option>
+                    <option value="3" selected>3 / 5</option>
+                    <option value="4">4 / 5</option>
+                    <option value="5">5 / 5</option>
+                </select>
+            </div>
+
+            <div class="routing-control-item">
+                <label for="waypointDepthInput">Profondeur:</label>
+                <select id="waypointDepthInput">
+                    <option value="5">5 m</option>
+                    <option value="10" selected>10 m</option>
+                    <option value="15">15 m</option>
+                    <option value="20">20 m</option>
+                    <option value="25">25 m</option>
+                    <option value="30">30 m</option>
+                </select>
+            </div>
+
+            <div class="routing-control-item waypoint-protection-item">
+                <label>Protection (rose des vents):</label>
+                <div class="waypoint-protection-rose">
+                    <div class="waypoint-protection-rose__ring"></div>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--n"><input type="checkbox" name="waypointProtection" value="N"><span>N</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--ne"><input type="checkbox" name="waypointProtection" value="NE"><span>NE</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--e"><input type="checkbox" name="waypointProtection" value="E"><span>E</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--se"><input type="checkbox" name="waypointProtection" value="SE"><span>SE</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--s"><input type="checkbox" name="waypointProtection" value="S"><span>S</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--so"><input type="checkbox" name="waypointProtection" value="SO"><span>SO</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--o"><input type="checkbox" name="waypointProtection" value="O"><span>O</span></label>
+                    <label class="waypoint-protection-dir waypoint-protection-dir--no"><input type="checkbox" name="waypointProtection" value="NO"><span>NO</span></label>
+                    <div class="waypoint-protection-center"><span>ABRI</span></div>
+                </div>
+            </div>
+        </div>
+
+        <label for="waypointBottomTypeInput" style="display: block; margin-top: 10px; font-size: 12px;">Type de fond:</label>
+        <input type="text" id="waypointBottomTypeInput" placeholder="Ex: sable, vase, herbiers" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+        <div class="button-row">
+            <button id="saveWaypointPhotoBtn" style="flex:1; margin-top:8px;">Ajouter ce waypoint photo</button>
+            <button id="cancelWaypointPhotoEditBtn" style="flex:1; margin-top:8px; display:none;">Annuler modification</button>
+        </div>
+
+    </div>
+
+    <div id="maintenanceTab" class="tab-panel">
+        <div class="maintenance-subtabs">
+            <button id="maintenanceTasksSubtabBtn" type="button" class="maintenance-subtab-btn active">Tâches</button>
+            <button id="maintenanceExpensesSubtabBtn" type="button" class="maintenance-subtab-btn">Dépenses & factures</button>
+            <button id="maintenanceSuppliersSubtabBtn" type="button" class="maintenance-subtab-btn">Fournisseurs</button>
+            <button id="maintenanceEngineSubtabBtn" type="button" class="maintenance-subtab-btn">Moteur</button>
+        </div>
+
+        <div id="maintenanceTasksPanel" class="maintenance-subpanel active">
+            <button id="maintenanceToggleSchemaManagerBtn" type="button" class="maintenance-toggle-btn">Gérer les schémas</button>
+
+            <div id="maintenanceSchemaManager" class="maintenance-schema-manager" style="display:none;">
+                <label for="maintenanceSchemaNameInput" style="display:block; margin-top:10px; font-size:12px;">Nom du schéma:</label>
+                <input type="text" id="maintenanceSchemaNameInput" placeholder="Ex: Compartiment moteur" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                <label for="maintenanceSchemaInput" style="display:block; margin-top:10px; font-size:12px;">Importer schéma (image):</label>
+                <input type="file" id="maintenanceSchemaInput" accept="image/*" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                <div class="button-row">
+                    <button id="maintenanceAddSchemaBtn" style="flex:1;">Ajouter schéma</button>
+                    <button id="maintenanceDeleteSchemaBtn" style="flex:1;">Supprimer schéma</button>
+                </div>
+
+                <label for="maintenanceSchemaSelect" style="display:block; margin-top:12px; font-size:12px;">Schémas enregistrés:</label>
+                <select id="maintenanceSchemaSelect" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></select>
+            </div>
+
+            <div class="maintenance-controls">
+                <div class="maintenance-control-item">
+                    <label for="maintenancePinColorInput">Couleur pastille:</label>
+                    <select id="maintenancePinColorInput">
+                        <option value="green">Vert · pas urgent</option>
+                        <option value="orange">Orange · important</option>
+                        <option value="red" selected>Rouge · urgent</option>
+                        <option value="blue">Bleu · information</option>
+                    </select>
+                </div>
+                <div class="maintenance-control-item">
+                    <label for="maintenanceTaskStatusInput">État:</label>
+                    <select id="maintenanceTaskStatusInput">
+                        <option value="active" selected>Actif</option>
+                        <option value="done">Fini</option>
+                        <option value="planned">À prévoir</option>
+                    </select>
+                </div>
+                <div class="maintenance-control-item">
+                    <label for="maintenanceTaskPerformedDateInput">Date réalisation:</label>
+                    <input type="date" id="maintenanceTaskPerformedDateInput" style="width:100%; padding:8px; box-sizing:border-box;">
+                </div>
+                <div class="maintenance-control-item maintenance-control-item--legend">
+                    <label for="maintenanceLegendInput">Légende:</label>
+                    <textarea id="maintenanceLegendInput" rows="3" placeholder="Ex: Changer turbine pompe eau" style="width:100%; padding:8px; box-sizing:border-box; resize:vertical;"></textarea>
+                </div>
+            </div>
+
+            <div id="maintenanceStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Maintenance: ajoute un schéma pour commencer.</div>
+
+            <label id="maintenanceLegendListLabel" style="display:block; margin-top:12px; font-size:12px;">Légendes / tâches:</label>
+            <div id="maintenanceLegendList"></div>
+        </div>
+
+        <div id="maintenanceExpensesPanel" class="maintenance-subpanel">
+            <div class="maintenance-subtabs maintenance-expense-subtabs">
+                <button id="maintenanceExpenseListTabBtn" type="button" class="maintenance-subtab-btn active">Liste factures</button>
+                <button id="maintenanceExpenseAddTabBtn" type="button" class="maintenance-subtab-btn">Ajouter facture</button>
+            </div>
+
+            <div id="maintenanceExpenseListPanel" class="maintenance-expense-subpanel active">
+                <label id="maintenanceExpensesListLabel" style="display:block; margin-top:12px; font-size:12px;">Dépenses:</label>
+                <div id="maintenanceExpensesList"></div>
+            </div>
+
+            <div id="maintenanceExpenseAddPanel" class="maintenance-expense-subpanel">
+                <label for="maintenanceInvoiceInput" style="display:block; margin-top:10px; font-size:12px;">Uploader facture/documents (images/PDF):</label>
+                <input type="file" id="maintenanceInvoiceInput" accept="image/*,.pdf" multiple style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+                <div class="button-row">
+                    <button id="maintenanceScanInvoiceBtn" style="flex:1;">Scanner facture</button>
+                    <button id="maintenanceAnalyzeInvoiceAiBtn" style="flex:1;">IA facture</button>
+                </div>
+                <div id="maintenanceInvoiceScanStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Scan facture: en attente</div>
+                <label id="maintenanceSupplierSuggestionsLabel" style="display:none; margin-top:8px; font-size:12px;">Suggestions fournisseur:</label>
+                <div id="maintenanceSupplierSuggestions" class="maintenance-supplier-suggestions" style="display:none;"></div>
+
+                <div id="maintenanceInvoiceReviewPanel" style="margin-top:8px; display:none; border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:8px;">
+                    <label id="maintenanceInvoiceReviewTitle" style="display:block; font-size:12px; margin-bottom:6px;">Copie rapide depuis l'aperçu PDF</label>
+                    <div id="maintenanceInvoiceReviewHint" style="font-size:12px; opacity:0.9; margin-bottom:6px;">1) Sélectionne du texte dans l’aperçu à droite 2) copie (⌘C) 3) colle dans le champ choisi.</div>
+                    <label for="maintenanceManualPasteTargetSelect" style="display:block; margin-top:6px; font-size:12px;">Champ de destination:</label>
+                    <select id="maintenanceManualPasteTargetSelect" style="width:100%; padding:8px; box-sizing:border-box;"></select>
+                    <div class="button-row">
+                        <button id="maintenancePasteSelectedTextBtn" style="flex:1;">Coller texte copié dans ce champ</button>
+                    </div>
+                </div>
+
+                <div class="maintenance-expense-grid">
+                    <div class="maintenance-control-item">
+                        <label for="maintenanceExpenseDateInput">Date:</label>
+                        <input type="date" id="maintenanceExpenseDateInput" style="width:100%; padding:8px; box-sizing:border-box;">
+                    </div>
+                    <div class="maintenance-control-item">
+                        <label for="maintenanceExpenseTotalInput">Montant total:</label>
+                        <input type="number" id="maintenanceExpenseTotalInput" step="0.01" min="0" placeholder="0.00" style="width:100%; padding:8px; box-sizing:border-box;">
+                    </div>
+                    <div class="maintenance-control-item">
+                        <label for="maintenanceExpenseCurrencyInput">Devise:</label>
+                        <input type="text" id="maintenanceExpenseCurrencyInput" value="EUR" maxlength="5" style="width:100%; padding:8px; box-sizing:border-box;">
+                    </div>
+                    <div class="maintenance-control-item">
+                        <label for="maintenanceExpensePayerSelect">Qui paye:</label>
+                        <select id="maintenanceExpensePayerSelect">
+                            <option value="PATISSIER">PATISSIER</option>
+                            <option value="KLENIK">KLENIK</option>
+                            <option value="OTRO">OTRO</option>
+                        </select>
+                    </div>
+                    <div class="maintenance-control-item">
+                        <label for="maintenanceExpensePaymentStatusSelect">État paiement:</label>
+                        <select id="maintenanceExpensePaymentStatusSelect">
+                            <option value="new">Nouvelle / à payer</option>
+                            <option value="pending">À payer</option>
+                            <option value="planned">À prévoir</option>
+                            <option value="paid">Payé</option>
+                        </select>
+                    </div>
+                    <div class="maintenance-control-item">
+                        <label for="maintenanceExpenseSupplierInput">Fournisseur:</label>
+                        <input type="text" id="maintenanceExpenseSupplierInput" placeholder="Nom fournisseur" style="width:100%; padding:8px; box-sizing:border-box;">
+                    </div>
+                    <div class="maintenance-control-item" style="grid-column: span 2;">
+                        <label for="maintenanceExpenseSupplierIbanInput">IBAN fournisseur:</label>
+                        <input type="text" id="maintenanceExpenseSupplierIbanInput" placeholder="Ex: FR76..." style="width:100%; padding:8px; box-sizing:border-box;">
+                    </div>
+                </div>
+
+                <label for="maintenanceExpenseLinesInput" style="display:block; margin-top:10px; font-size:12px;">Lignes de travaux/produits (une ligne = libellé ; quantité ; prix ; total):</label>
+                <textarea id="maintenanceExpenseLinesInput" rows="4" placeholder="Pompe eau ; 1 ; 280 ; 280" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+                <label for="maintenanceExpenseNoteInput" style="display:block; margin-top:10px; font-size:12px;">Note:</label>
+                <textarea id="maintenanceExpenseNoteInput" rows="2" placeholder="Détails / observations" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+                <label for="maintenanceExpenseAiCommentInput" style="display:block; margin-top:10px; font-size:12px;">Commentaire facture:</label>
+                <textarea id="maintenanceExpenseAiCommentInput" rows="4" placeholder="Observations sur la facture" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+                <div class="button-row">
+                    <button id="maintenanceAddExpenseBtn" style="flex:1;">Ajouter dépense</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="maintenanceSuppliersPanel" class="maintenance-subpanel">
+            <label id="maintenanceSuppliersListLabel" style="display:block; margin-top:12px; font-size:12px;">Fournisseurs:</label>
+            <div class="button-row">
+                <button id="maintenanceSupplierNewBtn" style="flex:1;">Nouveau fournisseur</button>
+            </div>
+            <div id="maintenanceSuppliersList"></div>
+        </div>
+
+        <div id="engineTab" class="maintenance-subpanel">
+            <div id="engineSensorCard" class="engine-sensor-card">
+                <div id="engineSensorTitle" class="engine-sensor-card__title">Détection moteur iPad (beta)</div>
+                <div id="engineSensorStatus" class="cloud-status">Détection moteur: arrêtée</div>
+                <div class="engine-sensor-grid">
+                    <div><strong id="engineSensorStateLabel">État:</strong> <span id="engineSensorStateValue" class="engine-sensor-state engine-sensor-state--off">OFF</span></div>
+                    <div><strong id="engineSensorScoreLabel">Score:</strong> <span id="engineSensorScoreValue">0</span></div>
+                    <div><strong id="engineSensorVibrationLabel">Vibration:</strong> <span id="engineSensorVibrationValue">0.000</span></div>
+                    <div><strong id="engineSensorSpeedLabel">Vitesse:</strong> <span id="engineSensorSpeedValue">-- kn</span></div>
+                </div>
+                <div class="button-row" style="margin-top:8px;">
+                    <button id="engineSensorStartBtn" type="button" style="flex:1;">Activer détection</button>
+                    <button id="engineSensorStopBtn" type="button" style="flex:1;">Stop détection</button>
+                </div>
+                <div id="engineSensorHint" class="cloud-status">Astuce: lance en mer avec iPad fixe pour une détection plus stable.</div>
+            </div>
+
+            <div class="button-row">
+                <button id="engineLogOpenCreateBtn" style="flex:1;">Ajouter</button>
+            </div>
+
+            <label id="engineLogListLabel" style="display:block; margin-top:12px; font-size:12px;">Historique moteur:</label>
+            <div id="engineLogList"></div>
+        </div>
+    </div>
+
+    <div id="sidebarFooterContainer">
+        <div class="sidebar-footer">
+            <span class="creator-credit">Programa creado por Max Patissier</span>
+            <span id="buildVersionBadge" class="build-version-badge">v20260310-01</span>
+            <div class="lang-switch" aria-label="Sélecteur de langue">
+                <button id="langFrBtn" class="lang-btn" type="button">FR</button>
+                <button id="langEsBtn" class="lang-btn" type="button">ES</button>
+                <button id="langEnBtn" class="lang-btn" type="button">EN</button>
+            </div>
+            <a id="helpFab" href="help.html" target="_blank" rel="noopener" title="Ayuda">❓ HELP</a>
+        </div>
+    </div>
+</div>
+
+<button id="sidebarToggleBtn" type="button" aria-pressed="false" title="Masquer panneau">Masquer panneau</button>
+
+<div id="mapWorkspace">
+    <div id="map">
+        <button id="locatePreciseBtn" type="button" title="Forcer GPS précis" aria-label="Forcer GPS précis">➤</button>
+        <div id="mapWeatherOverlayLegend"></div>
+    </div>
+    <aside id="waypointDockPanel" class="waypoint-dock-panel">
+        <div id="waypointSavedAnchoragesDockLabel" class="waypoint-dock-panel__title">Mouillages enregistrés:</div>
+        <input id="waypointSearchInput" class="route-search-input waypoint-dock-panel__search" type="search" placeholder="Recherche WP + lieux carte..." autocomplete="off">
+        <div id="waypointPhotoListDock" class="waypoint-dock-panel__list"></div>
+    </aside>
+    <aside id="documentDockPanel" class="waypoint-dock-panel">
+        <div id="documentFilesDockSection">
+            <div id="documentDockPanelTitle" class="waypoint-dock-panel__title">Documents enregistrés:</div>
+            <div id="documentListDock" class="waypoint-dock-panel__list"></div>
+        </div>
+        <div id="documentRagDockSection" class="document-rag-dock-section" style="display:none;">
+            <div id="documentRagDockTitle" class="waypoint-dock-panel__title" style="margin-top:0;">Résultat RAG</div>
+            <div id="documentRagDockAnswer" class="document-rag-answer">Réponse RAG: en attente</div>
+            <button id="documentRagExplainToggleBtn" type="button" class="document-rag-explain-toggle" style="display:none;">Afficher explications</button>
+            <details id="documentRagExplainDetails" class="document-rag-explain" style="display:none;">
+                <summary id="documentRagExplainSummary">Explications et sources</summary>
+                <div id="documentRagDockSources" class="document-rag-sources"></div>
+            </details>
+        </div>
+    </aside>
+</div>
+<div id="maintenanceMapPanel" style="display:none;">
+    <div id="maintenanceCanvas" class="maintenance-canvas" title="Clique sur le schéma pour ajouter une pastille">
+        <img id="maintenanceSchemaImage" alt="Schéma maintenance" style="display:none;">
+        <div id="maintenancePinsLayer" class="maintenance-pins-layer"></div>
+        <div id="maintenanceCanvasPlaceholder" class="maintenance-canvas-placeholder">Aucun schéma sélectionné</div>
+    </div>
+</div>
+<div id="maintenanceInvoicePreviewPanel" style="display:none;">
+    <div class="maintenance-invoice-preview-shell">
+        <div id="maintenanceInvoicePreviewTitle" class="maintenance-canvas-placeholder" style="display:none; justify-content:flex-start; align-items:center; min-height:auto; padding:8px 10px;">Aperçu facture</div>
+        <div id="maintenanceExpenseDetailPanel" style="display:none;"></div>
+        <img id="maintenanceInvoicePreviewImage" alt="Aperçu facture" style="display:none; width:100%; height:100%; object-fit:contain;">
+        <div id="maintenanceInvoicePreviewPdfContainer" style="display:none;"></div>
+        <div id="maintenanceInvoicePreviewPlaceholder" class="maintenance-canvas-placeholder">Charge une facture pour afficher l’aperçu</div>
+    </div>
+</div>
+
+<div id="logWorkspacePanel" style="display:none;">
+    <div class="maintenance-invoice-preview-shell">
+        <div class="log-workspace-layout">
+            <div class="log-workspace-main">
+                <div id="logWorkspaceTitle" class="maintenance-canvas-placeholder" style="display:flex; justify-content:flex-start; align-items:center; min-height:auto; padding:8px 10px;">Saisie journal</div>
+                <div id="logWorkspacePlaceholder" class="maintenance-canvas-placeholder">Clique sur Ajouter pour ouvrir le formulaire</div>
+
+                <div id="navLogEditorPanel" style="display:none; padding:10px; overflow:auto;">
+                    <label for="watchTimeInput" style="display:block; margin-top:0; font-size:12px;">Heure du quart:</label>
+                    <input type="datetime-local" id="watchTimeInput" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                    <label for="watchEndTimeInput" style="display:block; margin-top:10px; font-size:12px;">Heure de fin (voyage/quart):</label>
+                    <input type="datetime-local" id="watchEndTimeInput" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                    <div class="routing-control-grid waypoint-metrics-grid">
+                        <div class="routing-control-item">
+                            <label for="watchCrewInput">Équipage / quart:</label>
+                            <input type="text" id="watchCrewInput" placeholder="Ex: Max + Ana" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchHeadingInput">Cap compas (°):</label>
+                            <input type="number" id="watchHeadingInput" min="0" max="359" placeholder="Ex: 235" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchWindDirInput">Vent direction (°):</label>
+                            <input type="number" id="watchWindDirInput" min="0" max="359" placeholder="Ex: 260" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchWindSpeedInput">Vent force (kn):</label>
+                            <input type="number" id="watchWindSpeedInput" step="0.1" min="0" placeholder="Ex: 16.5" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchSeaStateInput">État de mer:</label>
+                            <select id="watchSeaStateInput">
+                                <option value="calme">Calme</option>
+                                <option value="peu agitée">Peu agitée</option>
+                                <option value="agitée">Agitée</option>
+                                <option value="forte">Forte</option>
+                            </select>
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchSailConfigInput">Voilure:</label>
+                            <input type="text" id="watchSailConfigInput" placeholder="Ex: GV 1 ris + génois" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchBarometerInput">Baromètre (hPa):</label>
+                            <input type="number" id="watchBarometerInput" step="0.1" placeholder="Ex: 1014.8" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                        <div class="routing-control-item">
+                            <label for="watchLogNmInput">Loch total (NM):</label>
+                            <input type="number" id="watchLogNmInput" step="0.1" min="0" placeholder="Ex: 842.3" style="width:100%; padding:8px; box-sizing:border-box;">
+                        </div>
+                    </div>
+
+                    <label for="watchEventsInput" style="display:block; margin-top:10px; font-size:12px;">Événements / manœuvres:</label>
+                    <textarea id="watchEventsInput" rows="3" placeholder="Changement de voile, prise de ris, trafic, sécurité, etc." style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+                    <div class="button-row">
+                        <button id="addManualNavLogBtn" type="button" style="flex:1;">Enregistrer entrée</button>
+                        <button id="cancelNavLogEditBtn" type="button" style="flex:1;">Annuler</button>
+                    </div>
+
+                    <canvas id="heelSpeedChart" width="520" height="180" style="width:100%; margin-top:8px; background: rgba(255,255,255,0.05); border-radius:8px; border:1px solid rgba(255,255,255,0.14);"></canvas>
+                </div>
+
+                <div id="engineLogEditorPanel" style="display:none; padding:10px; overflow:auto;">
+                    <label for="engineHoursInput" style="display:block; margin-top:0; font-size:12px;">Compteur moteur (h):</label>
+                    <input type="number" id="engineHoursInput" step="0.1" placeholder="Ex: 1250.4" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                    <label for="fuelAddedInput" style="display:block; margin-top:10px; font-size:12px;">Carburant ajouté (L):</label>
+                    <input type="number" id="fuelAddedInput" step="0.1" placeholder="Ex: 35" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+                    <label for="engineLogNoteInput" style="display:block; margin-top:10px; font-size:12px;">Note:</label>
+                    <textarea id="engineLogNoteInput" rows="3" placeholder="Maintenance, bruit, filtre, etc." style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
+
+                    <div class="button-row">
+                        <button id="saveEngineLogBtn" style="flex:1;">Ajouter entrée moteur</button>
+                        <button id="cancelEngineLogEditBtn" type="button" style="flex:1; display:none;">Annuler modification</button>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="log-workspace-side">
+                <div id="navLiveTableCard" class="log-live-table-card">
+                    <div class="log-live-table-card__title">Tableau navigation</div>
+                    <div class="log-live-controls-row">
+                        <label for="navSwellProfileSelect">Profil houle:</label>
+                        <select id="navSwellProfileSelect">
+                            <option value="conservative">Conservateur</option>
+                            <option value="balanced" selected>Equilibre</option>
+                            <option value="sport">Sportif</option>
+                        </select>
+                    </div>
+                    <table class="log-live-table" aria-label="Tableau navigation live">
+                        <tbody>
+                            <tr>
+                                <th>Vitesse</th>
+                                <td id="navLiveSpeedValue">-- kn</td>
+                            </tr>
+                            <tr>
+                                <th>Inclinaison</th>
+                                <td id="navLiveHeelValue">-- deg</td>
+                            </tr>
+                            <tr>
+                                <th>Cap reel</th>
+                                <td id="navLiveHeadingValue">-- deg</td>
+                            </tr>
+                            <tr>
+                                <th>Houle estimee</th>
+                                <td id="navLiveSwellValue">-- m</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div id="navLiveSwellHint" class="log-live-swell-hint">Evaluation houle: en attente</div>
+                </div>
+
+                <div class="log-checklist-card">
+                    <div class="log-checklist-card__title">Checklist Navigation</div>
+                    <div class="log-checklist-switch">
+                        <button id="navChecklistDepartureBtn" type="button" class="page-subtab-btn active">Avant depart</button>
+                        <button id="navChecklistArrivalBtn" type="button" class="page-subtab-btn">A l'arrivee</button>
+                    </div>
+                    <div class="log-checklist-template-row">
+                        <label for="navChecklistTemplateSelect">Template:</label>
+                        <select id="navChecklistTemplateSelect">
+                            <option value="standard" selected>Standard</option>
+                            <option value="night">Navigation de nuit</option>
+                            <option value="bad_weather">Mauvais temps</option>
+                            <option value="harbor">Port / manoeuvre</option>
+                        </select>
+                        <button id="navChecklistApplyTemplateBtn" type="button">Appliquer</button>
+                    </div>
+                    <div id="navChecklistProgress" class="log-checklist-progress">0/0</div>
+                    <div id="navChecklistList" class="log-checklist-list"></div>
+                    <div class="log-checklist-new-row">
+                        <input id="navChecklistNewItemInput" type="text" placeholder="Ajouter une action checklist">
+                        <button id="navChecklistAddBtn" type="button">Ajouter</button>
+                    </div>
+                    <div class="button-row">
+                        <button id="navChecklistResetBtn" type="button" style="flex:1;">Reinitialiser checklist</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+</div>
+
+<div id="aiTrafficOverlay" class="ai-traffic-overlay" style="display:none;">
+    <div class="ai-traffic-window">
+        <div class="ai-traffic-header">
+            <strong>Trafic modèle en cours</strong>
+            <button id="aiTrafficCloseBtn" type="button">Fermer</button>
+        </div>
+        <div id="aiTrafficList" class="ai-traffic-list"></div>
+    </div>
+</div>
+
+<div id="googlePhotosPickerModal" class="google-photos-modal" style="display:none;">
+    <div class="google-photos-modal__card">
+        <div class="google-photos-modal__header">
+            <strong id="googlePhotosModalTitle">Importer depuis Google Photos</strong>
+            <button id="googlePhotosCloseBtn" type="button">Fermer</button>
+        </div>
+        <div id="googlePhotosPickerStatus" class="google-photos-modal__status">Connexion Google en attente...</div>
+        <div id="googlePhotosPickerGrid" class="google-photos-modal__grid"></div>
+        <div class="button-row">
+            <button id="googlePhotosLoadMoreBtn" type="button" style="display:none;">Charger plus</button>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="app.js?v=20260309-05"></script>
+
+</body>
+</html>
