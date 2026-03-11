@@ -2,7 +2,7 @@ import { routeSegment, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_PO
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-07';
+const APP_BUILD_VERSION = '20260311-08';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -102,6 +102,7 @@ const ENGINE_LOG_STORAGE_KEY = 'ceiboEngineLogV1';
 const ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY = 'ceiboEngineSoundSnapshotsV1';
 const POLAR_PROFILES_STORAGE_KEY = 'ceiboPolarProfilesV1';
 const ACTIVE_POLAR_PROFILE_STORAGE_KEY = 'ceiboActivePolarProfileV1';
+const POLAR_AUTO_PROFILE_ID = '__auto__';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
 const CLOUD_ROUTES_TABLE = 'routes';
@@ -1242,16 +1243,20 @@ function loadPolarProfiles() {
 
     const storedActiveId = String(localStorage.getItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY) || '').trim();
     const fallbackProfile = polarProfiles[0] || null;
-    activePolarProfileId = polarProfiles.some(profile => profile.id === storedActiveId)
-        ? storedActiveId
-        : String(fallbackProfile?.id || '');
-    selectedPolarProfileEditorId = activePolarProfileId;
+    activePolarProfileId = storedActiveId === POLAR_AUTO_PROFILE_ID
+        ? POLAR_AUTO_PROFILE_ID
+        : polarProfiles.some(profile => profile.id === storedActiveId)
+            ? storedActiveId
+            : String(fallbackProfile?.id || '');
+    selectedPolarProfileEditorId = activePolarProfileId === POLAR_AUTO_PROFILE_ID
+        ? String(fallbackProfile?.id || '')
+        : activePolarProfileId;
 }
 
 function savePolarProfiles() {
     polarProfiles = sanitizePolarProfilesList(polarProfiles);
     saveArrayToStorage(POLAR_PROFILES_STORAGE_KEY, polarProfiles);
-    if (!polarProfiles.some(profile => profile.id === activePolarProfileId)) {
+    if (activePolarProfileId !== POLAR_AUTO_PROFILE_ID && !polarProfiles.some(profile => profile.id === activePolarProfileId)) {
         activePolarProfileId = String(polarProfiles[0]?.id || '');
     }
     localStorage.setItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY, activePolarProfileId);
@@ -1263,6 +1268,29 @@ function getActivePolarProfile() {
 
 function getActivePolarData() {
     return getActivePolarProfile()?.polarData || clonePolarData(DEFAULT_POLAR_DATA);
+}
+
+function getBestPolarForConditions(tws, twa) {
+    if (polarProfiles.length <= 1) return polarProfiles[0] || null;
+    const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
+    let bestProfile = polarProfiles[0];
+    let bestSpeed = -1;
+    polarProfiles.forEach(profile => {
+        const speed = polarLookup(tws, absTwa, profile.polarData);
+        if (speed > bestSpeed) { bestSpeed = speed; bestProfile = profile; }
+    });
+    return bestProfile;
+}
+
+function resolveSegmentPolar(startPt, endPt, windDir, windSpd) {
+    if (activePolarProfileId !== POLAR_AUTO_PROFILE_ID) {
+        const profile = getActivePolarProfile();
+        return { polarData: profile?.polarData || clonePolarData(DEFAULT_POLAR_DATA), name: profile?.name || '' };
+    }
+    const bearing = getBearing(startPt, endPt);
+    const twa = computeTWA(bearing, windDir);
+    const best = getBestPolarForConditions(windSpd, twa);
+    return { polarData: best?.polarData || clonePolarData(DEFAULT_POLAR_DATA), name: best?.name || '' };
 }
 
 function countPolarDataCells(polarData) {
@@ -1295,18 +1323,19 @@ function setPolarProfileStatus(message, isError = false) {
 function populatePolarProfileSelects() {
     const routingSelect = document.getElementById('routingPolarProfileSelect');
     const managerSelect = document.getElementById('polarProfileManagerSelect');
-    const optionsHtml = polarProfiles.map(profile => (
+    const profilesOptionsHtml = polarProfiles.map(profile => (
         `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`
     )).join('');
 
     if (routingSelect) {
-        routingSelect.innerHTML = optionsHtml;
+        const autoLabel = t('⚡ Auto — meilleure polaire / segment', '⚡ Auto — mejor polar / segmento', '⚡ Auto — best polar / segment');
+        routingSelect.innerHTML = `<option value="${POLAR_AUTO_PROFILE_ID}">${autoLabel}</option>` + profilesOptionsHtml;
         routingSelect.value = activePolarProfileId;
     }
 
     if (managerSelect) {
-        managerSelect.innerHTML = optionsHtml;
-        managerSelect.value = selectedPolarProfileEditorId || activePolarProfileId;
+        managerSelect.innerHTML = profilesOptionsHtml;
+        managerSelect.value = selectedPolarProfileEditorId || (activePolarProfileId !== POLAR_AUTO_PROFILE_ID ? activePolarProfileId : '');
     }
 }
 
@@ -1317,11 +1346,19 @@ function updateRoutingPolarProfileUi() {
 
     if (selectNode) {
         populatePolarProfileSelects();
-        selectNode.value = String(activeProfile?.id || '');
+        selectNode.value = activePolarProfileId;
     }
 
     if (hintNode) {
-        hintNode.textContent = formatPolarProfileHint(activeProfile);
+        if (activePolarProfileId === POLAR_AUTO_PROFILE_ID) {
+            hintNode.textContent = t(
+                '⚡ Sélection auto: meilleure polaire calculée segment par segment.',
+                '⚡ Selección auto: mejor polar por segmento.',
+                '⚡ Auto select: best polar computed per segment.'
+            );
+        } else {
+            hintNode.textContent = formatPolarProfileHint(activeProfile);
+        }
     }
 }
 
@@ -1344,14 +1381,17 @@ function loadPolarProfileEditor(profileId = selectedPolarProfileEditorId || acti
 
 function setActivePolarProfile(profileId, options = {}) {
     const { persist = true, syncEditor = false } = options;
-    const nextProfile = polarProfiles.find(profile => profile.id === profileId) || polarProfiles[0] || null;
-    if (!nextProfile) return;
-
-    activePolarProfileId = nextProfile.id;
+    if (profileId === POLAR_AUTO_PROFILE_ID) {
+        activePolarProfileId = POLAR_AUTO_PROFILE_ID;
+    } else {
+        const nextProfile = polarProfiles.find(profile => profile.id === profileId) || polarProfiles[0] || null;
+        if (!nextProfile) return;
+        activePolarProfileId = nextProfile.id;
+    }
     if (persist) {
         localStorage.setItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY, activePolarProfileId);
     }
-    if (syncEditor) {
+    if (syncEditor && activePolarProfileId !== POLAR_AUTO_PROFILE_ID) {
         selectedPolarProfileEditorId = activePolarProfileId;
         loadPolarProfileEditor(activePolarProfileId);
     } else {
@@ -2388,7 +2428,8 @@ function estimateEffectiveSpeedForLegSplit(startPoint, endPoint, weather) {
 
     try {
         const resolvedTackTimeHours = getAutoTackingTimeHours(startPoint, endPoint, windDirection, windSpeed, tackingTimeHours);
-        const rawSegment = routeSegment(startPoint, endPoint, windDirection, windSpeed, resolvedTackTimeHours, getActivePolarData());
+        const { polarData: _segPolarData2391 } = resolveSegmentPolar(startPoint, endPoint, windDirection, windSpeed);
+        const rawSegment = routeSegment(startPoint, endPoint, windDirection, windSpeed, resolvedTackTimeHours, _segPolarData2391);
         if (!rawSegment || !Number.isFinite(rawSegment.speed)) return 6;
 
         const twa = computeTWA(rawSegment.bearing, windDirection);
@@ -2486,8 +2527,9 @@ function getAutoTackingTimeHours(startPoint, endPoint, windDirection, windSpeed,
     let bestCandidate = fallback;
     let bestScore = Number.POSITIVE_INFINITY;
 
+    const { polarData: _autoTackPolarData } = resolveSegmentPolar(startPoint, endPoint, windDirection, windSpeed);
     AUTO_TACK_TIME_CANDIDATES_HOURS.forEach(candidate => {
-        const test = routeSegment(startPoint, endPoint, windDirection, windSpeed, candidate, getActivePolarData());
+        const test = routeSegment(startPoint, endPoint, windDirection, windSpeed, candidate, _autoTackPolarData);
         if (!test || test.type !== 'tacking') return;
 
         const points = Array.isArray(test.points) ? test.points : [];
@@ -4924,7 +4966,7 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
                     timeHours: distanceNm(legStart.lat, legStart.lon, legEnd.lat, legEnd.lon) / MOTOR_SPEED_KN,
                     type: 'motor'
                 }
-                : routeSegment(legStart, legEnd, windDirection, windSpeed, resolvedTackTimeHours, getActivePolarData());
+                : routeSegment(legStart, legEnd, windDirection, windSpeed, resolvedTackTimeHours, resolveSegmentPolar(legStart, legEnd, windDirection, windSpeed).polarData);
 
             const twa = isMotorSegment ? null : computeTWA(rawSegment.bearing, windDirection);
             const sailSetup = getSailRecommendation({
@@ -16660,8 +16702,7 @@ async function computeRoute() {
                 wind.speed,
                 tackingTimeHours
             );
-
-            const rawSegment = isMotorSegment
+            let _resolvedSegPolarName = '';
                 ? {
                     type: 'motor',
                     distance: distanceNm(startPoint.lat, startPoint.lon, endPoint.lat, endPoint.lon),
@@ -16670,14 +16711,12 @@ async function computeRoute() {
                     timeHours: distanceNm(startPoint.lat, startPoint.lon, endPoint.lat, endPoint.lon) / MOTOR_SPEED_KN,
                     points: [startPoint, endPoint]
                 }
-                : routeSegment(
-                    startPoint,
-                    endPoint,
-                    wind.direction,
-                    wind.speed,
-                    resolvedTackTimeHours,
-                    getActivePolarData()
-                );
+                : (() => {
+                    const { polarData: _sp, name: _sn } = resolveSegmentPolar(startPoint, endPoint, wind.direction, wind.speed);
+                    _resolvedSegPolarName = _sn;
+                    return routeSegment(startPoint, endPoint, wind.direction, wind.speed, resolvedTackTimeHours, _sp);
+                })();
+            const segPolarName = isMotorSegment ? t('Moteur', 'Motor', 'Motor') : (_resolvedSegPolarName || '');
 
             const twa = isMotorSegment ? null : computeTWA(rawSegment.bearing, wind.direction);
             const sailSetup = getSailRecommendation({
@@ -16791,6 +16830,7 @@ async function computeRoute() {
                     type: segment.type,
                     sailSetup,
                     sailComment,
+                    polarProfileName: segPolarName,
                     departureHour: passageSlot.hour
                 };
                 segmentsInfo.push(activeDisplaySegment);
@@ -16834,6 +16874,12 @@ async function computeRoute() {
                     activeDisplaySegment.sailSetup = 'Moteur';
                 }
             }
+
+            if (!isMotorSegment && segPolarName && activeDisplaySegment.polarProfileName
+                && activeDisplaySegment.polarProfileName !== segPolarName
+                && activeDisplaySegment.polarProfileName !== t('Multi', 'Multi', 'Multi')) {
+                activeDisplaySegment.polarProfileName = t('Multi', 'Multi', 'Multi');
+            }
         }
     }
 
@@ -16861,7 +16907,7 @@ async function computeRoute() {
     let segmentsHtml = `<table id="segmentsTable" style="width:100%; border-collapse:collapse; margin-top:8px; font-size:8px;"><tr style="border-bottom:1px solid #ccc;"><th style="text-align:left; padding:2px; width:22px;">WP</th><th style="text-align:left; padding:2px; width:14px;">Seg</th><th style="text-align:right; padding:2px;">${t('Départ', 'Salida')}</th><th style="text-align:right; padding:2px;">${t('Arrivée', 'Llegada')}</th><th style="text-align:right; padding:2px;">${t('Cap', 'Rumbo')}</th><th style="text-align:right; padding:2px;">${t('Dist.', 'Dist.')}</th><th style="text-align:right; padding:2px;">${t('Temps', 'Tiempo')}</th><th style="text-align:right; padding:2px;">${t('Vit.', 'Vel.')}</th><th style="text-align:right; padding:2px;">${t('V.V', 'V.V')}</th><th style="text-align:right; padding:2px;">${t('D.V', 'D.V')}</th><th style="text-align:right; padding:2px;">${t('V.C', 'V.C', 'C.S')}</th><th style="text-align:right; padding:2px;">${t('D.C', 'D.C', 'C.D')}</th><th style="text-align:left; padding:2px;">${t('Voiles', 'Velas')}</th></tr>`;
     
     segmentsInfo.forEach((seg, segIndex) => {
-        segmentsHtml += `<tr class="segment-row" data-seg-index="${segIndex}" style="border-bottom:1px solid #eee; cursor:pointer;"><td style="padding:2px; width:22px;" title="${seg.startLabel}">${seg.startIcon}</td><td style="padding:2px; width:14px;">${seg.number}</td><td style="text-align:right; padding:2px;">${seg.departureLabel}</td><td style="text-align:right; padding:2px;">${seg.arrivalLabel}</td><td style="text-align:right; padding:2px;">${seg.bearing}°</td><td style="text-align:right; padding:2px;">${seg.distance} nm</td><td style="text-align:right; padding:2px;">${seg.time} h</td><td style="text-align:right; padding:2px;">${seg.speed} kn</td><td style="text-align:right; padding:2px;">${seg.windSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.windDirection}°</td><td style="text-align:right; padding:2px;">${seg.currentSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.currentDirection}</td><td style="padding:2px;">${seg.sailSetup}</td></tr>`;
+        segmentsHtml += `<tr class="segment-row" data-seg-index="${segIndex}" style="border-bottom:1px solid #eee; cursor:pointer;"><td style="padding:2px; width:22px;" title="${seg.startLabel}">${seg.startIcon}</td><td style="padding:2px; width:14px;">${seg.number}</td><td style="text-align:right; padding:2px;">${seg.departureLabel}</td><td style="text-align:right; padding:2px;">${seg.arrivalLabel}</td><td style="text-align:right; padding:2px;">${seg.bearing}°</td><td style="text-align:right; padding:2px;">${seg.distance} nm</td><td style="text-align:right; padding:2px;">${seg.time} h</td><td style="text-align:right; padding:2px;">${seg.speed} kn</td><td style="text-align:right; padding:2px;">${seg.windSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.windDirection}°</td><td style="text-align:right; padding:2px;">${seg.currentSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.currentDirection}</td><td style="padding:2px;">${seg.sailSetup}${seg.polarProfileName ? `<br><span style="font-size:7px;opacity:0.6;color:#8fe7ff;">${escapeHtml(seg.polarProfileName)}</span>` : ''}</td></tr>`;
     });
 
     segmentsHtml += '</table>';
