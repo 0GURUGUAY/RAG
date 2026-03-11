@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-17';
+const APP_BUILD_VERSION = '20260311-23';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -454,7 +454,6 @@ function applyLanguageToUi() {
     setElementText('#suggestAiRoutesBtn', t('Proposer routes IA (safe / perf)', 'Proponer rutas IA (safe / perf)'));
     setElementText('label[for="departureDateTimeInput"]', t('Départ (date + heure):', 'Salida (fecha + hora):'));
     setElementText('label[for="tackingTimeInput"]', t('Temps du bord (min):', 'Tiempo de bordo (min):'));
-    setElementText('label[for="sailModeSelect"]', t('Mode voiles:', 'Modo velas:'));
     setElementText('#routingPolarProfileSelectLabel', t('Polaire / gréement:', 'Polar / aparejo:', 'Polar / rig:'));
     setElementText('label[for="autoWpSpacingInput"]', t('Contournement côte:', 'Rodeo costa:'));
     setElementText('label[for="forecastWindowDaysSelect"]', t('Fenêtre analyse:', 'Ventana análisis:'));
@@ -468,9 +467,6 @@ function applyLanguageToUi() {
     setElementText('#tackingTimeInput option[value="1"]', t('1 heure', '1 hora'));
     setElementText('#tackingTimeInput option[value="1.5"]', t('1.5 heures', '1.5 horas'));
     setElementText('#tackingTimeInput option[value="2"]', t('2 heures', '2 horas'));
-    setElementText('#sailModeSelect option[value="prudent"]', t('Prudent', 'Prudente'));
-    setElementText('#sailModeSelect option[value="auto"]', t('Auto', 'Auto'));
-    setElementText('#sailModeSelect option[value="performance"]', t('Performance', 'Rendimiento'));
     setElementText('#autoWpSpacingInput option[value="off"]', t('Désactivé', 'Desactivado'));
     setElementText('#forecastWindowDaysSelect option[value="2"]', t('2 jours', '2 días'));
     setElementText('#forecastWindowDaysSelect option[value="3"]', t('3 jours', '3 días'));
@@ -1405,11 +1401,6 @@ function getPolarProfileSuitabilityForTWS(profile, tws) {
     // since imported names like "Dufour 56 · GV Genoa" use spaces, not underscores
     const normalized = fullName.replace(/_/g, ' ');
     
-    // Gennaker = voile légère, indisponible à fort vent (TWS ≥ 18)
-    if (normalized.includes('GENNAKER') && tws >= 18) {
-        return false;
-    }
-    
     // Genoa sans ris = voile complète, indisponible à TWS ≥ 18
     if ((normalized.includes('GV GENOA') || normalized.match(/\bGV\s+GENOA\b/)) && tws >= 18) {
         return false;
@@ -1428,20 +1419,95 @@ function getPolarProfileSuitabilityForTWS(profile, tws) {
     return true;
 }
 
+function getPolarProfileSuitabilityForConditions(profile, tws, twa) {
+    if (!getPolarProfileSuitabilityForTWS(profile, tws)) return false;
+
+    const name = `${String(profile?.id || '')} ${String(profile?.name || '')}`
+        .toUpperCase()
+        .replace(/_/g, ' ');
+    const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
+
+    if (name.includes('GENNAKER') && absTwa < 90) {
+        return false;
+    }
+
+    // À vent fort, le gennaker n'est autorisé qu'au grand largue / vent arrière.
+    if (name.includes('GENNAKER') && tws >= 18 && absTwa < 145) {
+        return false;
+    }
+
+    return true;
+}
+
+function getPolarProfileTieBreakScore(profile, twa) {
+    const name = `${String(profile?.id || '')} ${String(profile?.name || '')}`
+        .toUpperCase()
+        .replace(/_/g, ' ');
+    const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
+
+    const isGennaker = name.includes('GENNAKER');
+    const isJib = name.includes('JIB') || name.includes('TRINQUETTE');
+    const isGenoa = name.includes('GENOA') || name.includes('GENOIS');
+    const isReef2 = name.includes('GV2') || name.includes('2 RIS');
+    const isReef1 = name.includes('GV1') || name.includes('1 RIS');
+
+    if (absTwa < 60) {
+        if (isJib && isReef2) return 140;
+        if (isJib && isReef1) return 130;
+        if (isJib) return 120;
+        if (isGenoa && isReef2) return 110;
+        if (isGenoa && isReef1) return 100;
+        if (isGenoa) return 90;
+        if (isGennaker) return 10;
+    }
+
+    if (absTwa <= 115) {
+        if (isGenoa && isReef1) return 120;
+        if (isGenoa) return 110;
+        if (isJib && isReef1) return 100;
+        if (isJib && isReef2) return 95;
+        if (isJib) return 90;
+        if (isGennaker) return 70;
+    }
+
+    if (absTwa <= 145) {
+        if (isGennaker) return 120;
+        if (isGenoa) return 100;
+        if (isJib) return 90;
+    }
+
+    if (isGennaker) return 110;
+    if (isGenoa) return 100;
+    if (isJib) return 90;
+    return 0;
+}
+
 function getBestPolarForConditions(tws, twa) {
     if (polarProfiles.length <= 1) return polarProfiles[0] || null;
     
     const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
     
     // Filtre : obtenir les profils acceptables au TWS actuel
-    const acceptableProfiles = polarProfiles.filter(p => getPolarProfileSuitabilityForTWS(p, tws));
+    const acceptableProfiles = polarProfiles.filter(p => getPolarProfileSuitabilityForConditions(p, tws, absTwa));
     const profilesToRank = acceptableProfiles.length > 0 ? acceptableProfiles : polarProfiles;
     
     let bestProfile = profilesToRank[0];
     let bestSpeed = -1;
+    let bestTieBreakScore = -1;
     profilesToRank.forEach(profile => {
         const speed = polarLookup(tws, absTwa, profile.polarData);
-        if (speed > bestSpeed) { bestSpeed = speed; bestProfile = profile; }
+        const tieBreakScore = getPolarProfileTieBreakScore(profile, absTwa);
+        if (speed > bestSpeed + 0.01) {
+            bestSpeed = speed;
+            bestTieBreakScore = tieBreakScore;
+            bestProfile = profile;
+            return;
+        }
+        if (Math.abs(speed - bestSpeed) <= 0.01 && tieBreakScore > bestTieBreakScore) {
+            bestSpeed = speed;
+            bestTieBreakScore = tieBreakScore;
+            bestProfile = profile;
+        }
     });
     return bestProfile;
 }
@@ -5307,9 +5373,6 @@ async function suggestBestDeparture() {
 }
 
 function updateRoutingControlsUiFromState() {
-    const sailModeSelect = document.getElementById('sailModeSelect');
-    if (sailModeSelect) sailModeSelect.value = sailMode;
-
     const tackingInput = document.getElementById('tackingTimeInput');
     if (tackingInput) tackingInput.value = String(tackingTimeHours);
 
@@ -5957,6 +6020,11 @@ function getSailRecommendation({ isMotorSegment, tws, twa, sailModeValue }) {
 
     if (tws >= (22 + prudentOffset)) return t('GV 2 ris + trinquette', 'Mayor 2 rizos + trinqueta');
     if (tws >= (16 + prudentOffset)) {
+        if (twa > 145) {
+            if (sailModeValue === 'prudent') return t('GV 1 ris + génois tangonné', 'Mayor 1 rizo + génova tangonada');
+            if (sailModeValue === 'performance') return t('GV 1 ris + spi', 'Mayor 1 rizo + spi');
+            return t('GV + gennaker', 'Mayor + gennaker');
+        }
         if (twa > 130 && sailModeValue === 'performance') return t('GV 1 ris + spi', 'Mayor 1 rizo + spi');
         return t('GV 1 ris + génois réduit', 'Mayor 1 rizo + génova reducida');
     }
@@ -5994,11 +6062,8 @@ function getSailComment({ sailSetup, sailModeValue, tws, twa, isMotorSegment }) 
 
     const twaText = Number.isFinite(twa) ? `${Math.round(twa)}°` : 'N/A';
     const twsText = Number.isFinite(tws) ? `${tws.toFixed(1)} kn` : 'N/A';
-    const modeLabel = sailModeValue === 'prudent'
-        ? t('Prudent', 'Prudente')
-        : (sailModeValue === 'performance' ? t('Performance', 'Rendimiento') : t('Auto', 'Auto'));
 
-    return `${t('Mode', 'Modo')} ${modeLabel} · TWS ${twsText} · TWA ${twaText} → ${sailSetup}`;
+    return `TWS ${twsText} · TWA ${twaText} → ${sailSetup}`;
 }
 
 async function ensureLandGeometryLoaded() {
@@ -15474,11 +15539,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         tackingTimeHours = parseFloat(e.target.value);
     });
 
-    document.getElementById("sailModeSelect").value = sailMode;
-    document.getElementById("sailModeSelect").addEventListener("change", function(e) {
-        sailMode = e.target.value;
-    });
-
     const routingPolarProfileSelect = document.getElementById('routingPolarProfileSelect');
     if (routingPolarProfileSelect) {
         routingPolarProfileSelect.value = activePolarProfileId;
@@ -17080,10 +17140,10 @@ async function computeRoute() {
         ? `<div style="margin-top:6px; margin-bottom:4px; font-size:10px; color:#8fe7ff; font-weight:700;">⚡ ${t('Mode Auto polaires actif', 'Modo Auto polares activo', 'Auto polar mode active')}</div>`
         : '';
 
-    let segmentsHtml = `${autoPolarSegmentsBadge}<table id="segmentsTable" style="width:100%; border-collapse:collapse; margin-top:8px; font-size:8px;"><tr style="border-bottom:1px solid #ccc;"><th style="text-align:left; padding:2px; width:22px;">WP</th><th style="text-align:left; padding:2px; width:14px;">Seg</th><th style="text-align:right; padding:2px;">${t('Départ', 'Salida')}</th><th style="text-align:right; padding:2px;">${t('Arrivée', 'Llegada')}</th><th style="text-align:right; padding:2px;">${t('Cap', 'Rumbo')}</th><th style="text-align:right; padding:2px;">${t('Dist.', 'Dist.')}</th><th style="text-align:right; padding:2px;">${t('Temps', 'Tiempo')}</th><th style="text-align:right; padding:2px;">${t('Vit.', 'Vel.')}</th><th style="text-align:right; padding:2px;">${t('V.V', 'V.V')}</th><th style="text-align:right; padding:2px;">${t('D.V', 'D.V')}</th><th style="text-align:right; padding:2px;">${t('V.C', 'V.C', 'C.S')}</th><th style="text-align:right; padding:2px;">${t('D.C', 'D.C', 'C.D')}</th><th style="text-align:left; padding:2px;">${t('Voiles', 'Velas')}</th></tr>`;
+    let segmentsHtml = `${autoPolarSegmentsBadge}<table id="segmentsTable" style="width:100%; border-collapse:collapse; margin-top:8px; font-size:8px;"><tr style="border-bottom:1px solid #ccc;"><th style="text-align:left; padding:2px; width:22px;">WP</th><th style="text-align:left; padding:2px; width:14px;">Seg</th><th style="text-align:right; padding:2px;">${t('Départ', 'Salida')}</th><th style="text-align:right; padding:2px;">${t('Arrivée', 'Llegada')}</th><th style="text-align:right; padding:2px;">${t('Cap', 'Rumbo')}</th><th style="text-align:right; padding:2px;">${t('Dist.', 'Dist.')}</th><th style="text-align:right; padding:2px;">${t('Temps', 'Tiempo')}</th><th style="text-align:right; padding:2px;">${t('Vit.', 'Vel.')}</th><th style="text-align:right; padding:2px;">${t('V.V', 'V.V')}</th><th style="text-align:right; padding:2px;">${t('D.V', 'D.V')}</th><th style="text-align:right; padding:2px;">${t('V.C', 'V.C', 'C.S')}</th><th style="text-align:right; padding:2px;">${t('D.C', 'D.C', 'C.D')}</th><th style="text-align:left; padding:2px;">${t('Polaire', 'Polar', 'Polar')}</th></tr>`;
     
     segmentsInfo.forEach((seg, segIndex) => {
-        segmentsHtml += `<tr class="segment-row" data-seg-index="${segIndex}" style="border-bottom:1px solid #eee; cursor:pointer;"><td style="padding:2px; width:22px;" title="${seg.startLabel}">${seg.startIcon}</td><td style="padding:2px; width:14px;">${seg.number}</td><td style="text-align:right; padding:2px;">${seg.departureLabel}</td><td style="text-align:right; padding:2px;">${seg.arrivalLabel}</td><td style="text-align:right; padding:2px;">${seg.bearing}°</td><td style="text-align:right; padding:2px;">${seg.distance} nm</td><td style="text-align:right; padding:2px;">${seg.time} h</td><td style="text-align:right; padding:2px;">${seg.speed} kn</td><td style="text-align:right; padding:2px;">${seg.windSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.windDirection}°</td><td style="text-align:right; padding:2px;">${seg.currentSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.currentDirection}</td><td style="padding:2px;">${seg.sailSetup}${seg.polarProfileName ? `<br><span style="font-size:7px;opacity:0.6;color:#8fe7ff;">${seg.polarProfileName.split('\n').map(line => escapeHtml(line)).join('<br>')}</span>` : ''}</td></tr>`;
+        segmentsHtml += `<tr class="segment-row" data-seg-index="${segIndex}" style="border-bottom:1px solid #eee; cursor:pointer;"><td style="padding:2px; width:22px;" title="${seg.startLabel}">${seg.startIcon}</td><td style="padding:2px; width:14px;">${seg.number}</td><td style="text-align:right; padding:2px;">${seg.departureLabel}</td><td style="text-align:right; padding:2px;">${seg.arrivalLabel}</td><td style="text-align:right; padding:2px;">${seg.bearing}°</td><td style="text-align:right; padding:2px;">${seg.distance} nm</td><td style="text-align:right; padding:2px;">${seg.time} h</td><td style="text-align:right; padding:2px;">${seg.speed} kn</td><td style="text-align:right; padding:2px;">${seg.windSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.windDirection}°</td><td style="text-align:right; padding:2px;">${seg.currentSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.currentDirection}</td><td style="padding:2px;"><span style="font-size:7px;opacity:0.8;color:#8fe7ff;">${seg.polarProfileName ? seg.polarProfileName.split('\n').map(line => escapeHtml(line)).join('<br>') : '—'}</span></td></tr>`;
     });
 
     segmentsHtml += '</table>';
