@@ -2,7 +2,7 @@ import { routeSegment, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_PO
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-08';
+const APP_BUILD_VERSION = '20260311-09';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -103,6 +103,7 @@ const ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY = 'ceiboEngineSoundSnapshotsV1';
 const POLAR_PROFILES_STORAGE_KEY = 'ceiboPolarProfilesV1';
 const ACTIVE_POLAR_PROFILE_STORAGE_KEY = 'ceiboActivePolarProfileV1';
 const POLAR_AUTO_PROFILE_ID = '__auto__';
+const POLAR_IMPORTED_DUFOUR56_STORAGE_KEY = 'ceiboPolarImportedDufour56V1';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
 const CLOUD_ROUTES_TABLE = 'routes';
@@ -1251,6 +1252,130 @@ function loadPolarProfiles() {
     selectedPolarProfileEditorId = activePolarProfileId === POLAR_AUTO_PROFILE_ID
         ? String(fallbackProfile?.id || '')
         : activePolarProfileId;
+}
+
+function slugifyPolarProfileKey(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64);
+}
+
+function prettyPolarProfileName(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 'Dufour 56';
+    return raw
+        .replace(/_/g, ' ')
+        .replace(/\bGv\b/gi, 'GV')
+        .replace(/\bJib\b/gi, 'Jib')
+        .replace(/\bGenoa\b/gi, 'Genoa')
+        .replace(/\bGennaker\b/gi, 'Gennaker')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildPolarDataFromImportedMatrix(twsList, twaList, matrixRows) {
+    if (!Array.isArray(twsList) || !Array.isArray(twaList) || !Array.isArray(matrixRows)) return null;
+
+    const polarData = {};
+    twsList.forEach((twsValue, rowIndex) => {
+        const tws = Number(twsValue);
+        const row = matrixRows[rowIndex];
+        if (!Number.isFinite(tws) || tws <= 0 || !Array.isArray(row)) return;
+
+        const angleMap = {};
+        twaList.forEach((twaValue, colIndex) => {
+            const twa = Number(twaValue);
+            const speed = Number(row[colIndex]);
+            if (!Number.isFinite(twa) || twa <= 0 || twa >= 181) return;
+            if (!Number.isFinite(speed) || speed < 0) return;
+            angleMap[String(twa)] = Math.round(speed * 100) / 100;
+        });
+
+        if (Object.keys(angleMap).length > 0) {
+            polarData[String(tws)] = angleMap;
+        }
+    });
+
+    return normalizePolarData(polarData);
+}
+
+async function importBundledDufourPolarProfilesIfNeeded() {
+    try {
+        const alreadyImported = localStorage.getItem(POLAR_IMPORTED_DUFOUR56_STORAGE_KEY) === '1';
+        if (alreadyImported) return false;
+
+        const response = await fetch('./polaires_dufour56.json', { cache: 'no-store' });
+        if (!response.ok) return false;
+
+        const source = await response.json();
+        const twsList = Array.isArray(source?.tws) ? source.tws : [];
+        const twaList = Array.isArray(source?.twa) ? source.twa : [];
+        const polarsMap = source?.polars && typeof source.polars === 'object' ? source.polars : {};
+        const sourceBoatName = String(source?.boat || 'Dufour 56').trim();
+
+        const importedProfiles = Object.entries(polarsMap)
+            .map(([rawKey, rows], index) => {
+                const polarData = buildPolarDataFromImportedMatrix(twsList, twaList, rows);
+                if (!polarData) return null;
+                const profileKey = slugifyPolarProfileKey(rawKey) || `profile-${index + 1}`;
+                const prettyName = prettyPolarProfileName(rawKey);
+                const nowIso = new Date().toISOString();
+                return {
+                    id: `dufour56-${profileKey}`,
+                    name: `${sourceBoatName} · ${prettyName}`,
+                    notes: t('Import auto depuis polaires_dufour56.json', 'Importación auto desde polaires_dufour56.json', 'Auto import from polaires_dufour56.json'),
+                    polarData,
+                    createdAt: nowIso,
+                    updatedAt: nowIso
+                };
+            })
+            .filter(Boolean);
+
+        if (!importedProfiles.length) return false;
+
+        const existingById = new Map(polarProfiles.map(profile => [profile.id, profile]));
+        let hasChanges = false;
+
+        importedProfiles.forEach(imported => {
+            const existing = existingById.get(imported.id);
+            if (!existing) {
+                polarProfiles.push(imported);
+                hasChanges = true;
+                return;
+            }
+
+            const sameData = JSON.stringify(existing.polarData || {}) === JSON.stringify(imported.polarData || {});
+            if (!sameData || String(existing.name || '') !== imported.name || String(existing.notes || '') !== imported.notes) {
+                existingById.set(imported.id, {
+                    ...existing,
+                    name: imported.name,
+                    notes: imported.notes,
+                    polarData: imported.polarData,
+                    updatedAt: imported.updatedAt
+                });
+                hasChanges = true;
+            }
+        });
+
+        if (hasChanges) {
+            polarProfiles = sanitizePolarProfilesList(Array.from(existingById.values()).concat(
+                polarProfiles.filter(profile => !existingById.has(profile.id))
+            ));
+            savePolarProfiles();
+            populatePolarProfileSelects();
+            loadPolarProfileEditor();
+            updateRoutingPolarProfileUi();
+            setPolarProfileStatus(t('Polaires Dufour 56 importées.', 'Polares Dufour 56 importadas.', 'Dufour 56 polars imported.'));
+        }
+
+        localStorage.setItem(POLAR_IMPORTED_DUFOUR56_STORAGE_KEY, '1');
+        return hasChanges;
+    } catch (_error) {
+        return false;
+    }
 }
 
 function savePolarProfiles() {
@@ -14932,6 +15057,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     console.info(`[CEIBO] Front build ${APP_BUILD_VERSION}`);
 
     loadPolarProfiles();
+    await importBundledDufourPolarProfilesIfNeeded();
 
     const savedMapView = loadSavedMapView();
     const initialLat = savedMapView?.lat ?? 41.3851;
