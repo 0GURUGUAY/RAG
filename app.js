@@ -1,8 +1,8 @@
-import { routeSegment, distanceNm, getBearing, computeTWA, movePoint } from './polarRouter.js';
+import { routeSegment, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_POLAR_DATA, clonePolarData, normalizePolarData } from './polarRouter.js';
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-06';
+const APP_BUILD_VERSION = '20260311-07';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -100,6 +100,8 @@ const NAV_LOG_STORAGE_KEY = 'ceiboNavLogV1';
 const NAV_GPS_TRACE_STORAGE_KEY = 'ceiboNavGpsTraceV1';
 const ENGINE_LOG_STORAGE_KEY = 'ceiboEngineLogV1';
 const ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY = 'ceiboEngineSoundSnapshotsV1';
+const POLAR_PROFILES_STORAGE_KEY = 'ceiboPolarProfilesV1';
+const ACTIVE_POLAR_PROFILE_STORAGE_KEY = 'ceiboActivePolarProfileV1';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
 const CLOUD_ROUTES_TABLE = 'routes';
@@ -114,6 +116,7 @@ const CLOUD_MAINTENANCE_EXPENSES_TABLE = 'maintenance_expenses';
 const CLOUD_NAV_LOG_TABLE = 'nav_log_entries';
 const CLOUD_ENGINE_LOG_TABLE = 'engine_log';
 const CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE = 'engine_sound_snapshots';
+const CLOUD_POLAR_PROFILES_TABLE = 'polar_profiles';
 const CLOUD_ALLOWED_USERS_TABLE = 'allowed_users';
 const CLOUD_PROJECTS_TABLE = 'projects';
 const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
@@ -219,6 +222,10 @@ let selectedMaintenanceSupplierId = null;
 let activeMaintenanceExpensesView = 'list';
 let activeRoutingSubtab = 'main';
 let activeRoutesSubtab = 'manage';
+let polarProfiles = [];
+let activePolarProfileId = '';
+let selectedPolarProfileEditorId = '';
+let polarEditorMode = 'grid'; // 'grid' | 'json'
 let routesSortOrder = 'asc';
 let routesSearchTerm = '';
 let waypointSearchTerm = '';
@@ -418,6 +425,18 @@ function applyLanguageToUi() {
     setElementText('#routesImportExportSubtabBtn', t('Import/Export', 'Importar/Exportar'));
     setElementText('#routesToolsSubtabBtn', t('Outils', 'Herramientas'));
     setElementText('#measureClearBtn', t('Effacer mesure', 'Borrar medición'));
+    setElementText('#polarProfilesTitle', t('Polaires / voilures', 'Polares / velas', 'Polars / sail plans'));
+    setElementText('#polarProfileManagerSelectLabel', t('Profil édité:', 'Perfil editado:', 'Edited profile:'));
+    setElementText('#polarProfileNameLabel', t('Nom du profil:', 'Nombre del perfil:', 'Profile name:'));
+    setElementText('#polarProfileNotesLabel', t('Notes de gréement:', 'Notas de aparejo:', 'Rig notes:'));
+    setElementText('#polarProfileJsonLabel', t('Matrice polaire JSON:', 'Matriz polar JSON:', 'Polar JSON matrix:'));
+    setElementText('#polarProfileNewBtn', t('Nouveau', 'Nuevo', 'New'));
+    setElementText('#polarProfileDuplicateBtn', t('Dupliquer actif', 'Duplicar activo', 'Duplicate active'));
+    setElementText('#polarProfileApplyBtn', t('Activer dans Routing', 'Activar en Routing', 'Use in Routing'));
+    setElementText('#polarProfileSaveBtn', t('Enregistrer polaire', 'Guardar polar', 'Save polar'));
+    setElementText('#polarProfileDeleteBtn', t('Supprimer profil', 'Eliminar perfil', 'Delete profile'));
+    setElementPlaceholder('#polarProfileNameInput', t('Ex: GV + génois réduit', 'Ej: Mayor + génova reducida', 'Ex: Main + reduced genoa'));
+    setElementPlaceholder('#polarProfileNotesInput', t('Ex: 1 ris + génois roulé 30%', 'Ej: 1 rizo + génova enrollada 30%', 'Ex: 1 reef + genoa furled 30%'));
     setElementText('label[for="importRouteInput"]', t('Importer (JSON / GPX):', 'Importar (JSON / GPX):'));
 
     setElementText('#routingMainSubtabBtn', t('ROUTING', 'ROUTING', 'ROUTING'));
@@ -434,6 +453,7 @@ function applyLanguageToUi() {
     setElementText('label[for="departureDateTimeInput"]', t('Départ (date + heure):', 'Salida (fecha + hora):'));
     setElementText('label[for="tackingTimeInput"]', t('Temps du bord (min):', 'Tiempo de bordo (min):'));
     setElementText('label[for="sailModeSelect"]', t('Mode voiles:', 'Modo velas:'));
+    setElementText('#routingPolarProfileSelectLabel', t('Polaire / gréement:', 'Polar / aparejo:', 'Polar / rig:'));
     setElementText('label[for="autoWpSpacingInput"]', t('Contournement côte:', 'Rodeo costa:'));
     setElementText('label[for="forecastWindowDaysSelect"]', t('Fenêtre analyse:', 'Ventana análisis:'));
     setElementText('#departureSuggestionInfo', t('Suggestion départ: en attente', 'Sugerencia salida: en espera'));
@@ -455,6 +475,7 @@ function applyLanguageToUi() {
     setElementText('#forecastWindowDaysSelect option[value="5"]', t('5 jours', '5 días'));
     setElementText('#forecastWindowDaysSelect option[value="7"]', t('7 jours', '7 días'));
     updateRoutingActiveRouteDisplay();
+    updateRoutingPolarProfileUi();
     setElementPlaceholder('#watchCrewInput', t('Ex: Max + Ana', 'Ej: Max + Ana'));
     setElementPlaceholder('#watchHeadingInput', t('Ex: 235', 'Ej: 235'));
     setElementPlaceholder('#watchWindDirInput', t('Ex: 260', 'Ej: 260'));
@@ -1156,6 +1177,511 @@ function escapeHtml(value) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+}
+
+function buildDefaultPolarProfiles() {
+    return [{
+        id: 'default-d56-standard',
+        name: 'DUFOUR 56 · Standard',
+        notes: 'Polaire de référence embarquée.',
+        polarData: clonePolarData(DEFAULT_POLAR_DATA),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    }];
+}
+
+function sanitizePolarProfile(entry, fallbackIndex = 0) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const normalizedData = normalizePolarData(entry.polarData || entry.matrix || entry.data);
+    if (!normalizedData) return null;
+
+    const fallbackName = fallbackIndex === 0 ? 'DUFOUR 56 · Standard' : `Polaire ${fallbackIndex + 1}`;
+    const rawId = String(entry.id || '').trim();
+
+    return {
+        id: rawId || `polar-profile-${fallbackIndex + 1}`,
+        name: String(entry.name || fallbackName).trim() || fallbackName,
+        notes: String(entry.notes || '').trim(),
+        polarData: normalizedData,
+        createdAt: String(entry.createdAt || new Date().toISOString()),
+        updatedAt: String(entry.updatedAt || entry.createdAt || new Date().toISOString())
+    };
+}
+
+function sanitizePolarProfilesList(list) {
+    const baseList = Array.isArray(list) ? list : [];
+    const sanitized = baseList
+        .map((entry, index) => sanitizePolarProfile(entry, index))
+        .filter(Boolean);
+
+    if (!sanitized.length) {
+        return buildDefaultPolarProfiles();
+    }
+
+    const seenIds = new Set();
+    return sanitized.map((profile, index) => {
+        let nextId = String(profile.id || '').trim() || `polar-profile-${index + 1}`;
+        if (seenIds.has(nextId)) {
+            nextId = `${nextId}-${index + 1}`;
+        }
+        seenIds.add(nextId);
+        return {
+            ...profile,
+            id: nextId
+        };
+    });
+}
+
+function loadPolarProfiles() {
+    try {
+        polarProfiles = sanitizePolarProfilesList(loadArrayFromStorage(POLAR_PROFILES_STORAGE_KEY));
+    } catch (_error) {
+        polarProfiles = buildDefaultPolarProfiles();
+    }
+
+    const storedActiveId = String(localStorage.getItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY) || '').trim();
+    const fallbackProfile = polarProfiles[0] || null;
+    activePolarProfileId = polarProfiles.some(profile => profile.id === storedActiveId)
+        ? storedActiveId
+        : String(fallbackProfile?.id || '');
+    selectedPolarProfileEditorId = activePolarProfileId;
+}
+
+function savePolarProfiles() {
+    polarProfiles = sanitizePolarProfilesList(polarProfiles);
+    saveArrayToStorage(POLAR_PROFILES_STORAGE_KEY, polarProfiles);
+    if (!polarProfiles.some(profile => profile.id === activePolarProfileId)) {
+        activePolarProfileId = String(polarProfiles[0]?.id || '');
+    }
+    localStorage.setItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY, activePolarProfileId);
+}
+
+function getActivePolarProfile() {
+    return polarProfiles.find(profile => profile.id === activePolarProfileId) || polarProfiles[0] || null;
+}
+
+function getActivePolarData() {
+    return getActivePolarProfile()?.polarData || clonePolarData(DEFAULT_POLAR_DATA);
+}
+
+function countPolarDataCells(polarData) {
+    const matrix = normalizePolarData(polarData);
+    if (!matrix) return { twsCount: 0, angleCount: 0 };
+
+    const twsCount = Object.keys(matrix).length;
+    const angleSet = new Set();
+    Object.values(matrix).forEach(value => {
+        Object.keys(value || {}).forEach(angle => angleSet.add(angle));
+    });
+    return { twsCount, angleCount: angleSet.size };
+}
+
+function formatPolarProfileHint(profile) {
+    if (!profile) return t('Aucune polaire sélectionnée.', 'Ninguna polar seleccionada.', 'No polar selected.');
+    const counts = countPolarDataCells(profile.polarData);
+    const notes = String(profile.notes || '').trim();
+    const summary = `${counts.twsCount} TWS · ${counts.angleCount} TWA`;
+    return notes ? `${notes} · ${summary}` : summary;
+}
+
+function setPolarProfileStatus(message, isError = false) {
+    const node = document.getElementById('polarProfileStatus');
+    if (!node) return;
+    node.textContent = String(message || '');
+    node.style.color = isError ? '#ff8f8f' : '';
+}
+
+function populatePolarProfileSelects() {
+    const routingSelect = document.getElementById('routingPolarProfileSelect');
+    const managerSelect = document.getElementById('polarProfileManagerSelect');
+    const optionsHtml = polarProfiles.map(profile => (
+        `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`
+    )).join('');
+
+    if (routingSelect) {
+        routingSelect.innerHTML = optionsHtml;
+        routingSelect.value = activePolarProfileId;
+    }
+
+    if (managerSelect) {
+        managerSelect.innerHTML = optionsHtml;
+        managerSelect.value = selectedPolarProfileEditorId || activePolarProfileId;
+    }
+}
+
+function updateRoutingPolarProfileUi() {
+    const hintNode = document.getElementById('routingPolarProfileHint');
+    const selectNode = document.getElementById('routingPolarProfileSelect');
+    const activeProfile = getActivePolarProfile();
+
+    if (selectNode) {
+        populatePolarProfileSelects();
+        selectNode.value = String(activeProfile?.id || '');
+    }
+
+    if (hintNode) {
+        hintNode.textContent = formatPolarProfileHint(activeProfile);
+    }
+}
+
+function loadPolarProfileEditor(profileId = selectedPolarProfileEditorId || activePolarProfileId) {
+    const profile = polarProfiles.find(item => item.id === profileId) || getActivePolarProfile();
+    if (!profile) return;
+
+    selectedPolarProfileEditorId = profile.id;
+    populatePolarProfileSelects();
+
+    const nameInput = document.getElementById('polarProfileNameInput');
+    const notesInput = document.getElementById('polarProfileNotesInput');
+    const jsonInput = document.getElementById('polarProfileJsonInput');
+
+    if (nameInput) nameInput.value = profile.name || '';
+    if (notesInput) notesInput.value = profile.notes || '';
+    if (jsonInput) jsonInput.value = JSON.stringify(profile.polarData || {}, null, 2);
+    renderPolarGridEditor(profile.polarData);
+}
+
+function setActivePolarProfile(profileId, options = {}) {
+    const { persist = true, syncEditor = false } = options;
+    const nextProfile = polarProfiles.find(profile => profile.id === profileId) || polarProfiles[0] || null;
+    if (!nextProfile) return;
+
+    activePolarProfileId = nextProfile.id;
+    if (persist) {
+        localStorage.setItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY, activePolarProfileId);
+    }
+    if (syncEditor) {
+        selectedPolarProfileEditorId = activePolarProfileId;
+        loadPolarProfileEditor(activePolarProfileId);
+    } else {
+        populatePolarProfileSelects();
+    }
+    updateRoutingPolarProfileUi();
+}
+
+function createPolarProfileDraftFrom(profile = null) {
+    const sourceProfile = profile || getActivePolarProfile() || buildDefaultPolarProfiles()[0];
+    const nameInput = document.getElementById('polarProfileNameInput');
+    const notesInput = document.getElementById('polarProfileNotesInput');
+    const jsonInput = document.getElementById('polarProfileJsonInput');
+    if (nameInput) nameInput.value = `${sourceProfile.name} ${t('copie', 'copia', 'copy')}`;
+    if (notesInput) notesInput.value = sourceProfile.notes || '';
+    if (jsonInput) jsonInput.value = JSON.stringify(clonePolarData(sourceProfile.polarData), null, 2);
+    renderPolarGridEditor(clonePolarData(sourceProfile.polarData));
+    selectedPolarProfileEditorId = '';
+    populatePolarProfileSelects();
+}
+
+function savePolarProfileFromEditor() {
+    const nameInput = document.getElementById('polarProfileNameInput');
+    const notesInput = document.getElementById('polarProfileNotesInput');
+    const jsonInput = document.getElementById('polarProfileJsonInput');
+    if (!nameInput || !jsonInput) return;
+
+    const name = String(nameInput.value || '').trim();
+    if (!name) {
+        setPolarProfileStatus(t('Le nom du profil est obligatoire.', 'El nombre del perfil es obligatorio.', 'Profile name is required.'), true);
+        return;
+    }
+
+    let parsedJson;
+    if (polarEditorMode === 'json') {
+        try {
+            parsedJson = JSON.parse(String(jsonInput.value || '{}'));
+        } catch (error) {
+            setPolarProfileStatus(`${t('JSON invalide', 'JSON inválido', 'Invalid JSON')}: ${String(error?.message || error)}`, true);
+            return;
+        }
+    } else {
+        parsedJson = readPolarGridValues();
+    }
+
+    const normalizedData = normalizePolarData(parsedJson);
+    if (!normalizedData) {
+        setPolarProfileStatus(t('La matrice polaire est vide ou invalide.', 'La matriz polar está vacía o es inválida.', 'Polar matrix is empty or invalid.'), true);
+        return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const existingIndex = polarProfiles.findIndex(profile => profile.id === selectedPolarProfileEditorId);
+    const baseProfile = {
+        id: existingIndex >= 0 ? polarProfiles[existingIndex].id : generateClientUuid(),
+        name,
+        notes: String(notesInput?.value || '').trim(),
+        polarData: normalizedData,
+        createdAt: existingIndex >= 0 ? polarProfiles[existingIndex].createdAt : nowIso,
+        updatedAt: nowIso
+    };
+
+    if (existingIndex >= 0) {
+        polarProfiles[existingIndex] = baseProfile;
+    } else {
+        polarProfiles.push(baseProfile);
+    }
+
+    selectedPolarProfileEditorId = baseProfile.id;
+    savePolarProfiles();
+    populatePolarProfileSelects();
+    loadPolarProfileEditor(baseProfile.id);
+    updateRoutingPolarProfileUi();
+    setPolarProfileStatus(t(`Polaire enregistrée: ${baseProfile.name}`, `Polar guardada: ${baseProfile.name}`, `Polar saved: ${baseProfile.name}`));
+}
+
+function deletePolarProfileFromEditor() {
+    if (!selectedPolarProfileEditorId) {
+        setPolarProfileStatus(t('Sélectionne un profil enregistré à supprimer.', 'Selecciona un perfil guardado para eliminar.', 'Select a saved profile to delete.'), true);
+        return;
+    }
+    if (polarProfiles.length <= 1) {
+        setPolarProfileStatus(t('Il faut conserver au moins une polaire.', 'Hay que conservar al menos una polar.', 'At least one polar profile must remain.'), true);
+        return;
+    }
+
+    const profile = polarProfiles.find(item => item.id === selectedPolarProfileEditorId);
+    polarProfiles = polarProfiles.filter(item => item.id !== selectedPolarProfileEditorId);
+    savePolarProfiles();
+    if (activePolarProfileId === selectedPolarProfileEditorId) {
+        activePolarProfileId = String(polarProfiles[0]?.id || '');
+        localStorage.setItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY, activePolarProfileId);
+    }
+    selectedPolarProfileEditorId = String(polarProfiles[0]?.id || '');
+    populatePolarProfileSelects();
+    loadPolarProfileEditor(selectedPolarProfileEditorId);
+    updateRoutingPolarProfileUi();
+    setPolarProfileStatus(t(`Polaire supprimée: ${profile?.name || ''}`, `Polar eliminada: ${profile?.name || ''}`, `Polar deleted: ${profile?.name || ''}`));
+}
+
+// ---- POLAR GRID VISUAL EDITOR ----
+
+function polarSpeedColor(speedKn) {
+    const stops = [
+        { v: 0,  h: 220, s: 70, l: 14 },
+        { v: 4,  h: 200, s: 65, l: 28 },
+        { v: 7,  h: 165, s: 60, l: 26 },
+        { v: 9,  h: 100, s: 62, l: 27 },
+        { v: 11, h: 55,  s: 80, l: 33 },
+        { v: 13, h: 25,  s: 85, l: 37 },
+        { v: 15, h: 0,   s: 75, l: 37 }
+    ];
+    const v = Math.max(0, Math.min(15, Number.isFinite(speedKn) ? speedKn : 0));
+    let lo = stops[0];
+    let hi = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (v >= stops[i].v && v <= stops[i + 1].v) { lo = stops[i]; hi = stops[i + 1]; break; }
+    }
+    const ratio = lo.v === hi.v ? 0 : (v - lo.v) / (hi.v - lo.v);
+    const h = Math.round(lo.h + (hi.h - lo.h) * ratio);
+    const s = Math.round(lo.s + (hi.s - lo.s) * ratio);
+    const l = Math.round(lo.l + (hi.l - lo.l) * ratio);
+    return `hsl(${h},${s}%,${l}%)`;
+}
+
+function renderPolarGridEditor(polarData) {
+    const gridDiv = document.getElementById('polarProfileGridView');
+    if (!gridDiv) return;
+
+    const matrix = normalizePolarData(polarData);
+    if (!matrix) {
+        gridDiv.innerHTML = `<div style="opacity:0.45;font-size:12px;padding:8px;">${t('Aucune donnée polaire.', 'Sin datos polares.', 'No polar data.')}</div>`;
+        return;
+    }
+
+    const twsKeys = Object.keys(matrix).map(Number).sort((a, b) => a - b);
+    const twaSet = new Set();
+    twsKeys.forEach(tws => Object.keys(matrix[tws] || {}).forEach(twa => twaSet.add(Number(twa))));
+    const twaKeys = [...twaSet].sort((a, b) => a - b);
+
+    if (twsKeys.length === 0 || twaKeys.length === 0) {
+        gridDiv.innerHTML = `<div style="opacity:0.45;font-size:12px;padding:8px;">${t('Matrice polaire vide.', 'Matriz polar vacía.', 'Empty polar matrix.')}</div>`;
+        return;
+    }
+
+    let html = `<div class="polar-grid-wrapper"><table class="polar-grid-table"><thead><tr>`;
+    html += `<th class="polar-grid-corner">&#x2193;TWS<br><span style="font-weight:400;opacity:0.6;font-size:9px">TWA&#x2192;</span></th>`;
+    twaKeys.forEach(twa => { html += `<th>${twa}°</th>`; });
+    html += `</tr></thead><tbody>`;
+
+    twsKeys.forEach(tws => {
+        html += `<tr><td class="polar-grid-tws-cell"><strong>${tws}</strong><span class="polar-grid-unit">kn</span></td>`;
+        twaKeys.forEach(twa => {
+            const val = matrix[tws]?.[twa];
+            const hasVal = typeof val === 'number' && val >= 0;
+            const displayVal = hasVal ? val.toFixed(1) : '';
+            const bg = hasVal ? polarSpeedColor(val) : 'rgba(255,255,255,0.04)';
+            const textColor = hasVal && val < 5 ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.92)';
+            html += `<td><input type="number" class="polar-cell-input" data-tws="${tws}" data-twa="${twa}" min="0" max="25" step="0.1" value="${displayVal}" style="background:${bg};color:${textColor}"></td>`;
+        });
+        html += `</tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+    html += `<div class="polar-add-row-bar">`;
+    html += `<span>${t('Ajouter ligne TWS (kn):', 'Añadir TWS (kn):', 'Add TWS row (kn):')}</span>`;
+    html += `<input type="number" id="polarNewTwsInput" class="polar-add-tws-input" min="1" max="60" step="1" placeholder="ex: 18">`;
+    html += `<button type="button" id="polarAddTwsRowBtn" class="polar-add-tws-btn">${t('Ajouter', 'Agregar', 'Add')}</button>`;
+    html += `</div>`;
+    gridDiv.innerHTML = html;
+
+    gridDiv.querySelectorAll('.polar-cell-input').forEach(input => {
+        input.addEventListener('input', () => {
+            updatePolarCellColor(input);
+            syncPolarGridToJson();
+        });
+    });
+
+    const addRowBtn = document.getElementById('polarAddTwsRowBtn');
+    if (addRowBtn) {
+        addRowBtn.addEventListener('click', () => {
+            const twsInput = document.getElementById('polarNewTwsInput');
+            const newTws = parseFloat(twsInput?.value || '');
+            if (!Number.isFinite(newTws) || newTws <= 0 || newTws > 60) {
+                setPolarProfileStatus(t('Entrer une valeur TWS entre 1 et 60 kn.', 'Introducir TWS entre 1 y 60 kn.', 'Enter a TWS value between 1 and 60 kn.'), true);
+                return;
+            }
+            const currentData = readPolarGridValues();
+            const twsStr = String(newTws);
+            if (currentData[twsStr] !== undefined) {
+                setPolarProfileStatus(t(`Ligne TWS ${newTws} kn déjà présente.`, `Línea TWS ${newTws} kn ya existe.`, `TWS ${newTws} kn row already exists.`), true);
+                return;
+            }
+            currentData[twsStr] = {};
+            twaKeys.forEach(twa => { currentData[twsStr][String(twa)] = 0; });
+            renderPolarGridEditor(currentData);
+            syncPolarGridToJson();
+            setPolarProfileStatus(t(`Ligne TWS ${newTws} kn ajoutée.`, `Línea TWS ${newTws} kn añadida.`, `TWS ${newTws} kn row added.`));
+        });
+    }
+}
+
+function updatePolarCellColor(input) {
+    const val = parseFloat(input.value);
+    if (Number.isFinite(val) && val >= 0) {
+        input.style.background = polarSpeedColor(val);
+        input.style.color = val < 5 ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.92)';
+    } else {
+        input.style.background = 'rgba(255,255,255,0.04)';
+        input.style.color = 'rgba(255,255,255,0.4)';
+    }
+}
+
+function readPolarGridValues() {
+    const result = {};
+    document.querySelectorAll('#polarProfileGridView .polar-cell-input').forEach(input => {
+        const tws = String(input.dataset?.tws || '').trim();
+        const twa = String(input.dataset?.twa || '').trim();
+        if (!tws || !twa) return;
+        const val = parseFloat(input.value);
+        if (!result[tws]) result[tws] = {};
+        if (Number.isFinite(val) && val >= 0) result[tws][twa] = val;
+    });
+    return result;
+}
+
+function syncPolarGridToJson() {
+    const jsonInput = document.getElementById('polarProfileJsonInput');
+    if (!jsonInput) return;
+    jsonInput.value = JSON.stringify(readPolarGridValues(), null, 2);
+}
+
+function syncPolarJsonToGrid() {
+    const jsonInput = document.getElementById('polarProfileJsonInput');
+    if (!jsonInput) return;
+    try {
+        renderPolarGridEditor(JSON.parse(jsonInput.value || '{}'));
+    } catch { /* invalid json - keep grid as-is */ }
+}
+
+function getPolarEditorCurrentData() {
+    if (polarEditorMode === 'grid') return readPolarGridValues();
+    const jsonInput = document.getElementById('polarProfileJsonInput');
+    try { return JSON.parse(String(jsonInput?.value || '{}')); } catch { return {}; }
+}
+
+// ---- POLAR PROFILES CLOUD SYNC ----
+
+async function pushPolarProfilesToCloudTable() {
+    if (!isCloudReady()) return;
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) return;
+
+    let resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    if (!resolvedProjectIdUuid) return;
+    resolvedProjectIdUuid = await ensureCloudProjectRow(resolvedProjectIdUuid);
+
+    const safeProfiles = sanitizePolarProfilesList(polarProfiles);
+    const nowIso = new Date().toISOString();
+
+    const { error: deleteError } = await cloudClient
+        .from(CLOUD_POLAR_PROFILES_TABLE)
+        .delete()
+        .eq('project_id', resolvedProjectIdUuid)
+        .eq('creator_email', creatorEmail);
+    if (deleteError) throw deleteError;
+
+    if (safeProfiles.length === 0) return;
+
+    const { error: insertError } = await cloudClient
+        .from(CLOUD_POLAR_PROFILES_TABLE)
+        .insert(safeProfiles.map(profile => ({
+            id: String(profile.id),
+            project_id: resolvedProjectIdUuid,
+            creator_email: creatorEmail,
+            name: profile.name,
+            notes: profile.notes || '',
+            polar_data: profile.polarData || {},
+            created_at: profile.createdAt || nowIso,
+            updated_at: profile.updatedAt || nowIso
+        })));
+    if (insertError) throw insertError;
+}
+
+async function pullPolarProfilesFromCloudTable() {
+    if (!isCloudReady()) return null;
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) return null;
+
+    const resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    let query = cloudClient
+        .from(CLOUD_POLAR_PROFILES_TABLE)
+        .select('*')
+        .eq('creator_email', creatorEmail)
+        .order('updated_at', { ascending: false });
+    if (isUuidString(resolvedProjectIdUuid)) query = query.eq('project_id', resolvedProjectIdUuid);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const mapped = (Array.isArray(data) ? data : []).map(row => ({
+        id: String(row.id || ''),
+        name: String(row.name || ''),
+        notes: String(row.notes || ''),
+        polarData: row.polar_data || {},
+        createdAt: row.created_at || new Date().toISOString(),
+        updatedAt: row.updated_at || row.created_at || new Date().toISOString()
+    }));
+    return mapped.length > 0 ? sanitizePolarProfilesList(mapped) : null;
+}
+
+function applySyncedPolarProfiles(cloudProfiles) {
+    if (!Array.isArray(cloudProfiles) || cloudProfiles.length === 0) return;
+    const cloudById = new Map(cloudProfiles.map(p => [p.id, p]));
+    const localById = new Map(polarProfiles.map(p => [p.id, p]));
+    const allIds = new Set([...cloudById.keys(), ...localById.keys()]);
+    const merged = [];
+    allIds.forEach(id => {
+        const cloudP = cloudById.get(id);
+        const localP = localById.get(id);
+        if (!cloudP) { merged.push(localP); return; }
+        if (!localP) { merged.push(cloudP); return; }
+        const localMs = Date.parse(String(localP.updatedAt || localP.createdAt || ''));
+        const cloudMs = Date.parse(String(cloudP.updatedAt || cloudP.createdAt || ''));
+        merged.push(!Number.isFinite(cloudMs) || (Number.isFinite(localMs) && localMs >= cloudMs) ? localP : cloudP);
+    });
+    polarProfiles = sanitizePolarProfilesList(merged);
+    savePolarProfiles();
+    populatePolarProfileSelects();
+    updateRoutingPolarProfileUi();
 }
 
 function toLocalDateTimeInputValue(dateObj) {
@@ -1862,7 +2388,7 @@ function estimateEffectiveSpeedForLegSplit(startPoint, endPoint, weather) {
 
     try {
         const resolvedTackTimeHours = getAutoTackingTimeHours(startPoint, endPoint, windDirection, windSpeed, tackingTimeHours);
-        const rawSegment = routeSegment(startPoint, endPoint, windDirection, windSpeed, resolvedTackTimeHours);
+        const rawSegment = routeSegment(startPoint, endPoint, windDirection, windSpeed, resolvedTackTimeHours, getActivePolarData());
         if (!rawSegment || !Number.isFinite(rawSegment.speed)) return 6;
 
         const twa = computeTWA(rawSegment.bearing, windDirection);
@@ -1961,7 +2487,7 @@ function getAutoTackingTimeHours(startPoint, endPoint, windDirection, windSpeed,
     let bestScore = Number.POSITIVE_INFINITY;
 
     AUTO_TACK_TIME_CANDIDATES_HOURS.forEach(candidate => {
-        const test = routeSegment(startPoint, endPoint, windDirection, windSpeed, candidate);
+        const test = routeSegment(startPoint, endPoint, windDirection, windSpeed, candidate, getActivePolarData());
         if (!test || test.type !== 'tacking') return;
 
         const points = Array.isArray(test.points) ? test.points : [];
@@ -4398,7 +4924,7 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
                     timeHours: distanceNm(legStart.lat, legStart.lon, legEnd.lat, legEnd.lon) / MOTOR_SPEED_KN,
                     type: 'motor'
                 }
-                : routeSegment(legStart, legEnd, windDirection, windSpeed, resolvedTackTimeHours);
+                : routeSegment(legStart, legEnd, windDirection, windSpeed, resolvedTackTimeHours, getActivePolarData());
 
             const twa = isMotorSegment ? null : computeTWA(rawSegment.bearing, windDirection);
             const sailSetup = getSailRecommendation({
@@ -4580,6 +5106,8 @@ function updateRoutingControlsUiFromState() {
 
     const tackingInput = document.getElementById('tackingTimeInput');
     if (tackingInput) tackingInput.value = String(tackingTimeHours);
+
+    updateRoutingPolarProfileUi();
 }
 
 function hasLoadedRouteSelection() {
@@ -14361,6 +14889,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     console.info(`[CEIBO] Front build ${APP_BUILD_VERSION}`);
 
+    loadPolarProfiles();
+
     const savedMapView = loadSavedMapView();
     const initialLat = savedMapView?.lat ?? 41.3851;
     const initialLng = savedMapView?.lng ?? 2.1734;
@@ -14368,6 +14898,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     map = L.map('map').setView([initialLat, initialLng], initialZoom);
     initializeLanguageSwitcher();
     initializeSidebarToggle();
+    populatePolarProfileSelects();
+    loadPolarProfileEditor();
+    updateRoutingPolarProfileUi();
+    setPolarProfileStatus(t('Polaire active chargée.', 'Polar activa cargada.', 'Active polar loaded.'));
 
     standardTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
@@ -14737,6 +15271,15 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById("sailModeSelect").addEventListener("change", function(e) {
         sailMode = e.target.value;
     });
+
+    const routingPolarProfileSelect = document.getElementById('routingPolarProfileSelect');
+    if (routingPolarProfileSelect) {
+        routingPolarProfileSelect.value = activePolarProfileId;
+        routingPolarProfileSelect.addEventListener('change', event => {
+            setActivePolarProfile(String(event.target?.value || ''), { persist: true, syncEditor: true });
+            setPolarProfileStatus(t('Polaire active mise à jour pour le routage.', 'Polar activa actualizada para el routing.', 'Active polar updated for routing.'));
+        });
+    }
 
     const autoWpSpacingInput = document.getElementById('autoWpSpacingInput');
     if (autoWpSpacingInput) {
@@ -15644,6 +16187,79 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
+    const polarProfileManagerSelect = document.getElementById('polarProfileManagerSelect');
+    if (polarProfileManagerSelect) {
+        polarProfileManagerSelect.addEventListener('change', event => {
+            loadPolarProfileEditor(String(event.target?.value || ''));
+            setPolarProfileStatus(t('Profil chargé dans l’éditeur.', 'Perfil cargado en el editor.', 'Profile loaded in editor.'));
+        });
+    }
+
+    const polarProfileNewBtn = document.getElementById('polarProfileNewBtn');
+    if (polarProfileNewBtn) {
+        polarProfileNewBtn.addEventListener('click', () => {
+            createPolarProfileDraftFrom(buildDefaultPolarProfiles()[0]);
+            setPolarProfileStatus(t('Nouveau profil prêt à être enregistré.', 'Nuevo perfil listo para guardar.', 'New profile ready to save.'));
+        });
+    }
+
+    const polarProfileDuplicateBtn = document.getElementById('polarProfileDuplicateBtn');
+    if (polarProfileDuplicateBtn) {
+        polarProfileDuplicateBtn.addEventListener('click', () => {
+            createPolarProfileDraftFrom(getActivePolarProfile());
+            setPolarProfileStatus(t('Copie du profil actif prête.', 'Copia del perfil activo lista.', 'Active profile copy ready.'));
+        });
+    }
+
+    const polarProfileApplyBtn = document.getElementById('polarProfileApplyBtn');
+    if (polarProfileApplyBtn) {
+        polarProfileApplyBtn.addEventListener('click', () => {
+            if (!selectedPolarProfileEditorId) {
+                setPolarProfileStatus(t('Enregistre d’abord ce profil avant de l’activer.', 'Guarda primero este perfil antes de activarlo.', 'Save this profile before activating it.'), true);
+                return;
+            }
+            setActivePolarProfile(selectedPolarProfileEditorId, { persist: true, syncEditor: false });
+            setPolarProfileStatus(t('Profil activé pour le routage.', 'Perfil activado para el routing.', 'Profile activated for routing.'));
+        });
+    }
+
+    const polarProfileSaveBtn = document.getElementById('polarProfileSaveBtn');
+    if (polarProfileSaveBtn) {
+        polarProfileSaveBtn.addEventListener('click', savePolarProfileFromEditor);
+    }
+
+    const polarProfileDeleteBtn = document.getElementById('polarProfileDeleteBtn');
+    if (polarProfileDeleteBtn) {
+        polarProfileDeleteBtn.addEventListener('click', deletePolarProfileFromEditor);
+    }
+
+    const polarEditorGridBtn = document.getElementById('polarEditorGridBtn');
+    const polarEditorJsonBtn = document.getElementById('polarEditorJsonBtn');
+    if (polarEditorGridBtn) {
+        polarEditorGridBtn.addEventListener('click', () => {
+            polarEditorMode = 'grid';
+            syncPolarJsonToGrid();
+            const gridView = document.getElementById('polarProfileGridView');
+            const jsonView = document.getElementById('polarProfileJsonView');
+            if (gridView) gridView.style.display = '';
+            if (jsonView) jsonView.style.display = 'none';
+            polarEditorGridBtn.classList.add('active');
+            if (polarEditorJsonBtn) polarEditorJsonBtn.classList.remove('active');
+        });
+    }
+    if (polarEditorJsonBtn) {
+        polarEditorJsonBtn.addEventListener('click', () => {
+            polarEditorMode = 'json';
+            syncPolarGridToJson();
+            const gridView = document.getElementById('polarProfileGridView');
+            const jsonView = document.getElementById('polarProfileJsonView');
+            if (gridView) gridView.style.display = 'none';
+            if (jsonView) jsonView.style.display = '';
+            polarEditorJsonBtn.classList.add('active');
+            if (polarEditorGridBtn) polarEditorGridBtn.classList.remove('active');
+        });
+    }
+
     const routeNameInput = document.getElementById('routeNameInput');
     if (routeNameInput) {
         routeNameInput.addEventListener('input', updateRoutingActiveRouteDisplay);
@@ -16059,7 +16675,8 @@ async function computeRoute() {
                     endPoint,
                     wind.direction,
                     wind.speed,
-                    resolvedTackTimeHours
+                    resolvedTackTimeHours,
+                    getActivePolarData()
                 );
 
             const twa = isMotorSegment ? null : computeTWA(rawSegment.bearing, wind.direction);
@@ -17339,6 +17956,8 @@ function sanitizeSavedRoute(route, fallbackIndex = 0) {
         tackingTimeHours: tacking,
         points,
         totalDistanceNm,
+        polarProfileId: String(route?.polarProfileId || '').trim(),
+        polarProfileName: String(route?.polarProfileName || '').trim(),
         creatorEmail: normalizeEmailForCompare(route?.creatorEmail || ''),
         creatorName: String(route?.creatorName || '').trim(),
         createdAt: String(route?.createdAt || nowIso),
@@ -18593,6 +19212,7 @@ async function pullRoutesFromCloud(options = {}) {
 
     const localRoutesBeforePull = [...getSavedRoutes()];
     const cloudRoutesV2 = await pullRoutesFromCloudV2();
+    const cloudPolarProfilesFromCloud = await pullPolarProfilesFromCloudTable().catch(() => null);
     const effectiveRoutes = Array.isArray(cloudRoutesV2) ? cloudRoutesV2 : [];
 
     const mergeRoutesPreservingDirtyLocal = (localList, cloudList) => {
@@ -18669,6 +19289,7 @@ async function pullRoutesFromCloud(options = {}) {
             saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
         }
 
+        applySyncedPolarProfiles(cloudPolarProfilesFromCloud);
         return merged;
     }
 
@@ -18700,6 +19321,7 @@ async function pullRoutesFromCloud(options = {}) {
         saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
     }
 
+    applySyncedPolarProfiles(cloudPolarProfilesFromCloud);
     updateCloudDataSourceStatus('cloud (routes v2)', effectiveRoutes.length, waypointPhotoEntries.length);
 
     return effectiveRoutes;
@@ -18725,6 +19347,7 @@ async function pushRoutesToCloud(options = {}) {
         await pushEngineSoundSnapshotsToCloudTable();
     }
     await pushRoutesToCloudV2(routesSnapshot);
+    await pushPolarProfilesToCloudTable().catch(() => {});
     if (includeWaypointPhotos) {
         await pushWaypointPhotosToCloudV2(waypointPhotoEntries);
     }
@@ -19079,6 +19702,7 @@ async function saveRoute() {
         }
     }
 
+    const activePolarProfile = getActivePolarProfile();
     const payload = {
         id: shouldUpdateExisting && isUuidString(saved[targetIndex]?.id)
             ? String(saved[targetIndex].id)
@@ -19087,6 +19711,8 @@ async function saveRoute() {
         date: departureDate,
         time: departureTime,
         tackingTimeHours,
+        polarProfileId: String(activePolarProfile?.id || ''),
+        polarProfileName: String(activePolarProfile?.name || ''),
         points: routePoints.map(p => ({ lat: p.lat, lon: p.lng ?? p.lon })),
         createdAt: shouldUpdateExisting
             ? String(saved[targetIndex]?.createdAt || '')
@@ -19125,7 +19751,8 @@ async function saveRoute() {
         && String(previousRoute.date || '') === String(payload.date || '')
         && String(previousRoute.time || '') === String(payload.time || '')
         && Number(previousRoute.tackingTimeHours) === Number(payload.tackingTimeHours)
-        && Number(previousRoute.totalDistanceNm ?? NaN) === Number(payload.totalDistanceNm ?? NaN);
+        && Number(previousRoute.totalDistanceNm ?? NaN) === Number(payload.totalDistanceNm ?? NaN)
+        && String(previousRoute.polarProfileId || '') === String(payload.polarProfileId || '');
     const isSimpleRenameOnly = shouldUpdateExisting
         && pointsEqual
         && !!metaEqual
@@ -19345,6 +19972,9 @@ function loadRoute(index) {
 
     const nameInput = document.getElementById('routeNameInput');
     if (nameInput) nameInput.value = r.name || '';
+    if (r?.polarProfileId) {
+        setActivePolarProfile(String(r.polarProfileId), { persist: true, syncEditor: true });
+    }
     updateRoutingActiveRouteDisplay();
 
     // restore UI values (keep current selected date)

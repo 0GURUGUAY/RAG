@@ -3,7 +3,7 @@
 // ===============================
 
 // ---- POLAR DATA ----
-const POLAR = {
+export const DEFAULT_POLAR_DATA = {
   2: { 52:1.2, 60:1.5, 75:1.7, 90:1.8, 110:1.6, 120:1.5, 135:1.3, 150:1.1, 165:0.9 },
   4: { 52:2.8, 60:3.5, 75:4.0, 90:4.2, 110:3.9, 120:3.7, 135:3.2, 150:2.8, 165:2.3 },
   6: { 52:6.1, 60:6.8, 75:7.4, 90:7.6, 110:7.3, 120:7.1, 135:6.4, 150:5.8, 165:5.2 },
@@ -17,6 +17,43 @@ const POLAR = {
   28:{ 40:8.6, 52:10.6, 60:11.9, 75:13.1, 90:13.8, 110:12.7, 120:12.2, 135:11.1, 150:10.0, 165:8.8 },
   30:{ 40:8.7, 52:10.7, 60:12.0, 75:13.2, 90:13.9, 110:12.8, 120:12.3, 135:11.2, 150:10.1, 165:8.9 }
 };
+
+export function clonePolarData(polarData = DEFAULT_POLAR_DATA) {
+  return JSON.parse(JSON.stringify(polarData));
+}
+
+export function normalizePolarData(rawPolarData) {
+  if (!rawPolarData || typeof rawPolarData !== 'object' || Array.isArray(rawPolarData)) {
+    return null;
+  }
+
+  const normalized = {};
+
+  Object.entries(rawPolarData).forEach(([twsKey, twaMap]) => {
+    const tws = Number(twsKey);
+    if (!Number.isFinite(tws) || tws <= 0) return;
+    if (!twaMap || typeof twaMap !== 'object' || Array.isArray(twaMap)) return;
+
+    const normalizedAngles = {};
+    Object.entries(twaMap).forEach(([twaKey, speedValue]) => {
+      const twa = Number(twaKey);
+      const speed = Number(speedValue);
+      if (!Number.isFinite(twa) || twa <= 0 || twa >= 181) return;
+      if (!Number.isFinite(speed) || speed < 0) return;
+      normalizedAngles[twa] = speed;
+    });
+
+    if (Object.keys(normalizedAngles).length > 0) {
+      normalized[tws] = normalizedAngles;
+    }
+  });
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function resolvePolarData(polarData) {
+  return normalizePolarData(polarData) || DEFAULT_POLAR_DATA;
+}
 
 // ---- UTILITIES ----
 function lerp(x, x0, x1, y0, y1) {
@@ -37,23 +74,25 @@ function getBoundingValues(value, keys) {
 }
 
 // ---- POLAR LOOKUP WITH BILINEAR INTERPOLATION ----
-export function polarLookup(tws, twa) {
+export function polarLookup(tws, twa, polarData = DEFAULT_POLAR_DATA) {
+
+  const resolvedPolar = resolvePolarData(polarData);
 
   if (twa > 180) twa = 360 - twa;
 
-  const twsKeys = Object.keys(POLAR);
+  const twsKeys = Object.keys(resolvedPolar);
   const [twsLow, twsHigh] = getBoundingValues(tws, twsKeys);
 
-  const angleKeysLow = Object.keys(POLAR[twsLow]);
-  const angleKeysHigh = Object.keys(POLAR[twsHigh]);
+  const angleKeysLow = Object.keys(resolvedPolar[twsLow]);
+  const angleKeysHigh = Object.keys(resolvedPolar[twsHigh]);
 
   const [twaLowL, twaHighL] = getBoundingValues(twa, angleKeysLow);
   const [twaLowH, twaHighH] = getBoundingValues(twa, angleKeysHigh);
 
-  const vLL = POLAR[twsLow][twaLowL] ?? 0;
-  const vLH = POLAR[twsLow][twaHighL] ?? vLL;
-  const vHL = POLAR[twsHigh][twaLowH] ?? 0;
-  const vHH = POLAR[twsHigh][twaHighH] ?? vHL;
+  const vLL = resolvedPolar[twsLow][twaLowL] ?? 0;
+  const vLH = resolvedPolar[twsLow][twaHighL] ?? vLL;
+  const vHL = resolvedPolar[twsHigh][twaLowH] ?? 0;
+  const vHH = resolvedPolar[twsHigh][twaHighH] ?? vHL;
 
   const vLow = lerp(twa, twaLowL, twaHighL, vLL, vLH);
   const vHigh = lerp(twa, twaLowH, twaHighH, vHL, vHH);
@@ -69,13 +108,13 @@ export function computeTWA(course, windDir) {
 }
 
 // ---- BEST UPWIND ANGLE (VMG MAX) ----
-export function findBestUpwindAngle(tws) {
+export function findBestUpwindAngle(tws, polarData = DEFAULT_POLAR_DATA) {
 
   let bestAngle = 45;
   let bestVMG = 0;
 
   for (let angle = 35; angle <= 60; angle += 1) {
-    const speed = polarLookup(tws, angle);
+    const speed = polarLookup(tws, angle, polarData);
     const vmg = speed * Math.cos(angle * Math.PI/180);
 
     if (vmg > bestVMG) {
@@ -135,7 +174,7 @@ export function movePoint(lat, lon, bearing, distanceNm) {
 }
 
 // ---- MAIN ROUTING FUNCTION ----
-export function routeSegment(start, end, windDir, windSpeed, legTimeHours = 0.5) {
+export function routeSegment(start, end, windDir, windSpeed, legTimeHours = 0.5, polarData = DEFAULT_POLAR_DATA) {
 
   const resultPoints = [];
   const totalDistance = distanceNm(start.lat, start.lon, end.lat, end.lon);
@@ -145,7 +184,7 @@ export function routeSegment(start, end, windDir, windSpeed, legTimeHours = 0.5)
 
   if (twa >= 40) {
 
-    const boatSpeed = polarLookup(windSpeed, twa);
+    const boatSpeed = polarLookup(windSpeed, twa, polarData);
     const time = totalDistance / boatSpeed;
 
     return {
@@ -159,8 +198,8 @@ export function routeSegment(start, end, windDir, windSpeed, legTimeHours = 0.5)
 
   } else {
 
-    const optimalAngle = findBestUpwindAngle(windSpeed);
-    const boatSpeed = polarLookup(windSpeed, optimalAngle);
+    const optimalAngle = findBestUpwindAngle(windSpeed, polarData);
+    const boatSpeed = polarLookup(windSpeed, optimalAngle, polarData);
 
     const legDistance = boatSpeed * legTimeHours;
 

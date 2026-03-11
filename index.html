@@ -70,6 +70,12 @@
                 </div>
 
                 <div class="routing-control-item">
+                    <label for="routingPolarProfileSelect" id="routingPolarProfileSelectLabel">Polaire / gréement:</label>
+                    <select id="routingPolarProfileSelect"></select>
+                    <div id="routingPolarProfileHint" class="cloud-status">Polaire standard active.</div>
+                </div>
+
+                <div class="routing-control-item">
                     <label for="autoWpSpacingInput">Contournement côte:</label>
                     <select id="autoWpSpacingInput">
                         <option value="off" selected>Désactivé</option>
@@ -156,6 +162,35 @@
                 <button id="measureClearBtn" style="flex:1;">Effacer mesure</button>
             </div>
             <div id="measureInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Mesure: 0.00 nm</div>
+
+            <div class="polar-manager-card">
+                <div id="polarProfilesTitle" class="cloud-config-title">Polaires / voilures</div>
+                <label for="polarProfileManagerSelect" id="polarProfileManagerSelectLabel" style="display:block; margin-top:10px; font-size:12px;">Profil édité:</label>
+                <select id="polarProfileManagerSelect" class="cloud-input"></select>
+                <label for="polarProfileNameInput" id="polarProfileNameLabel" style="display:block; margin-top:10px; font-size:12px;">Nom du profil:</label>
+                <input type="text" id="polarProfileNameInput" class="cloud-input" placeholder="Ex: GV + génois réduit">
+                <label for="polarProfileNotesInput" id="polarProfileNotesLabel" style="display:block; margin-top:10px; font-size:12px;">Notes de gréement:</label>
+                <textarea id="polarProfileNotesInput" class="polar-json-input" rows="3" placeholder="Ex: 1 ris + génois roulé 30%"></textarea>
+                <div class="polar-editor-toggle-row">
+                    <button id="polarEditorGridBtn" type="button" class="polar-editor-tab active">&#x1F4CA; Tableau</button>
+                    <button id="polarEditorJsonBtn" type="button" class="polar-editor-tab">{ } JSON</button>
+                </div>
+                <div id="polarProfileGridView"></div>
+                <div id="polarProfileJsonView" style="display:none;">
+                    <label for="polarProfileJsonInput" id="polarProfileJsonLabel" style="display:block; margin-top:8px; font-size:12px;">Matrice polaire JSON:</label>
+                    <textarea id="polarProfileJsonInput" class="polar-json-input" rows="10" spellcheck="false"></textarea>
+                </div>
+                <div class="button-row">
+                    <button id="polarProfileNewBtn" type="button" style="flex:1;">Nouveau</button>
+                    <button id="polarProfileDuplicateBtn" type="button" style="flex:1;">Dupliquer actif</button>
+                    <button id="polarProfileApplyBtn" type="button" style="flex:1;">Activer dans Routing</button>
+                </div>
+                <div class="button-row">
+                    <button id="polarProfileSaveBtn" type="button" style="flex:1;">Enregistrer polaire</button>
+                    <button id="polarProfileDeleteBtn" type="button" style="flex:1;">Supprimer profil</button>
+                </div>
+                <div id="polarProfileStatus" class="cloud-status">Polaire standard chargée.</div>
+            </div>
         </div>
     </div>
 
