@@ -1115,6 +1115,33 @@ body.auth-locked #map {
     margin-top: 10px;
 }
 
+.routing-active-route-banner {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 10px 12px;
+    border: 1px solid rgba(143, 231, 255, 0.3);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(17, 43, 66, 0.92), rgba(10, 26, 42, 0.92));
+}
+
+#routingActiveRouteLabel {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(143, 231, 255, 0.82);
+}
+
+#routingActiveRouteValue {
+    font-size: 15px;
+    color: #f5fbff;
+}
+
+#routingActiveRouteValue.is-empty {
+    color: rgba(245, 251, 255, 0.62);
+}
+
 .routing-control-item label {
     display: block;
     margin-bottom: 4px;
@@ -1814,6 +1841,10 @@ button:focus-visible {
     margin-top: 8px;
 }
 
+.routing-subtabs {
+    margin-top: 10px;
+}
+
 .page-subtab-btn {
     margin-top: 0;
     width: auto;
@@ -1860,6 +1891,18 @@ button:focus-visible {
 
 .page-subpanel.active {
     display: block;
+}
+
+.routing-meteo-panel.active {
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(17, 43, 66, 0.72), rgba(10, 26, 42, 0.72));
+    border: 1px solid rgba(143, 231, 255, 0.18);
+}
+
+.routing-meteo-panel button {
+    width: 100%;
 }
 
 .routes-list-header {
@@ -2575,6 +2618,64 @@ button:focus-visible {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+.engine-audio-card {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.engine-audio-list {
+    margin-top: 8px;
+    display: grid;
+    gap: 8px;
+}
+
+.engine-audio-regime-row {
+    margin-top: 8px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #eaf7ff;
+}
+
+.engine-audio-regime-btn--active {
+    outline: 2px solid rgba(143, 231, 255, 0.8);
+    background: rgba(143, 231, 255, 0.2);
+}
+
+.engine-audio-item {
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.engine-audio-item__head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.engine-audio-level {
+    text-transform: uppercase;
+    font-size: 11px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.engine-audio-level--normal { color: #b8f7d2; border-color: rgba(51, 194, 111, 0.45); }
+.engine-audio-level--watch { color: #ffe8b8; border-color: rgba(255, 195, 74, 0.55); }
+.engine-audio-level--alert { color: #ffd0b8; border-color: rgba(255, 140, 92, 0.6); }
+.engine-audio-level--critical { color: #ffb8b8; border-color: rgba(255, 92, 92, 0.7); }
 
 #navLogTab input,
 #navLogTab textarea,

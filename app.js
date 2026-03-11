@@ -2,7 +2,7 @@ import { routeSegment, distanceNm, getBearing, computeTWA, movePoint } from './p
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-01';
+const APP_BUILD_VERSION = '20260311-06';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -99,6 +99,7 @@ const CLOUD_CONFIG_STORAGE_KEY = 'ceiboCloudConfigV1';
 const NAV_LOG_STORAGE_KEY = 'ceiboNavLogV1';
 const NAV_GPS_TRACE_STORAGE_KEY = 'ceiboNavGpsTraceV1';
 const ENGINE_LOG_STORAGE_KEY = 'ceiboEngineLogV1';
+const ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY = 'ceiboEngineSoundSnapshotsV1';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
 const CLOUD_ROUTES_TABLE = 'routes';
@@ -112,6 +113,7 @@ const CLOUD_MAINTENANCE_SUPPLIERS_TABLE = 'maintenance_suppliers';
 const CLOUD_MAINTENANCE_EXPENSES_TABLE = 'maintenance_expenses';
 const CLOUD_NAV_LOG_TABLE = 'nav_log_entries';
 const CLOUD_ENGINE_LOG_TABLE = 'engine_log';
+const CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE = 'engine_sound_snapshots';
 const CLOUD_ALLOWED_USERS_TABLE = 'allowed_users';
 const CLOUD_PROJECTS_TABLE = 'projects';
 const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
@@ -165,6 +167,8 @@ let navHasCenteredOnFirstFix = false;
 let navLogLastSubmitMs = 0;
 let editingNavLogEntryId = null;
 let engineLogEntries = [];
+let engineSoundSnapshots = [];
+let engineAudioRegimeMode = 'auto';
 let editingEngineLogEntryId = null;
 let engineSensorDetectionActive = false;
 let engineSensorMotionListenerBound = false;
@@ -213,6 +217,7 @@ let maintenanceLastScannedText = '';
 let selectedMaintenanceExpenseId = null;
 let selectedMaintenanceSupplierId = null;
 let activeMaintenanceExpensesView = 'list';
+let activeRoutingSubtab = 'main';
 let activeRoutesSubtab = 'manage';
 let routesSortOrder = 'asc';
 let routesSearchTerm = '';
@@ -360,6 +365,22 @@ function setElementPlaceholder(selector, value) {
     node.placeholder = value;
 }
 
+function updateRoutingActiveRouteDisplay() {
+    const valueNode = document.getElementById('routingActiveRouteValue');
+    if (!valueNode) return;
+
+    const nameInput = document.getElementById('routeNameInput');
+    const inputName = String(nameInput?.value || '').trim();
+    const saved = getSavedRoutes();
+    const loadedName = hasLoadedRouteSelection()
+        ? String(saved[currentLoadedRouteIndex]?.name || '').trim()
+        : '';
+    const routeName = inputName || loadedName;
+
+    valueNode.textContent = routeName || t('Aucune route sélectionnée', 'Ninguna ruta seleccionada', 'No route selected');
+    valueNode.classList.toggle('is-empty', !routeName);
+}
+
 function updateLanguageButtonsUi() {
     const frBtn = document.getElementById('langFrBtn');
     const esBtn = document.getElementById('langEsBtn');
@@ -399,10 +420,13 @@ function applyLanguageToUi() {
     setElementText('#measureClearBtn', t('Effacer mesure', 'Borrar medición'));
     setElementText('label[for="importRouteInput"]', t('Importer (JSON / GPX):', 'Importar (JSON / GPX):'));
 
+    setElementText('#routingMainSubtabBtn', t('ROUTING', 'ROUTING', 'ROUTING'));
+    setElementText('#routingMeteoSubtabBtn', t('METEO', 'METEO', 'WEATHER'));
     setElementText('#computeBtn', t('Calculer', 'Calcular'));
     setElementText('#saveRouteFromRoutingBtn', t('Sauver', 'Guardar', 'Save'));
     setElementText('#deleteSelectedWpBtn', t('Supprimer WP', 'Eliminar WP'));
     setElementText('#recenterBtn', t('Recentrer route', 'Centrar ruta'));
+    setElementText('#routingActiveRouteLabel', t('Route active:', 'Ruta activa:', 'Active route:'));
     setElementText('#suggestDepartureBtn', t('Conseiller départ météo (≤ 20 kn)', 'Sugerir salida meteo (≤ 20 kn)'));
     setElementText('#openWeatherFromRoutingBtn', t('Ouvrir météo routage', 'Abrir meteo de navegación'));
     setElementText('#routingWeatherHint', t('Météo est accessible depuis Routage.', 'Meteo accesible desde Navegación.'));
@@ -430,6 +454,7 @@ function applyLanguageToUi() {
     setElementText('#forecastWindowDaysSelect option[value="3"]', t('3 jours', '3 días'));
     setElementText('#forecastWindowDaysSelect option[value="5"]', t('5 jours', '5 días'));
     setElementText('#forecastWindowDaysSelect option[value="7"]', t('7 jours', '7 días'));
+    updateRoutingActiveRouteDisplay();
     setElementPlaceholder('#watchCrewInput', t('Ex: Max + Ana', 'Ej: Max + Ana'));
     setElementPlaceholder('#watchHeadingInput', t('Ex: 235', 'Ej: 235'));
     setElementPlaceholder('#watchWindDirInput', t('Ex: 260', 'Ej: 260'));
@@ -554,6 +579,7 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsExpensesLabel', t('Dépenses/factures (maintenance_expenses)', 'Gastos/facturas (maintenance_expenses)'));
     setElementText('#cloudStatsNavLabel', t('Journal navigation (nav_log_entries)', 'Diario navegación (nav_log_entries)'));
     setElementText('#cloudStatsEngineLabel', t('Journal moteur (engine_log)', 'Diario motor (engine_log)'));
+    setElementText('#cloudStatsEngineSoundLabel', t('Snapshots son moteur (engine_sound_snapshots)', 'Snapshots sonido motor (engine_sound_snapshots)', 'Engine sound snapshots (engine_sound_snapshots)'));
     setElementText('#cloudStatsTotalLabel', t('Total enregistrements', 'Total registros'));
     setElementText('#cloudStatsStorageLabel', t('Taille utilisée', 'Tamaño usado'));
     setElementText('#cloudStatsQuotaLabel', t('Quota utilisé (500 Mo)', 'Cuota usada (500 MB)'));
@@ -561,6 +587,8 @@ function applyLanguageToUi() {
     setElementText('#startNavLogBtn', t('Démarrer log GPS', 'Iniciar log GPS'));
     setElementText('#locateNowBtn', t('Ma position', 'Mi posicion'));
     setElementText('#stopNavLogBtn', t('Arrêter log GPS', 'Detener log GPS'));
+    setElementText('#aiTrafficTitle', t('Trafic modèle en cours', 'Tráfico del modelo en curso', 'Model traffic in progress'));
+    setElementText('#aiTrafficCloseBtn', t('Fermer', 'Cerrar', 'Close'));
     const locatePreciseBtn = document.getElementById('locatePreciseBtn');
     if (locatePreciseBtn) {
         const locatePreciseLabel = t('Forcer GPS précis', 'Forzar GPS preciso');
@@ -622,6 +650,17 @@ function applyLanguageToUi() {
     setElementText('#engineSensorStartBtn', t('Activer détection', 'Activar detección', 'Start detection'));
     setElementText('#engineSensorStopBtn', t('Stop détection', 'Detener detección', 'Stop detection'));
     setElementText('#engineSensorHint', t('Astuce: lance en mer avec iPad fixe pour une détection plus stable.', 'Consejo: inicia en mar con iPad fijo para una detección más estable.', 'Tip: start offshore with a fixed iPad for a more stable detection.'));
+    setElementText('#engineAudioTitle', t('Audio moteur (MVP)', 'Audio motor (MVP)', 'Engine audio (MVP)'));
+    setElementText('#engineAudioStatus', t('Audio moteur: en attente', 'Audio motor: en espera', 'Engine audio: waiting'));
+    setElementText('#engineAudioRegimeLabel', t('Régime moteur:', 'Régimen motor:', 'Engine regime:'));
+    setElementText('#engineAudioRegimeAutoBtn', t('Auto', 'Auto', 'Auto'));
+    setElementText('#engineAudioRegimeIdleBtn', t('Idle', 'Ralentí', 'Idle'));
+    setElementText('#engineAudioRegimeCruiseBtn', t('Cruise', 'Crucero', 'Cruise'));
+    setElementText('#engineAudioRegimeHighBtn', t('High', 'Alto', 'High'));
+    setElementText('#engineAudioCaptureSnapshotBtn', t('Capturer snapshot moteur', 'Capturar snapshot motor', 'Capture engine snapshot'));
+    setElementText('label[for="engineAudioWavInput"]', t('Importer WAV (micro DJI):', 'Importar WAV (micro DJI):', 'Import WAV (DJI mic):'));
+    setElementText('#engineAudioHint', t('Conseil: micro fixe dans le compartiment moteur pour une meilleure comparaison.', 'Consejo: micro fijo en el compartimento motor para una mejor comparación.', 'Tip: fixed mic in the engine compartment for better comparisons.'));
+    setElementText('#engineAudioListLabel', t('Derniers snapshots audio:', 'Últimos snapshots de audio:', 'Latest audio snapshots:'));
 
     setElementText('#placeWeatherPointerBtn', t('Placer pointeur météo', 'Colocar puntero meteo'));
     setElementText('#useMapCenterWeatherBtn', t('Centre carte → pointeur', 'Centro mapa → puntero'));
@@ -956,6 +995,8 @@ function clearProtectedUiData() {
     renderNavLogList();
     engineLogEntries = [];
     renderEngineLogList();
+    engineSoundSnapshots = [];
+    saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
     clearCurrentRoute();
     updateCloudDataSourceStatus('verrouillé (auth requise)', 0, waypointPhotoEntries.length);
 }
@@ -1007,6 +1048,7 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
             renderMaintenanceSuppliers();
             loadNavigationLogbook();
             loadEngineLogbook();
+            loadEngineSoundSnapshots();
             setSavedRoutes(loadRoutesFromLocalStorage());
             refreshSavedList();
             updateCloudDataSourceStatus('cache local (auth ok)', getSavedRoutes().length, waypointPhotoEntries.length);
@@ -1024,6 +1066,7 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
             renderMaintenanceSuppliers();
             loadNavigationLogbook();
             loadEngineLogbook();
+            loadEngineSoundSnapshots();
             setSavedRoutes(loadRoutesFromLocalStorage());
             refreshSavedList();
             updateCloudDataSourceStatus('cache local', getSavedRoutes().length, waypointPhotoEntries.length);
@@ -9677,6 +9720,29 @@ function setActiveRoutesSubtab(tabKey) {
     });
 }
 
+function setActiveRoutingSubtab(tabKey) {
+    activeRoutingSubtab = tabKey === 'meteo' ? 'meteo' : 'main';
+
+    const tabBtnMap = {
+        main: document.getElementById('routingMainSubtabBtn'),
+        meteo: document.getElementById('routingMeteoSubtabBtn')
+    };
+    const panelMap = {
+        main: document.getElementById('routingMainPanel'),
+        meteo: document.getElementById('routingMeteoPanel')
+    };
+
+    Object.entries(tabBtnMap).forEach(([key, node]) => {
+        if (!node) return;
+        node.classList.toggle('active', key === activeRoutingSubtab);
+    });
+
+    Object.entries(panelMap).forEach(([key, node]) => {
+        if (!node) return;
+        node.classList.toggle('active', key === activeRoutingSubtab);
+    });
+}
+
 function renderMaintenanceBoard() {
     const image = document.getElementById('maintenanceSchemaImage');
     const pinsLayer = document.getElementById('maintenancePinsLayer');
@@ -10623,6 +10689,7 @@ function updateCloudAuthUi() {
 
     renderCloudUsersList();
     renderCloudStatsTable();
+    updateEngineAudioRegimeUi();
 }
 
 async function loadCloudUserProfile() {
@@ -11145,6 +11212,7 @@ function scheduleCloudLogbookPush({ includeNav = true, includeEngine = true } = 
             }
             if (shouldPushEngine) {
                 await pushEngineLogEntriesToCloudTable();
+                await pushEngineSoundSnapshotsToCloudTable();
             }
             if (shouldPushNav) cloudLogbookPushPendingNav = false;
             if (shouldPushEngine) cloudLogbookPushPendingEngine = false;
@@ -11307,6 +11375,419 @@ function sanitizeEngineLogEntriesList(list) {
         });
 }
 
+function normalizeEngineSoundAnomalyLevel(value) {
+    const level = String(value || '').trim().toLowerCase();
+    if (level === 'watch') return 'watch';
+    if (level === 'alert') return 'alert';
+    if (level === 'critical') return 'critical';
+    return 'normal';
+}
+
+function normalizeEngineAudioRegime(value) {
+    const regime = String(value || '').trim().toLowerCase();
+    if (regime === 'idle') return 'idle';
+    if (regime === 'cruise') return 'cruise';
+    if (regime === 'high') return 'high';
+    return 'default';
+}
+
+function detectEngineAudioRegimeAuto(snapshot = {}) {
+    const rpm = Number(snapshot?.rpm);
+    if (Number.isFinite(rpm) && rpm >= 0) {
+        if (rpm < 1100) return 'idle';
+        if (rpm < 2200) return 'cruise';
+        return 'high';
+    }
+
+    const speed = Number.isFinite(snapshot?.speedKn) ? Number(snapshot.speedKn) : navLatestSpeedKn;
+    const vibration = Number.isFinite(snapshot?.rms) ? Number(snapshot.rms) : engineSensorSmoothedVibration;
+
+    if (Number.isFinite(vibration) && vibration > 0.22) return 'high';
+    if (Number.isFinite(speed) && speed >= 6) return 'cruise';
+    if (Number.isFinite(speed) && speed < 2) return 'idle';
+    return 'default';
+}
+
+function resolveEngineAudioRegime(snapshot = {}) {
+    if (engineAudioRegimeMode !== 'auto') {
+        return normalizeEngineAudioRegime(engineAudioRegimeMode);
+    }
+    return detectEngineAudioRegimeAuto(snapshot);
+}
+
+function updateEngineAudioRegimeUi() {
+    const detectedNode = document.getElementById('engineAudioRegimeDetectedValue');
+    if (detectedNode) {
+        const detected = resolveEngineAudioRegime();
+        detectedNode.textContent = engineAudioRegimeMode === 'auto'
+            ? `AUTO · ${detected}`
+            : t(`MANUEL · ${engineAudioRegimeMode}`, `MANUAL · ${engineAudioRegimeMode}`, `MANUAL · ${engineAudioRegimeMode}`);
+    }
+
+    const buttons = [
+        { id: 'engineAudioRegimeAutoBtn', mode: 'auto' },
+        { id: 'engineAudioRegimeIdleBtn', mode: 'idle' },
+        { id: 'engineAudioRegimeCruiseBtn', mode: 'cruise' },
+        { id: 'engineAudioRegimeHighBtn', mode: 'high' }
+    ];
+
+    buttons.forEach(({ id, mode }) => {
+        const node = document.getElementById(id);
+        if (!node) return;
+        const isActive = engineAudioRegimeMode === mode;
+        node.classList.toggle('engine-audio-regime-btn--active', isActive);
+        node.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+}
+
+function sanitizeEngineSoundSnapshot(entry, fallbackIndex = 0) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const readValue = (...keys) => {
+        for (const key of keys) {
+            if (Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== undefined && entry[key] !== null) {
+                return entry[key];
+            }
+        }
+        return null;
+    };
+
+    const toFiniteOrNull = value => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const rawId = String(readValue('id') || '').trim();
+    const id = isUuidString(rawId) ? rawId : generateClientUuid();
+    const capturedAt = String(readValue('capturedAt', 'captured_at', 'timestamp', 'created_at', 'updated_at') || new Date().toISOString());
+
+    const mfccRaw = readValue('mfcc');
+    const bandEnergyRaw = readValue('bandEnergy', 'band_energy');
+    const anomalyReasonsRaw = readValue('anomalyReasons', 'anomaly_reasons');
+
+    return {
+        id,
+        capturedAt,
+        engineHours: toFiniteOrNull(readValue('engineHours', 'engine_hours')),
+        rpm: Number.isFinite(Number(readValue('rpm'))) ? Math.max(0, Math.round(Number(readValue('rpm')))) : null,
+        speedKn: toFiniteOrNull(readValue('speedKn', 'speed_kn')),
+        heelDeg: toFiniteOrNull(readValue('heelDeg', 'heel_deg')),
+        courseDeg: toFiniteOrNull(readValue('courseDeg', 'course_deg')),
+        windSpeedKn: toFiniteOrNull(readValue('windSpeedKn', 'wind_speed_kn')),
+        windDirectionDeg: toFiniteOrNull(readValue('windDirectionDeg', 'wind_direction_deg')),
+        seaState: String(readValue('seaState', 'sea_state') || 'unknown').trim() || 'unknown',
+        device: String(readValue('device') || 'ipad').trim() || 'ipad',
+        sampleRateHz: Number.isFinite(Number(readValue('sampleRateHz', 'sample_rate_hz')))
+            ? Math.max(8000, Math.round(Number(readValue('sampleRateHz', 'sample_rate_hz'))))
+            : 16000,
+        durationS: Number.isFinite(Number(readValue('durationS', 'duration_s')))
+            ? Math.max(1, Math.min(60, Number(readValue('durationS', 'duration_s'))))
+            : 10,
+        rms: toFiniteOrNull(readValue('rms')),
+        spectralCentroidHz: toFiniteOrNull(readValue('spectralCentroidHz', 'spectral_centroid_hz')),
+        spectralRolloffHz: toFiniteOrNull(readValue('spectralRolloffHz', 'spectral_rolloff_hz')),
+        zcr: toFiniteOrNull(readValue('zcr')),
+        mfcc: Array.isArray(mfccRaw) ? mfccRaw.map(value => Number(value)).filter(Number.isFinite) : [],
+        bandEnergy: (bandEnergyRaw && typeof bandEnergyRaw === 'object' && !Array.isArray(bandEnergyRaw)) ? bandEnergyRaw : {},
+        baselineProfile: String(readValue('baselineProfile', 'baseline_profile') || 'default').trim() || 'default',
+        anomalyScore: Number.isFinite(Number(readValue('anomalyScore', 'anomaly_score')))
+            ? Number(readValue('anomalyScore', 'anomaly_score'))
+            : 0,
+        anomalyLevel: normalizeEngineSoundAnomalyLevel(readValue('anomalyLevel', 'anomaly_level')),
+        anomalyReasons: Array.isArray(anomalyReasonsRaw)
+            ? anomalyReasonsRaw.map(item => String(item || '').trim()).filter(Boolean)
+            : [],
+        audioStoragePath: String(readValue('audioStoragePath', 'audio_storage_path') || '').trim(),
+        audioPublicUrl: String(readValue('audioPublicUrl', 'audio_public_url') || '').trim(),
+        note: String(readValue('note') || '').trim(),
+        creatorEmail: normalizeEmailForCompare(readValue('creatorEmail', 'creator_email') || ''),
+        creatorName: String(readValue('creatorName', 'creator_name') || '').trim()
+    };
+}
+
+function sanitizeEngineSoundSnapshotsList(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+        .map((entry, index) => sanitizeEngineSoundSnapshot(entry, index))
+        .filter(Boolean)
+        .sort((a, b) => toTimestampMs(a?.capturedAt) - toTimestampMs(b?.capturedAt));
+}
+
+function loadEngineSoundSnapshots() {
+    engineSoundSnapshots = sanitizeEngineSoundSnapshotsList(loadArrayFromStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY));
+    renderEngineSoundSnapshotsList();
+}
+
+function saveEngineSoundSnapshots() {
+    engineSoundSnapshots = sanitizeEngineSoundSnapshotsList(engineSoundSnapshots);
+    saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
+    renderEngineSoundSnapshotsList();
+    scheduleCloudLogbookPush({ includeNav: false, includeEngine: true });
+}
+
+function recordEngineSoundSnapshot(snapshot = {}) {
+    const engineLast = sanitizeEngineLogEntriesList(engineLogEntries).slice(-1)[0] || null;
+    const enriched = sanitizeEngineSoundSnapshot({
+        id: generateClientUuid(),
+        capturedAt: new Date().toISOString(),
+        engineHours: engineLast?.hours ?? null,
+        speedKn: Number.isFinite(navLatestSpeedKn) ? navLatestSpeedKn : null,
+        heelDeg: Number.isFinite(navLatestHeelDeg) ? navLatestHeelDeg : null,
+        courseDeg: Number.isFinite(navLatestCourseDeg) ? navLatestCourseDeg : null,
+        ...snapshot
+    });
+
+    if (!enriched) return null;
+
+    engineSoundSnapshots.push(enriched);
+    if (engineSoundSnapshots.length > 2000) {
+        engineSoundSnapshots = engineSoundSnapshots.slice(engineSoundSnapshots.length - 2000);
+    }
+    saveEngineSoundSnapshots();
+    return enriched;
+}
+
+function setEngineAudioStatus(message, isError = false) {
+    const status = document.getElementById('engineAudioStatus');
+    if (!status) return;
+    status.textContent = String(message || '');
+    status.style.color = isError ? '#ff8f8f' : '';
+}
+
+function formatEngineAudioLevel(level) {
+    const safe = normalizeEngineSoundAnomalyLevel(level);
+    if (safe === 'watch') return t('surveillance', 'vigilancia', 'watch');
+    if (safe === 'alert') return t('alerte', 'alerta', 'alert');
+    if (safe === 'critical') return t('critique', 'crítico', 'critical');
+    return t('normal', 'normal', 'normal');
+}
+
+function computeAnomalyLevelFromScore(score) {
+    const safeScore = Number(score);
+    if (!Number.isFinite(safeScore)) return 'normal';
+    if (safeScore >= 0.85) return 'critical';
+    if (safeScore >= 0.65) return 'alert';
+    if (safeScore >= 0.45) return 'watch';
+    return 'normal';
+}
+
+function renderEngineSoundSnapshotsList() {
+    const container = document.getElementById('engineAudioList');
+    if (!container) return;
+
+    const entries = sanitizeEngineSoundSnapshotsList(engineSoundSnapshots);
+    if (!entries.length) {
+        container.innerHTML = `<div class="log-card">${t('Aucun snapshot audio pour le moment.', 'No hay snapshots de audio por ahora.', 'No audio snapshots yet.')}</div>`;
+        return;
+    }
+
+    const recent = entries.slice().reverse().slice(0, 20);
+    container.className = 'engine-audio-list';
+    container.innerHTML = recent.map(entry => {
+        const level = normalizeEngineSoundAnomalyLevel(entry?.anomalyLevel);
+        const score = Number(entry?.anomalyScore);
+        const scoreText = Number.isFinite(score) ? score.toFixed(2) : '0.00';
+        const dateText = formatDateTimeFr(entry?.capturedAt);
+        const durationText = Number.isFinite(Number(entry?.durationS)) ? `${Number(entry.durationS).toFixed(1)} s` : '10.0 s';
+        const sourceLabel = entry?.audioStoragePath || entry?.audioPublicUrl
+            ? t('audio stocké', 'audio guardado', 'audio stored')
+            : t('analyse locale', 'análisis local', 'local analysis');
+        const regime = normalizeEngineAudioRegime(entry?.baselineProfile);
+
+        return `
+            <div class="engine-audio-item">
+                <div class="engine-audio-item__head">
+                    <span>${escapeHtml(dateText)}</span>
+                    <span class="engine-audio-level engine-audio-level--${escapeHtml(level)}">${escapeHtml(formatEngineAudioLevel(level))}</span>
+                </div>
+                <div>${t('Score', 'Puntuación', 'Score')}: <strong>${escapeHtml(scoreText)}</strong> · ${t('Durée', 'Duración', 'Duration')}: ${escapeHtml(durationText)}</div>
+                <div>${t('Source', 'Origen', 'Source')}: ${escapeHtml(sourceLabel)} · RMS: ${escapeHtml(Number.isFinite(Number(entry?.rms)) ? Number(entry.rms).toFixed(4) : 'N/A')}</div>
+                <div>${t('Régime', 'Régimen', 'Regime')}: ${escapeHtml(regime)}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function calculateBandEnergies(samples, sampleRateHz) {
+    const safeRate = Number.isFinite(sampleRateHz) ? sampleRateHz : 16000;
+    const nyquist = safeRate / 2;
+    const bands = {
+        low: [20, 200],
+        lowMid: [200, 800],
+        mid: [800, 3000],
+        high: [3000, Math.min(8000, nyquist)]
+    };
+
+    const approx = {};
+    const len = samples.length || 1;
+    const chunk = Math.max(1, Math.floor(len / 64));
+    const energies = new Array(64).fill(0);
+
+    for (let i = 0; i < len; i += 1) {
+        const bucket = Math.min(63, Math.floor(i / chunk));
+        const value = Number(samples[i]) || 0;
+        energies[bucket] += value * value;
+    }
+
+    const bucketHz = nyquist / 64;
+    Object.entries(bands).forEach(([key, range]) => {
+        const [minHz, maxHz] = range;
+        let sum = 0;
+        for (let b = 0; b < energies.length; b += 1) {
+            const hz = (b + 0.5) * bucketHz;
+            if (hz >= minHz && hz < maxHz) sum += energies[b];
+        }
+        approx[key] = Number(sum.toFixed(6));
+    });
+
+    return approx;
+}
+
+async function analyzeWavFileToEngineSnapshot(file) {
+    if (!file) throw new Error(t('Fichier audio manquant.', 'Falta archivo de audio.', 'Missing audio file.'));
+
+    const ext = String(file.name || '').toLowerCase();
+    if (!ext.endsWith('.wav')) {
+        throw new Error(t('Importe un fichier WAV.', 'Importa un archivo WAV.', 'Upload a WAV file.'));
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+        throw new Error(t('WebAudio non disponible sur cet appareil.', 'WebAudio no disponible en este dispositivo.', 'WebAudio unavailable on this device.'));
+    }
+
+    const audioContext = new AudioContextCtor();
+    let decoded;
+    try {
+        decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    } finally {
+        if (typeof audioContext.close === 'function') {
+            void audioContext.close();
+        }
+    }
+
+    const sampleRate = decoded.sampleRate;
+    const length = decoded.length;
+    const channelCount = decoded.numberOfChannels;
+    const mono = new Float32Array(length);
+
+    for (let ch = 0; ch < channelCount; ch += 1) {
+        const channel = decoded.getChannelData(ch);
+        for (let i = 0; i < length; i += 1) {
+            mono[i] += channel[i] / channelCount;
+        }
+    }
+
+    let sumSquares = 0;
+    let zcrCount = 0;
+    let prev = mono[0] || 0;
+    for (let i = 0; i < mono.length; i += 1) {
+        const v = mono[i] || 0;
+        sumSquares += v * v;
+        if ((v >= 0 && prev < 0) || (v < 0 && prev >= 0)) zcrCount += 1;
+        prev = v;
+    }
+
+    const rms = mono.length ? Math.sqrt(sumSquares / mono.length) : 0;
+    const zcr = mono.length ? (zcrCount / mono.length) : 0;
+    const durationS = decoded.duration;
+
+    let weightedIndexSum = 0;
+    let weightedEnergySum = 0;
+    const windowSize = Math.min(4096, mono.length);
+    for (let i = 0; i < windowSize; i += 1) {
+        const value = mono[i] || 0;
+        const energy = value * value;
+        weightedIndexSum += i * energy;
+        weightedEnergySum += energy;
+    }
+    const centroidNorm = weightedEnergySum > 0 ? (weightedIndexSum / weightedEnergySum) / Math.max(1, windowSize - 1) : 0;
+    const spectralCentroidHz = centroidNorm * (sampleRate / 2);
+    const spectralRolloffHz = Math.min(sampleRate / 2, spectralCentroidHz * 1.5);
+
+    const normalizedRms = Math.min(1, rms * 12);
+    const normalizedZcr = Math.min(1, zcr * 8);
+    const normalizedCentroid = Math.min(1, spectralCentroidHz / 4000);
+    const anomalyScore = Number((0.55 * normalizedRms + 0.25 * normalizedZcr + 0.20 * normalizedCentroid).toFixed(4));
+    const anomalyLevel = computeAnomalyLevelFromScore(anomalyScore);
+
+    const mfccProxy = [normalizedRms, normalizedZcr, normalizedCentroid].map(value => Number(value.toFixed(6)));
+    const bandEnergy = calculateBandEnergies(mono, sampleRate);
+
+    return {
+        device: 'dji-mic',
+        sampleRateHz: sampleRate,
+        durationS,
+        rms: Number(rms.toFixed(6)),
+        zcr: Number(zcr.toFixed(6)),
+        spectralCentroidHz: Number(spectralCentroidHz.toFixed(2)),
+        spectralRolloffHz: Number(spectralRolloffHz.toFixed(2)),
+        mfcc: mfccProxy,
+        bandEnergy,
+        baselineProfile: 'default',
+        anomalyScore,
+        anomalyLevel,
+        anomalyReasons: [
+            `rms=${normalizedRms.toFixed(2)}`,
+            `zcr=${normalizedZcr.toFixed(2)}`,
+            `centroid=${normalizedCentroid.toFixed(2)}`
+        ],
+        note: `WAV: ${String(file.name || 'audio.wav')}`
+    };
+}
+
+function captureEngineAudioSnapshotFromLiveContext() {
+    const anomalyScore = Number.isFinite(engineSensorScore)
+        ? Math.max(0, Math.min(1, engineSensorScore))
+        : 0;
+
+    const snapshot = recordEngineSoundSnapshot({
+        device: 'ipad-live',
+        durationS: 10,
+        sampleRateHz: 16000,
+        seaState: 'unknown',
+        baselineProfile: resolveEngineAudioRegime(),
+        rms: Number.isFinite(engineSensorSmoothedVibration) ? engineSensorSmoothedVibration : null,
+        anomalyScore,
+        anomalyLevel: computeAnomalyLevelFromScore(anomalyScore),
+        anomalyReasons: [t('Snapshot manuel sans WAV (capteurs live).', 'Snapshot manual sin WAV (sensores live).', 'Manual snapshot without WAV (live sensors).')],
+        note: t('Capture manuelle iPad', 'Captura manual iPad', 'Manual iPad capture')
+    });
+
+    if (!snapshot) {
+        setEngineAudioStatus(t('Snapshot audio impossible.', 'Snapshot audio imposible.', 'Audio snapshot failed.'), true);
+        return;
+    }
+
+    setEngineAudioStatus(t(
+        `Snapshot audio capturé · score ${Number(snapshot.anomalyScore || 0).toFixed(2)} (${formatEngineAudioLevel(snapshot.anomalyLevel)})`,
+        `Snapshot audio capturado · puntuación ${Number(snapshot.anomalyScore || 0).toFixed(2)} (${formatEngineAudioLevel(snapshot.anomalyLevel)})`,
+        `Audio snapshot captured · score ${Number(snapshot.anomalyScore || 0).toFixed(2)} (${formatEngineAudioLevel(snapshot.anomalyLevel)})`
+    ));
+}
+
+async function handleEngineAudioWavUpload(file) {
+    try {
+        setEngineAudioStatus(t('Analyse WAV en cours...', 'Análisis WAV en curso...', 'WAV analysis in progress...'));
+        const analyzed = await analyzeWavFileToEngineSnapshot(file);
+        analyzed.baselineProfile = resolveEngineAudioRegime(analyzed);
+        const saved = recordEngineSoundSnapshot(analyzed);
+        if (!saved) {
+            setEngineAudioStatus(t('Analyse WAV échouée.', 'Análisis WAV fallido.', 'WAV analysis failed.'), true);
+            return;
+        }
+
+        setEngineAudioStatus(t(
+            `WAV analysé · score ${Number(saved.anomalyScore || 0).toFixed(2)} (${formatEngineAudioLevel(saved.anomalyLevel)})`,
+            `WAV analizado · puntuación ${Number(saved.anomalyScore || 0).toFixed(2)} (${formatEngineAudioLevel(saved.anomalyLevel)})`,
+            `WAV analyzed · score ${Number(saved.anomalyScore || 0).toFixed(2)} (${formatEngineAudioLevel(saved.anomalyLevel)})`
+        ));
+    } catch (error) {
+        setEngineAudioStatus(t(`Import WAV impossible: ${formatCloudError(error)}`, `Importación WAV imposible: ${formatCloudError(error)}`, `WAV import failed: ${formatCloudError(error)}`), true);
+    }
+}
+
 async function pushEngineLogEntriesToCloudTable() {
     if (!isCloudReady()) {
         throw new Error('Cloud non prêt: impossible d\'insérer engine_log.');
@@ -11412,6 +11893,155 @@ async function pullEngineLogEntriesFromCloudTable() {
     if (error) throw error;
 
     return sanitizeEngineLogEntriesList(data || []);
+}
+
+async function pushEngineSoundSnapshotsToCloudTable() {
+    if (!isCloudReady()) {
+        throw new Error('Cloud non prêt: impossible d\'insérer engine_sound_snapshots.');
+    }
+
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) {
+        throw new Error('creator_email manquant: impossible d\'insérer engine_sound_snapshots.');
+    }
+
+    let resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    if (!resolvedProjectIdUuid) {
+        throw new Error('project_id introuvable pour engine_sound_snapshots');
+    }
+    resolvedProjectIdUuid = await ensureCloudProjectRow(resolvedProjectIdUuid);
+
+    const safeEntries = sanitizeEngineSoundSnapshotsList(engineSoundSnapshots);
+    if (safeEntries.length === 0) return true;
+
+    const { data: existingRows, error: existingError } = await cloudClient
+        .from(CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE)
+        .select('id')
+        .eq('project_id', resolvedProjectIdUuid)
+        .eq('creator_email', creatorEmail);
+
+    if (existingError) throw existingError;
+
+    const existingIds = new Set(
+        (Array.isArray(existingRows) ? existingRows : [])
+            .map(row => String(row?.id || '').trim())
+            .filter(Boolean)
+    );
+
+    const nowIso = new Date().toISOString();
+
+    const insertPayload = safeEntries
+        .filter(entry => !existingIds.has(String(entry.id || '').trim()))
+        .map(entry => ({
+            id: String(entry.id),
+            project_id: resolvedProjectIdUuid,
+            creator_email: creatorEmail,
+            creator_name: entry.creatorName || null,
+            captured_at: entry.capturedAt || nowIso,
+            engine_hours: entry.engineHours,
+            rpm: entry.rpm,
+            speed_kn: entry.speedKn,
+            heel_deg: entry.heelDeg,
+            course_deg: entry.courseDeg,
+            wind_speed_kn: entry.windSpeedKn,
+            wind_direction_deg: entry.windDirectionDeg,
+            sea_state: entry.seaState || 'unknown',
+            device: entry.device || 'ipad',
+            sample_rate_hz: Number.isFinite(entry.sampleRateHz) ? entry.sampleRateHz : 16000,
+            duration_s: Number.isFinite(entry.durationS) ? entry.durationS : 10,
+            rms: entry.rms,
+            spectral_centroid_hz: entry.spectralCentroidHz,
+            spectral_rolloff_hz: entry.spectralRolloffHz,
+            zcr: entry.zcr,
+            mfcc: Array.isArray(entry.mfcc) ? entry.mfcc : [],
+            band_energy: (entry.bandEnergy && typeof entry.bandEnergy === 'object') ? entry.bandEnergy : {},
+            baseline_profile: entry.baselineProfile || 'default',
+            anomaly_score: Number.isFinite(entry.anomalyScore) ? entry.anomalyScore : 0,
+            anomaly_level: normalizeEngineSoundAnomalyLevel(entry.anomalyLevel),
+            anomaly_reasons: Array.isArray(entry.anomalyReasons) ? entry.anomalyReasons : [],
+            audio_storage_path: entry.audioStoragePath || null,
+            audio_public_url: entry.audioPublicUrl || null,
+            note: entry.note || '',
+            created_at: entry.capturedAt || nowIso,
+            updated_at: nowIso
+        }));
+
+    if (insertPayload.length > 0) {
+        const { error: insertError } = await cloudClient
+            .from(CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE)
+            .insert(insertPayload);
+        if (insertError) throw insertError;
+    }
+
+    const rowsToUpdate = safeEntries.filter(entry => existingIds.has(String(entry.id || '').trim()));
+    for (const entry of rowsToUpdate) {
+        const { error: updateError } = await cloudClient
+            .from(CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE)
+            .update({
+                creator_name: entry.creatorName || null,
+                captured_at: entry.capturedAt || nowIso,
+                engine_hours: entry.engineHours,
+                rpm: entry.rpm,
+                speed_kn: entry.speedKn,
+                heel_deg: entry.heelDeg,
+                course_deg: entry.courseDeg,
+                wind_speed_kn: entry.windSpeedKn,
+                wind_direction_deg: entry.windDirectionDeg,
+                sea_state: entry.seaState || 'unknown',
+                device: entry.device || 'ipad',
+                sample_rate_hz: Number.isFinite(entry.sampleRateHz) ? entry.sampleRateHz : 16000,
+                duration_s: Number.isFinite(entry.durationS) ? entry.durationS : 10,
+                rms: entry.rms,
+                spectral_centroid_hz: entry.spectralCentroidHz,
+                spectral_rolloff_hz: entry.spectralRolloffHz,
+                zcr: entry.zcr,
+                mfcc: Array.isArray(entry.mfcc) ? entry.mfcc : [],
+                band_energy: (entry.bandEnergy && typeof entry.bandEnergy === 'object') ? entry.bandEnergy : {},
+                baseline_profile: entry.baselineProfile || 'default',
+                anomaly_score: Number.isFinite(entry.anomalyScore) ? entry.anomalyScore : 0,
+                anomaly_level: normalizeEngineSoundAnomalyLevel(entry.anomalyLevel),
+                anomaly_reasons: Array.isArray(entry.anomalyReasons) ? entry.anomalyReasons : [],
+                audio_storage_path: entry.audioStoragePath || null,
+                audio_public_url: entry.audioPublicUrl || null,
+                note: entry.note || '',
+                updated_at: nowIso
+            })
+            .eq('id', String(entry.id))
+            .eq('project_id', resolvedProjectIdUuid)
+            .eq('creator_email', creatorEmail);
+
+        if (updateError) throw updateError;
+    }
+
+    return true;
+}
+
+async function pullEngineSoundSnapshotsFromCloudTable() {
+    if (!isCloudReady()) {
+        throw new Error('Cloud non prêt: impossible de lire engine_sound_snapshots.');
+    }
+
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) {
+        throw new Error('creator_email manquant: impossible de lire engine_sound_snapshots.');
+    }
+
+    const resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+
+    let query = cloudClient
+        .from(CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE)
+        .select('*')
+        .eq('creator_email', creatorEmail)
+        .order('captured_at', { ascending: true });
+
+    if (isUuidString(resolvedProjectIdUuid)) {
+        query = query.eq('project_id', resolvedProjectIdUuid);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return sanitizeEngineSoundSnapshotsList(data || []);
 }
 
 async function pushNavLogEntriesToCloudTable() {
@@ -13496,6 +14126,7 @@ function addEngineLogEntryFromForm() {
 
 function loadEngineLogbook() {
     engineLogEntries = [];
+    loadEngineSoundSnapshots();
     renderEngineLogList();
     cancelEngineLogEdit();
     renderEngineSensorUi();
@@ -14416,6 +15047,42 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
+    const engineAudioRegimeButtons = [
+        { id: 'engineAudioRegimeAutoBtn', mode: 'auto' },
+        { id: 'engineAudioRegimeIdleBtn', mode: 'idle' },
+        { id: 'engineAudioRegimeCruiseBtn', mode: 'cruise' },
+        { id: 'engineAudioRegimeHighBtn', mode: 'high' }
+    ];
+    engineAudioRegimeButtons.forEach(({ id, mode }) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            engineAudioRegimeMode = mode;
+            updateEngineAudioRegimeUi();
+        });
+    });
+
+    const engineAudioCaptureSnapshotBtn = document.getElementById('engineAudioCaptureSnapshotBtn');
+    if (engineAudioCaptureSnapshotBtn) {
+        engineAudioCaptureSnapshotBtn.addEventListener('click', () => {
+            captureEngineAudioSnapshotFromLiveContext();
+        });
+    }
+
+    const engineAudioWavInput = document.getElementById('engineAudioWavInput');
+    if (engineAudioWavInput) {
+        engineAudioWavInput.addEventListener('change', async () => {
+            const file = engineAudioWavInput.files && engineAudioWavInput.files[0] ? engineAudioWavInput.files[0] : null;
+            if (file) {
+                await handleEngineAudioWavUpload(file);
+            }
+            engineAudioWavInput.value = '';
+        });
+    }
+
+    renderEngineSoundSnapshotsList();
+    updateEngineAudioRegimeUi();
+
     renderEngineSensorUi();
 
     const useMapCenterWeatherBtn = document.getElementById('useMapCenterWeatherBtn');
@@ -14887,6 +15554,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         document.getElementById("info").innerHTML = "";
         const routeNameInput = document.getElementById('routeNameInput');
         if (routeNameInput) routeNameInput.value = '';
+        updateRoutingActiveRouteDisplay();
         const weatherContainer = document.getElementById('waypointWeatherInfo');
         if (weatherContainer) weatherContainer.innerHTML = '';
         const windLegend = document.getElementById('windSpeedLegend');
@@ -14947,6 +15615,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     const routesManageSubtabBtn = document.getElementById('routesManageSubtabBtn');
     const routesImportExportSubtabBtn = document.getElementById('routesImportExportSubtabBtn');
     const routesToolsSubtabBtn = document.getElementById('routesToolsSubtabBtn');
+    const routingMainSubtabBtn = document.getElementById('routingMainSubtabBtn');
+    const routingMeteoSubtabBtn = document.getElementById('routingMeteoSubtabBtn');
     if (routesManageSubtabBtn) {
         routesManageSubtabBtn.addEventListener('click', () => setActiveRoutesSubtab('manage'));
     }
@@ -14957,6 +15627,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         routesToolsSubtabBtn.addEventListener('click', () => setActiveRoutesSubtab('tools'));
     }
     setActiveRoutesSubtab('manage');
+    if (routingMainSubtabBtn) {
+        routingMainSubtabBtn.addEventListener('click', () => setActiveRoutingSubtab('main'));
+    }
+    if (routingMeteoSubtabBtn) {
+        routingMeteoSubtabBtn.addEventListener('click', () => setActiveRoutingSubtab('meteo'));
+    }
+    setActiveRoutingSubtab(activeRoutingSubtab);
 
     // Route search input
     const routeSearchInput = document.getElementById('routeSearchInput');
@@ -14965,6 +15642,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             routesSearchTerm = e.target.value;
             refreshSavedList();
         });
+    }
+
+    const routeNameInput = document.getElementById('routeNameInput');
+    if (routeNameInput) {
+        routeNameInput.addEventListener('input', updateRoutingActiveRouteDisplay);
+        routeNameInput.addEventListener('change', updateRoutingActiveRouteDisplay);
     }
 
     const waypointSearchInput = document.getElementById('waypointSearchInput');
@@ -16766,7 +17449,8 @@ function estimateCloudPayloadSizeBytes() {
         maintenanceExpenses,
         maintenanceSuppliers,
         navLogEntries,
-        engineLogEntries
+        engineLogEntries,
+        engineSoundSnapshots
     };
 
     try {
@@ -16853,7 +17537,8 @@ async function refreshCloudStatsTableCounts({ force = false } = {}) {
                 maintenanceSuppliers: null,
                 maintenanceExpenses: null,
                 navLog: null,
-                engineLog: null
+                engineLog: null,
+                engineSoundSnapshots: null
             };
 
             counts.projects = await countCloudTableRows(CLOUD_PROJECTS_TABLE, projectId ? { eq: { id: projectId } } : {});
@@ -16868,6 +17553,7 @@ async function refreshCloudStatsTableCounts({ force = false } = {}) {
             counts.maintenanceExpenses = await countCloudTableRows(CLOUD_MAINTENANCE_EXPENSES_TABLE, creatorFilter);
             counts.navLog = await countCloudTableRows(CLOUD_NAV_LOG_TABLE, creatorFilter);
             counts.engineLog = await countCloudTableRows(CLOUD_ENGINE_LOG_TABLE, creatorFilter);
+            counts.engineSoundSnapshots = await countCloudTableRows(CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE, creatorFilter);
 
             cloudTableStatsRemoteCounts = counts;
             cloudTableStatsLastRefreshAtMs = Date.now();
@@ -16909,7 +17595,8 @@ function renderCloudStatsTable() {
         maintenanceSuppliers: maintenanceSuppliers.length,
         maintenanceExpenses: maintenanceExpenses.length,
         navLog: navLogEntries.length,
-        engineLog: engineLogEntries.length
+        engineLog: engineLogEntries.length,
+        engineSoundSnapshots: engineSoundSnapshots.length
     };
 
     const remoteCounts = cloudTableStatsRemoteCounts || {};
@@ -16924,7 +17611,8 @@ function renderCloudStatsTable() {
         maintenanceSuppliers: Number.isFinite(remoteCounts.maintenanceSuppliers) ? remoteCounts.maintenanceSuppliers : localFallbackCounts.maintenanceSuppliers,
         maintenanceExpenses: Number.isFinite(remoteCounts.maintenanceExpenses) ? remoteCounts.maintenanceExpenses : localFallbackCounts.maintenanceExpenses,
         navLog: Number.isFinite(remoteCounts.navLog) ? remoteCounts.navLog : localFallbackCounts.navLog,
-        engineLog: Number.isFinite(remoteCounts.engineLog) ? remoteCounts.engineLog : localFallbackCounts.engineLog
+        engineLog: Number.isFinite(remoteCounts.engineLog) ? remoteCounts.engineLog : localFallbackCounts.engineLog,
+        engineSoundSnapshots: Number.isFinite(remoteCounts.engineSoundSnapshots) ? remoteCounts.engineSoundSnapshots : localFallbackCounts.engineSoundSnapshots
     };
 
     const totalCount = Object.values(resolvedCounts).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
@@ -16950,6 +17638,7 @@ function renderCloudStatsTable() {
     setText('cloudStatsExpensesValue', resolvedCounts.maintenanceExpenses);
     setText('cloudStatsNavValue', resolvedCounts.navLog);
     setText('cloudStatsEngineValue', resolvedCounts.engineLog);
+    setText('cloudStatsEngineSoundValue', resolvedCounts.engineSoundSnapshots);
     setText('cloudStatsTotalValue', totalCount);
     setText('cloudStatsStorageValue', formatStorageSize(storageBytes));
     setText('cloudStatsQuotaValue', `${storageQuotaPercent.toFixed(2)} %`);
@@ -16967,7 +17656,7 @@ function updateCloudDataSourceStatus(sourceLabel, routeCount = null, photoCount 
     const safeSourceLocalized = getLocalizedCloudSourceLabel(cloudDataSourceLabel);
     const routesLabel = Number.isFinite(routeCount) ? routeCount : getSavedRoutes().length;
     const photosLabel = Number.isFinite(photoCount) ? photoCount : waypointPhotoEntries.length;
-    status.textContent = `${t('Données routes/photos/maintenance', 'Datos rutas/fotos/mantenimiento')}: ${safeSourceLocalized} · ${t('routes', 'rutas')}: ${routesLabel} · ${t('photos', 'fotos')}: ${photosLabel} · ${t('schémas', 'esquemas')}: ${maintenanceBoards.length} · ${t('dépenses', 'gastos')}: ${maintenanceExpenses.length} · ${t('fournisseurs', 'proveedores')}: ${maintenanceSuppliers.length}`;
+    status.textContent = `${t('Données routes/photos/maintenance', 'Datos rutas/fotos/mantenimiento')}: ${safeSourceLocalized} · ${t('routes', 'rutas')}: ${routesLabel} · ${t('photos', 'fotos')}: ${photosLabel} · ${t('schémas', 'esquemas')}: ${maintenanceBoards.length} · ${t('dépenses', 'gastos')}: ${maintenanceExpenses.length} · ${t('fournisseurs', 'proveedores')}: ${maintenanceSuppliers.length} · ${t('sons moteur', 'sonidos motor')}: ${engineSoundSnapshots.length}`;
     renderCloudStatsTable();
 }
 
@@ -17877,6 +18566,7 @@ async function pullRoutesFromCloud(options = {}) {
         allowMaintenanceOverwrite = false,
         includeNavLog = true,
         includeEngineLog = true,
+        includeEngineSound = includeEngineLog,
         includeWaypointPhotos = true
     } = options || {};
     const cloudNavEntriesFromTable = includeNavLog
@@ -17884,6 +18574,9 @@ async function pullRoutesFromCloud(options = {}) {
         : null;
     const cloudEngineEntriesFromTable = includeEngineLog
         ? await pullEngineLogEntriesFromCloudTable()
+        : null;
+    const cloudEngineSoundSnapshotsFromTable = includeEngineSound
+        ? await pullEngineSoundSnapshotsFromCloudTable()
         : null;
     const cloudWaypointPhotosV2 = includeWaypointPhotos
         ? await pullWaypointPhotosFromCloudV2()
@@ -17971,6 +18664,11 @@ async function pullRoutesFromCloud(options = {}) {
             renderEngineLogList();
         }
 
+        if (Array.isArray(cloudEngineSoundSnapshotsFromTable)) {
+            engineSoundSnapshots = cloudEngineSoundSnapshotsFromTable;
+            saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
+        }
+
         return merged;
     }
 
@@ -17997,6 +18695,11 @@ async function pullRoutesFromCloud(options = {}) {
         renderEngineLogList();
     }
 
+    if (Array.isArray(cloudEngineSoundSnapshotsFromTable)) {
+        engineSoundSnapshots = cloudEngineSoundSnapshotsFromTable;
+        saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
+    }
+
     updateCloudDataSourceStatus('cloud (routes v2)', effectiveRoutes.length, waypointPhotoEntries.length);
 
     return effectiveRoutes;
@@ -18007,6 +18710,7 @@ async function pushRoutesToCloud(options = {}) {
 
     const {
         includeEngineLog = true,
+        includeEngineSound = includeEngineLog,
         includeWaypointPhotos = true,
         includeMaintenanceBoards = true
     } = options || {};
@@ -18016,6 +18720,9 @@ async function pushRoutesToCloud(options = {}) {
     // Strict mode: if normalized tables fail, report sync failure instead of silently claiming success.
     if (includeEngineLog) {
         await pushEngineLogEntriesToCloudTable();
+    }
+    if (includeEngineSound) {
+        await pushEngineSoundSnapshotsToCloudTable();
     }
     await pushRoutesToCloudV2(routesSnapshot);
     if (includeWaypointPhotos) {
@@ -18438,6 +19145,7 @@ async function saveRoute() {
     }
 
     setSavedRoutes(saved);
+    updateRoutingActiveRouteDisplay();
     routesCloudDirty = true;
     updateCloudDataSourceStatus('local (non synchronisé)', saved.length, waypointPhotoEntries.length);
 
@@ -18500,6 +19208,7 @@ function saveRouteFromRouting() {
         }
 
         nameInput.value = trimmedName;
+        updateRoutingActiveRouteDisplay();
     }
 
     void saveRoute();
@@ -18543,6 +19252,7 @@ function clearCurrentRoute() {
     if (restaurants) restaurants.innerHTML = '';
     const shops = document.getElementById('nearbyShops');
     if (shops) shops.innerHTML = '';
+    updateRoutingActiveRouteDisplay();
     updateSelectedWaypointInfo();
     updateRoutingTabAvailability();
 }
@@ -18593,6 +19303,8 @@ function reverseCurrentRoute() {
         }
     }
 
+    updateRoutingActiveRouteDisplay();
+
     invalidateComputedRouteDisplay();
     drawRoute(routePoints);
     updateSelectedWaypointInfo();
@@ -18633,6 +19345,7 @@ function loadRoute(index) {
 
     const nameInput = document.getElementById('routeNameInput');
     if (nameInput) nameInput.value = r.name || '';
+    updateRoutingActiveRouteDisplay();
 
     // restore UI values (keep current selected date)
     departureTime = normalizeHourTime(r.time);

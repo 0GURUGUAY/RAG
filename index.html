@@ -33,69 +33,82 @@
     </div>
 
     <div id="routingTab" class="tab-panel">
-        <label for="departureDateTimeInput" style="display: block; margin-top: 10px; font-size: 12px;">Départ (date + heure):</label>
-        <input type="datetime-local" id="departureDateTimeInput" step="600" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+        <div class="routing-active-route-banner">
+            <span id="routingActiveRouteLabel">Route active:</span>
+            <strong id="routingActiveRouteValue">Aucune route sélectionnée</strong>
+        </div>
+        <div class="page-subtabs routing-subtabs">
+            <button id="routingMainSubtabBtn" type="button" class="page-subtab-btn active">ROUTING</button>
+            <button id="routingMeteoSubtabBtn" type="button" class="page-subtab-btn">METEO</button>
+        </div>
 
-        <div class="routing-control-grid">
-            <div class="routing-control-item">
-                <label for="tackingTimeInput">Temps du bord (min):</label>
-                <select id="tackingTimeInput">
-                    <option value="0.25">15 minutes</option>
-                    <option value="0.33">20 minutes</option>
-                    <option value="0.5" selected>30 minutes</option>
-                    <option value="0.75">45 minutes</option>
-                    <option value="1">1 heure</option>
-                    <option value="1.5">1.5 heures</option>
-                    <option value="2">2 heures</option>
-                </select>
+        <div id="routingMainPanel" class="page-subpanel active">
+            <label for="departureDateTimeInput" style="display: block; margin-top: 10px; font-size: 12px;">Départ (date + heure):</label>
+            <input type="datetime-local" id="departureDateTimeInput" step="600" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+            <div class="routing-control-grid">
+                <div class="routing-control-item">
+                    <label for="tackingTimeInput">Temps du bord (min):</label>
+                    <select id="tackingTimeInput">
+                        <option value="0.25">15 minutes</option>
+                        <option value="0.33">20 minutes</option>
+                        <option value="0.5" selected>30 minutes</option>
+                        <option value="0.75">45 minutes</option>
+                        <option value="1">1 heure</option>
+                        <option value="1.5">1.5 heures</option>
+                        <option value="2">2 heures</option>
+                    </select>
+                </div>
+
+                <div class="routing-control-item">
+                    <label for="sailModeSelect">Mode voiles:</label>
+                    <select id="sailModeSelect">
+                        <option value="auto" selected>Auto</option>
+                        <option value="prudent">Prudent</option>
+                        <option value="performance">Performance</option>
+                    </select>
+                </div>
+
+                <div class="routing-control-item">
+                    <label for="autoWpSpacingInput">Contournement côte:</label>
+                    <select id="autoWpSpacingInput">
+                        <option value="off" selected>Désactivé</option>
+                        <option value="5">5 NM</option>
+                        <option value="8">8 NM</option>
+                        <option value="10">10 NM</option>
+                        <option value="12">12 NM</option>
+                        <option value="15">15 NM</option>
+                        <option value="20">20 NM</option>
+                    </select>
+                </div>
+
+                <div class="routing-control-item">
+                    <label for="forecastWindowDaysSelect">Fenêtre analyse:</label>
+                    <select id="forecastWindowDaysSelect">
+                        <option value="2">2 jours</option>
+                        <option value="3" selected>3 jours</option>
+                        <option value="5">5 jours</option>
+                        <option value="7">7 jours</option>
+                    </select>
+                </div>
             </div>
 
-            <div class="routing-control-item">
-                <label for="sailModeSelect">Mode voiles:</label>
-                <select id="sailModeSelect">
-                    <option value="auto" selected>Auto</option>
-                    <option value="prudent">Prudent</option>
-                    <option value="performance">Performance</option>
-                </select>
-            </div>
-
-            <div class="routing-control-item">
-                <label for="autoWpSpacingInput">Contournement côte:</label>
-                <select id="autoWpSpacingInput">
-                    <option value="off" selected>Désactivé</option>
-                    <option value="5">5 NM</option>
-                    <option value="8">8 NM</option>
-                    <option value="10">10 NM</option>
-                    <option value="12">12 NM</option>
-                    <option value="15">15 NM</option>
-                    <option value="20">20 NM</option>
-                </select>
-            </div>
-
-            <div class="routing-control-item">
-                <label for="forecastWindowDaysSelect">Fenêtre analyse:</label>
-                <select id="forecastWindowDaysSelect">
-                    <option value="2">2 jours</option>
-                    <option value="3" selected>3 jours</option>
-                    <option value="5">5 jours</option>
-                    <option value="7">7 jours</option>
-                </select>
+            <div class="button-row">
+                    <button id="computeBtn" style="flex:1;">Calculer</button>
+                    <button id="saveRouteFromRoutingBtn" style="flex:1;">Sauver</button>
+                    <button id="deleteSelectedWpBtn" style="flex:1;">Supprimer WP</button>
+                <button id="recenterBtn" style="flex:1;">Recentrer route</button>
             </div>
         </div>
 
-        <button id="suggestDepartureBtn" style="margin-top:8px;">Conseiller départ météo (≤ 20 kn)</button>
-        <div id="departureSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Suggestion départ: en attente</div>
-        <button id="openWeatherFromRoutingBtn" style="margin-top:8px;">Ouvrir météo routage</button>
-        <div id="routingWeatherHint" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo est accessible depuis Routage.</div>
-        <button id="suggestAiRoutesBtn" style="margin-top:8px;">Proposer routes IA (safe / perf)</button>
-        <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Routes IA: en attente</div>
-        <div id="aiRouteSuggestions"></div>
-
-        <div class="button-row">
-                <button id="computeBtn" style="flex:1;">Calculer</button>
-                <button id="saveRouteFromRoutingBtn" style="flex:1;">Sauver</button>
-                <button id="deleteSelectedWpBtn" style="flex:1;">Supprimer WP</button>
-            <button id="recenterBtn" style="flex:1;">Recentrer route</button>
+        <div id="routingMeteoPanel" class="page-subpanel routing-meteo-panel">
+            <button id="suggestDepartureBtn" style="margin-top:8px;">Conseiller départ météo (≤ 20 kn)</button>
+            <div id="departureSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Suggestion départ: en attente</div>
+            <button id="openWeatherFromRoutingBtn" style="margin-top:8px;">Ouvrir météo routage</button>
+            <div id="routingWeatherHint" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo est accessible depuis Routage.</div>
+            <button id="suggestAiRoutesBtn" style="margin-top:8px;">Proposer routes IA (safe / perf)</button>
+            <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Routes IA: en attente</div>
+            <div id="aiRouteSuggestions"></div>
         </div>
         <div id="windSpeedLegend"></div>
         <div id="selectedWpInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">WP sélectionné: aucun · clic sur WP pour sélectionner · clic droit pour supprimer</div>
@@ -204,6 +217,7 @@
                         <tr><th id="cloudStatsExpensesLabel">Dépenses/factures (maintenance_expenses)</th><td id="cloudStatsExpensesValue">0</td></tr>
                         <tr><th id="cloudStatsNavLabel">Journal navigation (nav_log_entries)</th><td id="cloudStatsNavValue">0</td></tr>
                         <tr><th id="cloudStatsEngineLabel">Journal moteur (engine_log)</th><td id="cloudStatsEngineValue">0</td></tr>
+                        <tr><th id="cloudStatsEngineSoundLabel">Snapshots son moteur (engine_sound_snapshots)</th><td id="cloudStatsEngineSoundValue">0</td></tr>
                         <tr class="cloud-stats-total"><th id="cloudStatsTotalLabel">Total enregistrements</th><td id="cloudStatsTotalValue">0</td></tr>
                         <tr><th id="cloudStatsStorageLabel">Taille utilisée</th><td id="cloudStatsStorageValue">0 Mo</td></tr>
                         <tr><th id="cloudStatsQuotaLabel">Quota utilisé (500 Mo)</th><td id="cloudStatsQuotaValue">0 %</td></tr>
@@ -659,6 +673,29 @@
                 <div id="engineSensorHint" class="cloud-status">Astuce: lance en mer avec iPad fixe pour une détection plus stable.</div>
             </div>
 
+            <div id="engineAudioCard" class="engine-audio-card">
+                <div id="engineAudioTitle" class="engine-sensor-card__title">Audio moteur (MVP)</div>
+                <div id="engineAudioStatus" class="cloud-status">Audio moteur: en attente</div>
+                <div class="engine-audio-regime-row">
+                    <strong id="engineAudioRegimeLabel">Régime moteur:</strong>
+                    <span id="engineAudioRegimeDetectedValue">AUTO · default</span>
+                </div>
+                <div class="button-row" style="margin-top:8px;">
+                    <button id="engineAudioRegimeAutoBtn" type="button" style="flex:1;">Auto</button>
+                    <button id="engineAudioRegimeIdleBtn" type="button" style="flex:1;">Idle</button>
+                    <button id="engineAudioRegimeCruiseBtn" type="button" style="flex:1;">Cruise</button>
+                    <button id="engineAudioRegimeHighBtn" type="button" style="flex:1;">High</button>
+                </div>
+                <div class="button-row" style="margin-top:8px;">
+                    <button id="engineAudioCaptureSnapshotBtn" type="button" style="flex:1;">Capturer snapshot moteur</button>
+                </div>
+                <label for="engineAudioWavInput" style="display:block; margin-top:10px; font-size:12px;">Importer WAV (micro DJI):</label>
+                <input type="file" id="engineAudioWavInput" accept=".wav,audio/wav,audio/wave" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+                <div id="engineAudioHint" class="cloud-status">Conseil: micro fixe dans le compartiment moteur pour une meilleure comparaison.</div>
+                <label id="engineAudioListLabel" style="display:block; margin-top:12px; font-size:12px;">Derniers snapshots audio:</label>
+                <div id="engineAudioList"></div>
+            </div>
+
             <div class="button-row">
                 <button id="engineLogOpenCreateBtn" style="flex:1;">Ajouter</button>
             </div>
@@ -877,7 +914,7 @@
 <div id="aiTrafficOverlay" class="ai-traffic-overlay" style="display:none;">
     <div class="ai-traffic-window">
         <div class="ai-traffic-header">
-            <strong>Trafic modèle en cours</strong>
+            <strong id="aiTrafficTitle">Trafic modèle en cours</strong>
             <button id="aiTrafficCloseBtn" type="button">Fermer</button>
         </div>
         <div id="aiTrafficList" class="ai-traffic-list"></div>
