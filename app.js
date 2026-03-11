@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-14';
+const APP_BUILD_VERSION = '20260311-15';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -17038,11 +17038,15 @@ async function computeRoute() {
             }
 
             if (!isMotorSegment && segPolarName && activeDisplaySegment.polarProfileName
-                && activeDisplaySegment.polarProfileName !== segPolarName
-                && activeDisplaySegment.polarProfileName !== t('Multi', 'Multi', 'Multi')) {
-                // Only mark as "Multi" if we have multiple *different* polars within the same aggregated segment
-                // (i.e., same segment but different timepoint). For now, just update with the calculated polar.
-                activeDisplaySegment.polarProfileName = segPolarName;
+                && activeDisplaySegment.polarProfileName !== segPolarName) {
+                // When different polars are used within same aggregated segment,
+                // accumulate them on separate lines (e.g., "GV2_Jib\nGV_Genoa")
+                const existing = String(activeDisplaySegment.polarProfileName).trim();
+                const lines = existing.split('\n').map(s => s.trim()).filter(Boolean);
+                if (!lines.includes(segPolarName)) {
+                    lines.push(segPolarName);
+                }
+                activeDisplaySegment.polarProfileName = lines.join('\n');
             }
         }
     }
