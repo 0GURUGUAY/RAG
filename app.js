@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-11';
+const APP_BUILD_VERSION = '20260311-12';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -1395,12 +1395,42 @@ function getActivePolarData() {
     return getActivePolarProfile()?.polarData || clonePolarData(DEFAULT_POLAR_DATA);
 }
 
+function getPolarProfileSuitabilityForTWS(profile, tws) {
+    // Filtre métier : certaines voiles ne sont pas utilisables au-delà de certains TWS
+    const name = String(profile.name || '').toUpperCase();
+    const id = String(profile.id || '').toUpperCase();
+    const fullName = `${id} ${name}`;
+    
+    // Gennaker = voile légère, indisponible à fort vent
+    if (fullName.includes('GENNAKER') && tws >= 18) {
+        return false;
+    }
+    
+    // Genoa sans ris = voile complète, indisponible au-delà de ~16-18kn
+    if ((fullName.startsWith('GV_GENOA') || fullName.includes('GV_GENOA')) && tws >= 18) {
+        return false;
+    }
+    
+    // GV1 (1er ris) inefficace au-delà de ~24kn
+    if (fullName.includes('GV1_') && tws >= 25) {
+        return false; // Passe à GV2
+    }
+    
+    return true;
+}
+
 function getBestPolarForConditions(tws, twa) {
     if (polarProfiles.length <= 1) return polarProfiles[0] || null;
+    
     const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
-    let bestProfile = polarProfiles[0];
+    
+    // Filtre : obtenir les profils acceptables au TWS actuel
+    const acceptableProfiles = polarProfiles.filter(p => getPolarProfileSuitabilityForTWS(p, tws));
+    const profilesToRank = acceptableProfiles.length > 0 ? acceptableProfiles : polarProfiles;
+    
+    let bestProfile = profilesToRank[0];
     let bestSpeed = -1;
-    polarProfiles.forEach(profile => {
+    profilesToRank.forEach(profile => {
         const speed = polarLookup(tws, absTwa, profile.polarData);
         if (speed > bestSpeed) { bestSpeed = speed; bestProfile = profile; }
     });
