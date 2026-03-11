@@ -1,8 +1,8 @@
-import { routeSegment, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_POLAR_DATA, clonePolarData, normalizePolarData } from './polarRouter.js';
+import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_POLAR_DATA, clonePolarData, normalizePolarData } from './polarRouter.js';
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-10';
+const APP_BUILD_VERSION = '20260311-11';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
