@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-16';
+const APP_BUILD_VERSION = '20260311-17';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -1401,24 +1401,28 @@ function getPolarProfileSuitabilityForTWS(profile, tws) {
     const id = String(profile.id || '').toUpperCase();
     const fullName = `${id} ${name}`;
     
-    // Gennaker = voile légère, indisponible à fort vent
-    if (fullName.includes('GENNAKER') && tws >= 18) {
+    // Normalize: replace underscores with spaces for consistent matching
+    // since imported names like "Dufour 56 · GV Genoa" use spaces, not underscores
+    const normalized = fullName.replace(/_/g, ' ');
+    
+    // Gennaker = voile légère, indisponible à fort vent (TWS ≥ 18)
+    if (normalized.includes('GENNAKER') && tws >= 18) {
         return false;
     }
     
-    // Genoa sans ris = voile complète, indisponible au-delà de ~18kn
-    if ((fullName.startsWith('GV_GENOA') || fullName.includes('GV_GENOA')) && tws >= 18) {
+    // Genoa sans ris = voile complète, indisponible à TWS ≥ 18
+    if ((normalized.includes('GV GENOA') || normalized.match(/\bGV\s+GENOA\b/)) && tws >= 18) {
         return false;
     }
     
-    // GV1 (1er ris) remplacé par GV2 au-delà de ~20kn de vent
-    if (fullName.includes('GV1_') && tws >= 20) {
-        return false; // Passe à GV2 (2e ris)
+    // GV1 (1er ris) remplacé par GV2 au-delà de 20kn
+    if (normalized.includes('GV1') && tws >= 20) {
+        return false;
     }
     
     // À fort vent (≥18kn), préférer Jib plutôt que Genoa complet
-    if (fullName.includes('GV2_GENOA') && tws >= 18) {
-        return false; // Use GV2_Jib instead
+    if (normalized.includes('GV2') && normalized.includes('GENOA') && tws >= 18) {
+        return false;
     }
     
     return true;
