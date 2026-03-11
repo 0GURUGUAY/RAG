@@ -2,7 +2,7 @@ import { routeSegment, distanceNm, getBearing, computeTWA, movePoint } from './p
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260310-06';
+const APP_BUILD_VERSION = '20260311-01';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -8757,7 +8757,52 @@ function getSupplierCandidatesFromText(text, fileName = '') {
         .slice(0, 3);
 }
 
-function guessSupplierFromText(text, fileName = '') {
+
+// IA supplier extraction (Gemini)
+async function extractSupplierNameWithAI(text) {
+    // Utilise les réglages actuels pour Gemini
+    const llmSettings = documentRagLlmSettings || {};
+    const apiKey = llmSettings.apiKey || '';
+    const model = llmSettings.model || 'gemini-1.5-flash-latest';
+    if (!apiKey) return { name: '', confidence: 'none', source: 'none' };
+
+    const prompt = [
+        'Tu es un assistant expert en factures. Extrais uniquement le nom du fournisseur principal de la facture ci-dessous. Réponds uniquement par un JSON de la forme {"supplierName": "NOM"}.',
+        '',
+        'Facture :',
+        text.slice(0, 12000)
+    ].join('\n');
+
+    try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.2, responseMimeType: 'application/json' }
+            })
+        });
+        if (!response.ok) return { name: '', confidence: 'none', source: 'none' };
+        const payload = await response.json();
+        const textAnswer = extractGeminiTextAnswer(payload);
+        const structured = extractJsonPayloadFromText(textAnswer);
+        if (structured && typeof structured === 'object' && structured.supplierName) {
+            return { name: String(structured.supplierName).trim(), confidence: 'ai', source: 'gemini' };
+        }
+        return { name: '', confidence: 'none', source: 'none' };
+    } catch (e) {
+        return { name: '', confidence: 'none', source: 'none' };
+    }
+}
+
+// Version asynchrone IA ou fallback heuristique
+async function guessSupplierFromText(text, fileName = '') {
+    // Si mode IA activé, tente extraction IA
+    if ((documentRagLlmSettings?.mode === 'external' || documentRagLlmSettings?.provider === 'gemini') && documentRagLlmSettings?.apiKey) {
+        const aiResult = await extractSupplierNameWithAI(text);
+        if (aiResult?.name) return aiResult;
+    }
+    // Sinon heuristique locale
     const candidates = getSupplierCandidatesFromText(text, fileName);
     if (!candidates.length) return { name: '', confidence: 'none', source: 'none' };
     return {
@@ -16586,6 +16631,7 @@ function drawWind(lat, lon, direction) {
 
 function sanitizeSavedRoute(route, fallbackIndex = 0) {
     const nowIso = new Date().toISOString();
+    const id = isUuidString(route?.id) ? String(route.id) : generateClientUuid();
     const name = String(route?.name || `Route ${fallbackIndex + 1}`).trim() || `Route ${fallbackIndex + 1}`;
     const date = String(route?.date || departureDate || nowIso.slice(0, 10));
     const time = normalizeHourTime(route?.time || departureTime || '12:00');
@@ -16603,6 +16649,7 @@ function sanitizeSavedRoute(route, fallbackIndex = 0) {
     const totalDistanceNm = Number.isFinite(parsedDistance) ? parsedDistance : null;
 
     return {
+        id,
         name,
         date,
         time,
@@ -16635,6 +16682,19 @@ function setSavedRoutes(list) {
     const normalized = Array.isArray(list)
         ? list.map((route, index) => sanitizeSavedRoute(route, index))
         : [];
+
+    const seenIds = new Set();
+    normalized.forEach((route, index) => {
+        const routeId = String(route?.id || '').trim();
+        if (!isUuidString(routeId) || seenIds.has(routeId)) {
+            normalized[index] = {
+                ...route,
+                id: generateClientUuid()
+            };
+        }
+        seenIds.add(String(normalized[index]?.id || ''));
+    });
+
     savedRoutesCache = normalized;
     localStorage.setItem(SAVED_ROUTES_STORAGE_KEY, JSON.stringify(normalized));
 }
@@ -17039,6 +17099,7 @@ function buildRoutesFromCloudV2Rows(routeRows, pointRows) {
             : extractLegacyPoints(row);
 
         return sanitizeSavedRoute({
+            id: routeId,
             name: row?.name,
             date: row?.departure_date ?? row?.date,
             time: row?.departure_time ?? row?.time,
@@ -17617,12 +17678,17 @@ async function pushRoutesToCloudV2(routes) {
 
     const canonicalRouteName = value => String(value || '').trim().toLowerCase();
     const existingRows = Array.isArray(existingRouteRows) ? existingRouteRows : [];
+    const existingById = new Map();
     const existingByName = new Map();
     const duplicateRouteIdsToDelete = [];
 
     existingRows.forEach(row => {
         const id = String(row?.id || '').trim();
         if (!id) return;
+        existingById.set(id, {
+            id,
+            name: String(row?.name || '').trim()
+        });
         const key = canonicalRouteName(row?.name);
         if (!key) return;
 
@@ -17638,7 +17704,7 @@ async function pushRoutesToCloudV2(routes) {
         duplicateRouteIdsToDelete.push(id);
     });
 
-    const localRouteNameKeys = new Set();
+    const localRouteIds = new Set();
 
     for (const route of safeRoutes) {
         const routeName = String(route?.name || '').trim();
@@ -17649,10 +17715,12 @@ async function pushRoutesToCloudV2(routes) {
         if (!routeNameKey) {
             throw new Error('Nom de route invalide: synchronisation cloud refusée.');
         }
-        localRouteNameKeys.add(routeNameKey);
-
-        const existingRow = existingByName.get(routeNameKey) || null;
-        const routeId = existingRow?.id || generateClientUuid();
+        const localRouteId = isUuidString(route?.id) ? String(route.id) : '';
+        const existingRow = (localRouteId && existingById.get(localRouteId))
+            || existingByName.get(routeNameKey)
+            || null;
+        const routeId = existingRow?.id || localRouteId || generateClientUuid();
+        localRouteIds.add(routeId);
         const fallbackUpdatedAt = route.updatedAt || new Date().toISOString();
         const baseRoutePayload = {
             name: routeName,
@@ -17729,8 +17797,7 @@ async function pushRoutesToCloudV2(routes) {
         .filter(row => {
             const id = String(row?.id || '').trim();
             if (!id) return false;
-            const key = canonicalRouteName(row?.name);
-            return key && !localRouteNameKeys.has(key);
+            return !localRouteIds.has(id);
         })
         .map(row => String(row?.id || '').trim())
         .filter(Boolean);
@@ -17836,17 +17903,21 @@ async function pullRoutesFromCloud(options = {}) {
     const effectiveRoutes = Array.isArray(cloudRoutesV2) ? cloudRoutesV2 : [];
 
     const mergeRoutesPreservingDirtyLocal = (localList, cloudList) => {
-        const canonical = value => String(value || '').trim().toLowerCase();
+        const routeKey = (route) => {
+            const id = String(route?.id || '').trim();
+            if (isUuidString(id)) return `id:${id}`;
+            return `name:${String(route?.name || '').trim().toLowerCase()}`;
+        };
         const mergedByName = new Map();
 
         (Array.isArray(cloudList) ? cloudList : []).forEach((route, index) => {
             const safe = sanitizeSavedRoute(route, index);
-            mergedByName.set(canonical(safe?.name), safe);
+            mergedByName.set(routeKey(safe), safe);
         });
 
         (Array.isArray(localList) ? localList : []).forEach((route, index) => {
             const safeLocal = sanitizeSavedRoute(route, index);
-            const key = canonical(safeLocal?.name);
+            const key = routeKey(safeLocal);
             const cloudVersion = mergedByName.get(key);
             if (!cloudVersion) {
                 mergedByName.set(key, safeLocal);
@@ -18302,6 +18373,9 @@ async function saveRoute() {
     }
 
     const payload = {
+        id: shouldUpdateExisting && isUuidString(saved[targetIndex]?.id)
+            ? String(saved[targetIndex].id)
+            : generateClientUuid(),
         name,
         date: departureDate,
         time: departureTime,
