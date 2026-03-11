@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-23';
+const APP_BUILD_VERSION = '20260311-24';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -1426,13 +1426,27 @@ function getPolarProfileSuitabilityForConditions(profile, tws, twa) {
         .toUpperCase()
         .replace(/_/g, ' ');
     const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
+    const isGennaker = name.includes('GENNAKER');
+    const isJib = name.includes('JIB') || name.includes('TRINQUETTE');
+    const isGv2 = name.includes('GV2') || name.includes('2 RIS');
 
-    if (name.includes('GENNAKER') && absTwa < 90) {
+    if (isGennaker && absTwa < 90) {
         return false;
     }
 
     // À vent fort, le gennaker n'est autorisé qu'au grand largue / vent arrière.
-    if (name.includes('GENNAKER') && tws >= 18 && absTwa < 145) {
+    if (isGennaker && tws >= 18 && absTwa < 145) {
+        return false;
+    }
+
+    // Limites de sécurité "marin" en fort vent.
+    // ≥ 25 kn : pas de gennaker, quelle que soit l'allure.
+    if (isGennaker && tws >= 25) {
+        return false;
+    }
+
+    // ≥ 30 kn : n'autoriser que GV2 + Jib / Trinquette.
+    if (tws >= 30 && !(isGv2 && isJib)) {
         return false;
     }
 
