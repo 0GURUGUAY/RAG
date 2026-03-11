@@ -16703,6 +16703,7 @@ async function computeRoute() {
                 tackingTimeHours
             );
             let _resolvedSegPolarName = '';
+            const rawSegment = isMotorSegment
                 ? {
                     type: 'motor',
                     distance: distanceNm(startPoint.lat, startPoint.lon, endPoint.lat, endPoint.lon),
