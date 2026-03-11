@@ -48,28 +48,6 @@
 
             <div class="routing-control-grid">
                 <div class="routing-control-item">
-                    <label for="tackingTimeInput">Temps du bord (min):</label>
-                    <select id="tackingTimeInput">
-                        <option value="0.25">15 minutes</option>
-                        <option value="0.33">20 minutes</option>
-                        <option value="0.5" selected>30 minutes</option>
-                        <option value="0.75">45 minutes</option>
-                        <option value="1">1 heure</option>
-                        <option value="1.5">1.5 heures</option>
-                        <option value="2">2 heures</option>
-                    </select>
-                </div>
-
-                <div class="routing-control-item">
-                    <label for="sailModeSelect">Mode voiles:</label>
-                    <select id="sailModeSelect">
-                        <option value="auto" selected>Auto</option>
-                        <option value="prudent">Prudent</option>
-                        <option value="performance">Performance</option>
-                    </select>
-                </div>
-
-                <div class="routing-control-item">
                     <label for="routingPolarProfileSelect" id="routingPolarProfileSelectLabel">Polaire / gréement:</label>
                     <select id="routingPolarProfileSelect"></select>
                     <div id="routingPolarProfileHint" class="cloud-status">Polaire standard active.</div>
@@ -88,15 +66,6 @@
                     </select>
                 </div>
 
-                <div class="routing-control-item">
-                    <label for="forecastWindowDaysSelect">Fenêtre analyse:</label>
-                    <select id="forecastWindowDaysSelect">
-                        <option value="2">2 jours</option>
-                        <option value="3" selected>3 jours</option>
-                        <option value="5">5 jours</option>
-                        <option value="7">7 jours</option>
-                    </select>
-                </div>
             </div>
 
             <div class="button-row">
@@ -108,6 +77,15 @@
         </div>
 
         <div id="routingMeteoPanel" class="page-subpanel routing-meteo-panel">
+            <div class="routing-control-item" style="margin-top:8px;">
+                <label for="forecastWindowDaysSelect">Fenêtre analyse:</label>
+                <select id="forecastWindowDaysSelect">
+                    <option value="2">2 jours</option>
+                    <option value="3" selected>3 jours</option>
+                    <option value="5">5 jours</option>
+                    <option value="7">7 jours</option>
+                </select>
+            </div>
             <button id="suggestDepartureBtn" style="margin-top:8px;">Conseiller départ météo (≤ 20 kn)</button>
             <div id="departureSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Suggestion départ: en attente</div>
             <button id="openWeatherFromRoutingBtn" style="margin-top:8px;">Ouvrir météo routage</button>

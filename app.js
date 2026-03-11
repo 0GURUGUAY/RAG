@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-24';
+const APP_BUILD_VERSION = '20260311-28';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -292,6 +292,7 @@ const COASTAL_CLEARANCE_NM = 5;
 const AUTO_WP_MIN_SPACING_NM = 10;
 const AUTO_WP_MAX_INTERMEDIATE = 24;
 const AUTO_WEATHER_SPLIT_MAX_HOURS = 2;
+const AUTO_WEATHER_SPLIT_UPWIND_MAX_HOURS = 4;
 const AUTO_WEATHER_SPLIT_MAX_SUBSEGMENTS = 8;
 let autoWpMinSpacingNm = null;
 let currentLanguage = 'fr';
@@ -453,20 +454,12 @@ function applyLanguageToUi() {
     setElementText('#routingWeatherHint', t('Météo est accessible depuis Routage.', 'Meteo accesible desde Navegación.'));
     setElementText('#suggestAiRoutesBtn', t('Proposer routes IA (safe / perf)', 'Proponer rutas IA (safe / perf)'));
     setElementText('label[for="departureDateTimeInput"]', t('Départ (date + heure):', 'Salida (fecha + hora):'));
-    setElementText('label[for="tackingTimeInput"]', t('Temps du bord (min):', 'Tiempo de bordo (min):'));
     setElementText('#routingPolarProfileSelectLabel', t('Polaire / gréement:', 'Polar / aparejo:', 'Polar / rig:'));
     setElementText('label[for="autoWpSpacingInput"]', t('Contournement côte:', 'Rodeo costa:'));
     setElementText('label[for="forecastWindowDaysSelect"]', t('Fenêtre analyse:', 'Ventana análisis:'));
     setElementText('#departureSuggestionInfo', t('Suggestion départ: en attente', 'Sugerencia salida: en espera'));
     setElementText('#aiRouteSuggestionInfo', t('Routes IA: en attente', 'Rutas IA: en espera'));
 
-    setElementText('#tackingTimeInput option[value="0.25"]', t('15 minutes', '15 minutos'));
-    setElementText('#tackingTimeInput option[value="0.33"]', t('20 minutes', '20 minutos'));
-    setElementText('#tackingTimeInput option[value="0.5"]', t('30 minutes', '30 minutos'));
-    setElementText('#tackingTimeInput option[value="0.75"]', t('45 minutes', '45 minutos'));
-    setElementText('#tackingTimeInput option[value="1"]', t('1 heure', '1 hora'));
-    setElementText('#tackingTimeInput option[value="1.5"]', t('1.5 heures', '1.5 horas'));
-    setElementText('#tackingTimeInput option[value="2"]', t('2 heures', '2 horas'));
     setElementText('#autoWpSpacingInput option[value="off"]', t('Désactivé', 'Desactivado'));
     setElementText('#forecastWindowDaysSelect option[value="2"]', t('2 jours', '2 días'));
     setElementText('#forecastWindowDaysSelect option[value="3"]', t('3 jours', '3 días'));
@@ -2700,6 +2693,25 @@ function estimateEffectiveSpeedForLegSplit(startPoint, endPoint, weather) {
     }
 }
 
+function getMaxDistanceForWeatherSplit(startPoint, endPoint, weather, effectiveSpeed, directDistanceNm) {
+    const safeSpeed = Number.isFinite(effectiveSpeed) && effectiveSpeed > 0 ? effectiveSpeed : 6;
+    const safeDirectDistance = Number.isFinite(directDistanceNm) && directDistanceNm > 0
+        ? directDistanceNm
+        : distanceNm(startPoint.lat, startPoint.lon, endPoint.lat, endPoint.lon);
+
+    const upwind = isUpwindLeg(startPoint, endPoint, weather?.windDirection, weather?.windSpeed);
+    if (!upwind) {
+        return Math.max(4, safeSpeed * AUTO_WEATHER_SPLIT_MAX_HOURS);
+    }
+
+    const upwindChunkDistanceNm = Math.max(4, safeSpeed * AUTO_WEATHER_SPLIT_UPWIND_MAX_HOURS);
+    if (safeDirectDistance <= upwindChunkDistanceNm) {
+        return Math.max(4, safeDirectDistance + 1);
+    }
+
+    return upwindChunkDistanceNm;
+}
+
 function normalizeCurrentFromWeather(weather) {
     const rawVelocity = Number(weather?.oceanCurrentVelocity);
     const rawDirection = Number(weather?.oceanCurrentDirection);
@@ -2755,44 +2767,7 @@ function getAutoTackingTimeHours(startPoint, endPoint, windDirection, windSpeed,
     const fallback = Number.isFinite(fallbackTackTimeHours) && fallbackTackTimeHours > 0
         ? fallbackTackTimeHours
         : 0.5;
-
-    if (!Number.isFinite(startPoint?.lat) || !Number.isFinite(startPoint?.lon)) return fallback;
-    if (!Number.isFinite(endPoint?.lat) || !Number.isFinite(endPoint?.lon)) return fallback;
-    if (!Number.isFinite(windDirection) || !Number.isFinite(windSpeed) || windSpeed <= 0) return fallback;
-
-    const bearing = getBearing(startPoint, endPoint);
-    const twa = computeTWA(bearing, windDirection);
-    if (!Number.isFinite(twa) || twa >= 40) return fallback;
-
-    const directDistance = distanceNm(startPoint.lat, startPoint.lon, endPoint.lat, endPoint.lon);
-    if (!Number.isFinite(directDistance) || directDistance <= 0.1) return fallback;
-
-    const targetLegCount = Math.max(2, Math.min(10, Math.round(directDistance / 2.2)));
-    let bestCandidate = fallback;
-    let bestScore = Number.POSITIVE_INFINITY;
-
-    const { polarData: _autoTackPolarData } = resolveSegmentPolar(startPoint, endPoint, windDirection, windSpeed);
-    AUTO_TACK_TIME_CANDIDATES_HOURS.forEach(candidate => {
-        const test = routeSegment(startPoint, endPoint, windDirection, windSpeed, candidate, _autoTackPolarData);
-        if (!test || test.type !== 'tacking') return;
-
-        const points = Array.isArray(test.points) ? test.points : [];
-        const legCount = Math.max(1, points.length);
-        const lastPoint = points.length ? points[points.length - 1] : startPoint;
-        const closureDistanceNm = distanceNm(lastPoint.lat, lastPoint.lon, endPoint.lat, endPoint.lon);
-
-        const closurePenalty = closureDistanceNm * 2.5;
-        const legCountPenalty = Math.abs(legCount - targetLegCount) * 0.3;
-        const excessiveLegPenalty = Math.max(0, legCount - 16) * 0.7;
-        const score = closurePenalty + legCountPenalty + excessiveLegPenalty;
-
-        if (score < bestScore) {
-            bestScore = score;
-            bestCandidate = candidate;
-        }
-    });
-
-    return bestCandidate;
+    return fallback;
 }
 
 function isUpwindLeg(startPoint, endPoint, windDirection, windSpeed) {
@@ -5172,9 +5147,7 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
         const legStartWeather = await getWeatherAtDateHour(start.lat, start.lon, legStartSlot.date, legStartSlot.hour);
         const effectiveSpeed = estimateEffectiveSpeedForLegSplit(start, end, legStartWeather);
         const directDistanceNm = distanceNm(start.lat, start.lon, end.lat, end.lon);
-        const maxDistanceForWeatherNm = isUpwindLeg(start, end, legStartWeather?.windDirection, legStartWeather?.windSpeed)
-            ? Math.max(4, directDistanceNm + 1)
-            : Math.max(4, effectiveSpeed * AUTO_WEATHER_SPLIT_MAX_HOURS);
+        const maxDistanceForWeatherNm = getMaxDistanceForWeatherSplit(start, end, legStartWeather, effectiveSpeed, directDistanceNm);
         const legPoints = densifyPolylineForWeather([start, end], maxDistanceForWeatherNm);
 
         for (let legIndex = 0; legIndex < legPoints.length - 1; legIndex++) {
@@ -5387,9 +5360,6 @@ async function suggestBestDeparture() {
 }
 
 function updateRoutingControlsUiFromState() {
-    const tackingInput = document.getElementById('tackingTimeInput');
-    if (tackingInput) tackingInput.value = String(tackingTimeHours);
-
     updateRoutingPolarProfileUi();
 }
 
@@ -15548,11 +15518,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     maintenanceTabBtn.addEventListener('click', () => activateTab('maintenance'));
     setMaintenanceMapMode(false);
 
-    document.getElementById("tackingTimeInput").value = tackingTimeHours;
-    document.getElementById("tackingTimeInput").addEventListener("change", function(e) {
-        tackingTimeHours = parseFloat(e.target.value);
-    });
-
     const routingPolarProfileSelect = document.getElementById('routingPolarProfileSelect');
     if (routingPolarProfileSelect) {
         routingPolarProfileSelect.value = activePolarProfileId;
@@ -16865,9 +16830,7 @@ async function computeRoute() {
         const legStartWeather = await getWeatherAtDateHour(userStart.lat, userStart.lon, legStartSlot.date, legStartSlot.hour);
         const effectiveSpeed = estimateEffectiveSpeedForLegSplit(userStart, userEnd, legStartWeather);
         const directDistanceNm = distanceNm(userStart.lat, userStart.lon, userEnd.lat, userEnd.lon);
-        const maxDistanceForWeatherNm = isUpwindLeg(userStart, userEnd, legStartWeather?.windDirection, legStartWeather?.windSpeed)
-            ? Math.max(4, directDistanceNm + 1)
-            : Math.max(4, effectiveSpeed * AUTO_WEATHER_SPLIT_MAX_HOURS);
+        const maxDistanceForWeatherNm = getMaxDistanceForWeatherSplit(userStart, userEnd, legStartWeather, effectiveSpeed, directDistanceNm);
         const weatherLegPoints = densifyPolylineForWeather(coastalLegPoints, maxDistanceForWeatherNm);
         if (!Array.isArray(weatherLegPoints) || weatherLegPoints.length < 2) continue;
 
@@ -17030,7 +16993,11 @@ async function computeRoute() {
             }
 
             routeSegmentsForDraw.push({
-                latlngs: segmentLatLngs,
+                latlngs: buildDisplayedSegmentLatLngs(
+                    { lat: startPoint.lat, lng: startPoint.lon },
+                    { lat: endPoint.lat, lng: endPoint.lon },
+                    segment
+                ),
                 windSpeed: wind.speed,
                 mode: segment.type,
                 waveHeight: weatherAtPassage.waveHeight,
@@ -17991,6 +17958,48 @@ function buildSegmentLatLngs(start, end, segment) {
     }
 
     return latlngs;
+}
+
+function buildDisplayedSegmentLatLngs(start, end, segment) {
+    const actualLatLngs = buildSegmentLatLngs(start, end, segment);
+    if (segment?.type !== 'tacking') {
+        return actualLatLngs;
+    }
+
+    const startLon = Number.isFinite(start?.lng) ? start.lng : start?.lon;
+    const endLon = Number.isFinite(end?.lng) ? end.lng : end?.lon;
+    if (!Number.isFinite(start?.lat) || !Number.isFinite(startLon) || !Number.isFinite(end?.lat) || !Number.isFinite(endLon)) {
+        return actualLatLngs;
+    }
+
+    const directDistanceNm = distanceNm(start.lat, startLon, end.lat, endLon);
+    if (!Number.isFinite(directDistanceNm) || directDistanceNm < 0.5) {
+        return actualLatLngs;
+    }
+
+    const directBearing = getBearing({ lat: start.lat, lon: startLon }, { lat: end.lat, lon: endLon });
+    if (!Number.isFinite(directBearing)) {
+        return actualLatLngs;
+    }
+
+    const controlPointCount = Math.max(6, Math.min(18, (Array.isArray(segment?.points) ? segment.points.length : 0) + 4));
+    const oscillationCount = Math.max(2, Math.min(6, Math.round(controlPointCount / 3)));
+    const amplitudeNm = Math.max(0.12, Math.min(0.6, directDistanceNm * 0.025));
+    const perpendicularBearing = (directBearing + 90) % 360;
+    const waved = [];
+
+    for (let index = 0; index <= controlPointCount; index++) {
+        const ratio = index / controlPointCount;
+        const basePoint = movePoint(start.lat, startLon, directBearing, directDistanceNm * ratio);
+        const envelope = Math.sin(Math.PI * ratio);
+        const offsetNm = Math.sin(ratio * Math.PI * oscillationCount) * amplitudeNm * envelope;
+        const offsetPoint = movePoint(basePoint.lat, basePoint.lon, perpendicularBearing, offsetNm);
+        waved.push([offsetPoint.lat, offsetPoint.lon]);
+    }
+
+    waved[0] = [start.lat, startLon];
+    waved[waved.length - 1] = [end.lat, endLon];
+    return waved;
 }
 
 function getWindSpeedColor(speed) {
@@ -20276,7 +20285,6 @@ function loadRoute(index) {
     // restore UI values (keep current selected date)
     departureTime = normalizeHourTime(r.time);
     updateDepartureDateTimeInput();
-    document.getElementById('tackingTimeInput').value = r.tackingTimeHours;
     tackingTimeHours = r.tackingTimeHours;
 
     // draw polyline between waypoints
