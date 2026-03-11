@@ -2,7 +2,7 @@ import { routeSegment, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_PO
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-09';
+const APP_BUILD_VERSION = '20260311-10';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -17031,7 +17031,11 @@ async function computeRoute() {
     drawRouteByWindSpeed(routeSegmentsForDraw);
     drawStrongWaveDirections(routeSegmentsForDraw);
 
-    let segmentsHtml = `<table id="segmentsTable" style="width:100%; border-collapse:collapse; margin-top:8px; font-size:8px;"><tr style="border-bottom:1px solid #ccc;"><th style="text-align:left; padding:2px; width:22px;">WP</th><th style="text-align:left; padding:2px; width:14px;">Seg</th><th style="text-align:right; padding:2px;">${t('Départ', 'Salida')}</th><th style="text-align:right; padding:2px;">${t('Arrivée', 'Llegada')}</th><th style="text-align:right; padding:2px;">${t('Cap', 'Rumbo')}</th><th style="text-align:right; padding:2px;">${t('Dist.', 'Dist.')}</th><th style="text-align:right; padding:2px;">${t('Temps', 'Tiempo')}</th><th style="text-align:right; padding:2px;">${t('Vit.', 'Vel.')}</th><th style="text-align:right; padding:2px;">${t('V.V', 'V.V')}</th><th style="text-align:right; padding:2px;">${t('D.V', 'D.V')}</th><th style="text-align:right; padding:2px;">${t('V.C', 'V.C', 'C.S')}</th><th style="text-align:right; padding:2px;">${t('D.C', 'D.C', 'C.D')}</th><th style="text-align:left; padding:2px;">${t('Voiles', 'Velas')}</th></tr>`;
+    const autoPolarSegmentsBadge = activePolarProfileId === POLAR_AUTO_PROFILE_ID
+        ? `<div style="margin-top:6px; margin-bottom:4px; font-size:10px; color:#8fe7ff; font-weight:700;">⚡ ${t('Mode Auto polaires actif', 'Modo Auto polares activo', 'Auto polar mode active')}</div>`
+        : '';
+
+    let segmentsHtml = `${autoPolarSegmentsBadge}<table id="segmentsTable" style="width:100%; border-collapse:collapse; margin-top:8px; font-size:8px;"><tr style="border-bottom:1px solid #ccc;"><th style="text-align:left; padding:2px; width:22px;">WP</th><th style="text-align:left; padding:2px; width:14px;">Seg</th><th style="text-align:right; padding:2px;">${t('Départ', 'Salida')}</th><th style="text-align:right; padding:2px;">${t('Arrivée', 'Llegada')}</th><th style="text-align:right; padding:2px;">${t('Cap', 'Rumbo')}</th><th style="text-align:right; padding:2px;">${t('Dist.', 'Dist.')}</th><th style="text-align:right; padding:2px;">${t('Temps', 'Tiempo')}</th><th style="text-align:right; padding:2px;">${t('Vit.', 'Vel.')}</th><th style="text-align:right; padding:2px;">${t('V.V', 'V.V')}</th><th style="text-align:right; padding:2px;">${t('D.V', 'D.V')}</th><th style="text-align:right; padding:2px;">${t('V.C', 'V.C', 'C.S')}</th><th style="text-align:right; padding:2px;">${t('D.C', 'D.C', 'C.D')}</th><th style="text-align:left; padding:2px;">${t('Voiles', 'Velas')}</th></tr>`;
     
     segmentsInfo.forEach((seg, segIndex) => {
         segmentsHtml += `<tr class="segment-row" data-seg-index="${segIndex}" style="border-bottom:1px solid #eee; cursor:pointer;"><td style="padding:2px; width:22px;" title="${seg.startLabel}">${seg.startIcon}</td><td style="padding:2px; width:14px;">${seg.number}</td><td style="text-align:right; padding:2px;">${seg.departureLabel}</td><td style="text-align:right; padding:2px;">${seg.arrivalLabel}</td><td style="text-align:right; padding:2px;">${seg.bearing}°</td><td style="text-align:right; padding:2px;">${seg.distance} nm</td><td style="text-align:right; padding:2px;">${seg.time} h</td><td style="text-align:right; padding:2px;">${seg.speed} kn</td><td style="text-align:right; padding:2px;">${seg.windSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.windDirection}°</td><td style="text-align:right; padding:2px;">${seg.currentSpeed} kn</td><td style="text-align:right; padding:2px;">${seg.currentDirection}</td><td style="padding:2px;">${seg.sailSetup}${seg.polarProfileName ? `<br><span style="font-size:7px;opacity:0.6;color:#8fe7ff;">${escapeHtml(seg.polarProfileName)}</span>` : ''}</td></tr>`;
