@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260312-33';
+const APP_BUILD_VERSION = '20260312-34';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -724,6 +724,7 @@ function applyLanguageToUi() {
     setElementText('#logWorkspaceTitle', t('Saisie journal', 'Edición diario'));
     setElementText('#logWorkspacePlaceholder', t('Clique sur Ajouter pour ouvrir le formulaire', 'Haz clic en Añadir para abrir el formulario'));
     setElementText('#navLogStatus', t('Journal navigation: en attente', 'Diario navegación: en espera'));
+    setElementText('#navLogTraceHint', t('Astuce: clique une ligne du journal pour rouvrir sa trace sur la carte.', 'Consejo: toca una línea del diario para reabrir su traza en el mapa.'));
     setElementText('label[for="watchTimeInput"]', t('Heure du quart:', 'Hora de guardia:'));
     setElementText('label[for="watchEndTimeInput"]', t('Heure de fin (voyage/quart):', 'Hora de fin (viaje/guardia):'));
     setElementText('label[for="watchCrewInput"]', t('Équipage / quart:', 'Tripulación / guardia:'));
@@ -1005,7 +1006,38 @@ function initializeSidebarToggle() {
 }
 
 function syncNavLogGpsCompactUi() {
-    const shouldCompactTabs = activeTabName === 'navlog' && navWatchId !== null;
+    const isGpsLoggingActive = navWatchId !== null;
+    const shouldCompactTabs = activeTabName === 'navlog' && isGpsLoggingActive;
+    const startNavLogBtn = document.getElementById('startNavLogBtn');
+    const stopNavLogBtn = document.getElementById('stopNavLogBtn');
+    const navLogStatus = document.getElementById('navLogStatus');
+
+    if (startNavLogBtn) {
+        startNavLogBtn.disabled = isGpsLoggingActive;
+        startNavLogBtn.setAttribute('aria-disabled', isGpsLoggingActive ? 'true' : 'false');
+        startNavLogBtn.textContent = isGpsLoggingActive
+            ? t('Log GPS en cours', 'Log GPS en curso')
+            : t('Démarrer log GPS', 'Iniciar log GPS');
+        startNavLogBtn.classList.toggle('nav-gps-btn--active', isGpsLoggingActive);
+    }
+
+    if (stopNavLogBtn) {
+        stopNavLogBtn.disabled = !isGpsLoggingActive;
+        stopNavLogBtn.setAttribute('aria-disabled', !isGpsLoggingActive ? 'true' : 'false');
+        stopNavLogBtn.textContent = isGpsLoggingActive
+            ? t('Arrêter log GPS', 'Detener log GPS')
+            : t('Log GPS arrêté', 'Log GPS detenido');
+        stopNavLogBtn.classList.toggle('nav-gps-btn--active', !isGpsLoggingActive);
+    }
+
+    document.body.classList.toggle('navlog-gps-active', isGpsLoggingActive);
+    document.body.classList.toggle('navlog-gps-inactive', !isGpsLoggingActive);
+
+    if (navLogStatus) {
+        navLogStatus.classList.toggle('nav-log-status--active', isGpsLoggingActive);
+        navLogStatus.classList.toggle('nav-log-status--inactive', !isGpsLoggingActive);
+    }
+
     document.body.classList.toggle('navlog-gps-compact', shouldCompactTabs);
 
     window.setTimeout(() => {
@@ -15364,6 +15396,43 @@ function updateNavLiveDashboard() {
     );
 }
 
+function readFiniteOrientationValue(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getScreenOrientationAngle() {
+    const orientationAngle = readFiniteOrientationValue(window?.screen?.orientation?.angle);
+    if (Number.isFinite(orientationAngle)) return orientationAngle;
+
+    const legacyAngle = readFiniteOrientationValue(window?.orientation);
+    if (Number.isFinite(legacyAngle)) return legacyAngle;
+
+    return 0;
+}
+
+function deriveHeelDegreesFromOrientationEvent(event) {
+    const gamma = readFiniteOrientationValue(event?.gamma);
+    const beta = readFiniteOrientationValue(event?.beta);
+    if (!Number.isFinite(gamma) && !Number.isFinite(beta)) return null;
+
+    const normalizedAngle = ((getScreenOrientationAngle() % 360) + 360) % 360;
+    let heelDeg = gamma;
+
+    if (normalizedAngle === 90) {
+        heelDeg = Number.isFinite(beta) ? -beta : gamma;
+    } else if (normalizedAngle === 270) {
+        heelDeg = Number.isFinite(beta) ? beta : gamma;
+    } else if (normalizedAngle === 180) {
+        heelDeg = Number.isFinite(gamma) ? -gamma : beta;
+    } else if (!Number.isFinite(heelDeg)) {
+        heelDeg = beta;
+    }
+
+    return Number.isFinite(heelDeg)
+        ? Math.max(-89.9, Math.min(89.9, heelDeg))
+        : null;
+}
+
 function drawHeelSpeedChart() {
     const canvas = document.getElementById('heelSpeedChart');
     if (!canvas) return;
@@ -15484,6 +15553,20 @@ function renderNavLogList() {
                 });
                 row.appendChild(eventsRow);
             }
+
+            const traceHintRow = document.createElement('div');
+            traceHintRow.style.margin = '6px 0 0';
+            traceHintRow.style.fontSize = '11px';
+            traceHintRow.style.opacity = '0.82';
+            traceHintRow.style.color = '#8fe7ff';
+            traceHintRow.textContent = t(
+                'Cliquer pour rouvrir la trace sur la carte',
+                'Tocar para reabrir la traza en el mapa'
+            );
+            traceHintRow.addEventListener('click', () => {
+                startEditNavLogEntry(String(item?.id || ''));
+            });
+            row.appendChild(traceHintRow);
 
             container.appendChild(row);
         });
@@ -16053,9 +16136,9 @@ function addManualNavigationLogEntry(event) {
 }
 
 function handleNavOrientation(event) {
-    const gamma = Number(event?.gamma);
-    if (!Number.isFinite(gamma)) return;
-    navLatestHeelDeg = gamma;
+    const heelDeg = deriveHeelDegreesFromOrientationEvent(event);
+    if (!Number.isFinite(heelDeg)) return;
+    navLatestHeelDeg = heelDeg;
     updateNavLiveDashboard();
 }
 
@@ -16624,9 +16707,18 @@ function startNavigationLogging() {
         position => {
             const latitude = Number(position?.coords?.latitude);
             const longitude = Number(position?.coords?.longitude);
-            const speedMs = Number(position?.coords?.speed);
-            const headingDeg = Number(position?.coords?.heading);
+            const rawSpeedMs = position?.coords?.speed;
+            const speedMs = typeof rawSpeedMs === 'number' && Number.isFinite(rawSpeedMs)
+                ? rawSpeedMs
+                : null;
+            const rawHeadingDeg = position?.coords?.heading;
+            const headingDeg = typeof rawHeadingDeg === 'number' && Number.isFinite(rawHeadingDeg)
+                ? rawHeadingDeg
+                : null;
             const nativeSpeedKn = Number.isFinite(speedMs) ? speedMs * 1.943844 : null;
+            const fixTimeMs = Number.isFinite(Number(position?.timestamp))
+                ? Number(position.timestamp)
+                : Date.now();
 
             if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
@@ -16634,7 +16726,7 @@ function startNavigationLogging() {
                 lat: latitude,
                 lng: longitude,
                 speedKn: nativeSpeedKn,
-                fixTimeMs: Date.now()
+                fixTimeMs
             };
             const derivedMetrics = computeDerivedNavMetricsFromPoints(navGpsLatestFix, nextFix);
             const resolvedSpeedKn = Number.isFinite(nativeSpeedKn) ? nativeSpeedKn : derivedMetrics.speedKn;
@@ -16649,7 +16741,7 @@ function startNavigationLogging() {
                 lat: latitude,
                 lng: longitude,
                 speedKn: Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null,
-                fixTimeMs: nextFix.fixTimeMs
+                fixTimeMs
             };
 
             updateNavCurrentPositionMarker(navGpsLatestFix);
@@ -16713,8 +16805,8 @@ function stopNavigationLogging(options = {}) {
             focusNavTraceEntriesOnMap(getNavTraceEntriesForEntry(selectedEntry));
         }
         setNavLogStatus(t(
-            `Log GPS arrêté · session enregistrée (${summary.points} points, ${summary.distance.toFixed(2)} NM).`,
-            `Log GPS detenido · sesión guardada (${summary.points} puntos, ${summary.distance.toFixed(2)} NM).`
+            `Log GPS arrêté · session enregistrée (${summary.points} points, ${summary.distance.toFixed(2)} NM). Clique la ligne du journal pour revoir la trace.`,
+            `Log GPS detenido · sesión guardada (${summary.points} puntos, ${summary.distance.toFixed(2)} NM). Toca la línea del diario para reabrir la traza.`
         ));
     } else {
         setNavLogStatus(t(`Log GPS arrêté · ${navLogEntries.length} point(s) enregistrés.`, `Log GPS detenido · ${navLogEntries.length} punto(s) guardado(s).`));

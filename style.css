@@ -1391,6 +1391,54 @@ button:hover {
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
 }
 
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+    box-shadow: none;
+    transform: none;
+}
+
+button:disabled:hover {
+    background: inherit;
+    box-shadow: none;
+}
+
+#startNavLogBtn,
+#stopNavLogBtn {
+    transition: background-color 160ms ease, border-color 160ms ease, opacity 160ms ease, box-shadow 160ms ease;
+}
+
+#startNavLogBtn.nav-gps-btn--active {
+    background: #1f9d55;
+    border-color: #188346;
+    color: #f3fff8;
+}
+
+#stopNavLogBtn.nav-gps-btn--active {
+    background: #5f6b7a;
+    border-color: #4d5865;
+    color: #eef5fb;
+}
+
+body.navlog-gps-active #navLogStatus {
+    color: #9de2b7;
+    font-weight: 700;
+}
+
+body.navlog-gps-inactive #navLogStatus {
+    color: #cfe4f7;
+}
+
+#navLogStatus.nav-log-status--active::before {
+    content: '● ';
+    color: #4ee38a;
+}
+
+#navLogStatus.nav-log-status--inactive::before {
+    content: '○ ';
+    color: #9cb5c9;
+}
+
 button:active {
     transform: translateY(1px);
 }
