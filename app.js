@@ -12726,8 +12726,18 @@ function getCloudFunctionUrl(functionName) {
     return `${baseUrl}/functions/v1/${encodeURIComponent(fn)}`;
 }
 
-async function getCloudAuthAccessToken() {
+async function getCloudAuthAccessToken(options = {}) {
     if (!cloudClient) return '';
+
+    const forceRefresh = options?.forceRefresh === true;
+    if (forceRefresh) {
+        const { data: refreshData, error: refreshError } = await cloudClient.auth.refreshSession();
+        if (!refreshError) {
+            const refreshedToken = String(refreshData?.session?.access_token || '').trim();
+            if (refreshedToken) return refreshedToken;
+        }
+    }
+
     const { data, error } = await cloudClient.auth.getSession();
     if (error) throw error;
     return String(data?.session?.access_token || '').trim();
@@ -12740,9 +12750,6 @@ async function sendAnchorDragTelegramAlert(distanceM, speedKn) {
         const enabled = normalizeTelegramAlertsEnabledValue(cloudUserProfile?.telegramAlertsEnabled);
         if (!enabled || !chatId) return false;
 
-        const accessToken = await getCloudAuthAccessToken();
-        if (!accessToken) return false;
-
         const endpoint = getCloudFunctionUrl(CLOUD_TELEGRAM_PROXY_FUNCTION);
         if (!endpoint) return false;
 
@@ -12751,22 +12758,38 @@ async function sendAnchorDragTelegramAlert(distanceM, speedKn) {
             text: buildAnchorDragTelegramAlertText(distanceM, speedKn)
         };
 
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                apikey: String(cloudConfig.anonKey || ''),
-                Authorization: `Bearer ${accessToken}`
-            },
-            body: JSON.stringify(payload)
-        });
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const accessToken = await getCloudAuthAccessToken({ forceRefresh: attempt > 0 });
+            if (!accessToken) return false;
 
-        if (!response.ok) {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    apikey: String(cloudConfig.anonKey || ''),
+                    Authorization: `Bearer ${accessToken}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                return true;
+            }
+
             const errorText = await response.text().catch(() => '');
+            const shouldRetryWithFreshJwt =
+                response.status === 401 &&
+                /invalid jwt|jwt expired|token/i.test(String(errorText || '')) &&
+                attempt === 0;
+
+            if (shouldRetryWithFreshJwt) {
+                continue;
+            }
+
             throw new Error(`telegram-proxy ${response.status}: ${errorText}`);
         }
 
-        return true;
+        return false;
     } catch (error) {
         console.warn('Anchor drag Telegram alert failed:', error);
         return false;
