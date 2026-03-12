@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260312-30';
+const APP_BUILD_VERSION = '20260312-31';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -50,6 +50,7 @@ let measureLabelLayers = [];
 let lastComputedReportData = null;
 let forecastWindowDays = 3;
 let arrivalPoiMarkers = [];
+let arrivalAnalysisEntries = [];
 let lastDepartureSuggestion = null;
 let selectedUserWaypointIndex = -1;
 let currentLoadedRouteIndex = -1;
@@ -90,6 +91,8 @@ const OVERPASS_URLS = [
 const OVERPASS_MIN_INTERVAL_MS = 900;
 const OVERPASS_CACHE_TTL_MS = 8 * 60 * 1000;
 const OVERPASS_429_COOLDOWN_MS = 10 * 60 * 1000;
+const MAX_ARRIVAL_ANALYSIS_CACHE_ENTRIES = 24;
+const ARRIVAL_ANALYSIS_MATCH_RADIUS_NM = 2;
 const WAYPOINT_PHOTOS_STORAGE_KEY = 'ceiboWaypointPhotos';
 const DOCUMENTS_STORAGE_KEY = 'ceiboDocumentsV1';
 const DOCUMENT_RAG_HISTORY_SESSION_KEY = 'ceiboDocumentRagHistoryV1';
@@ -107,9 +110,11 @@ const POLAR_AUTO_PROFILE_ID = '__auto__';
 const POLAR_IMPORTED_DUFOUR56_STORAGE_KEY = 'ceiboPolarImportedDufour56V1';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
+const ARRIVAL_ANALYSIS_STORAGE_KEY = 'ceiboArrivalAnalysesV1';
 const CLOUD_ROUTES_TABLE = 'routes';
 const CLOUD_ROUTE_POINTS_TABLE = 'route_points';
 const CLOUD_WAYPOINT_PHOTOS_TABLE = 'waypoint_photos';
+const CLOUD_ARRIVAL_ANALYSES_TABLE = 'arrival_analyses';
 const CLOUD_DOCUMENTS_TABLE = 'document_files';
 const CLOUD_DOCUMENTS_BUCKET = 'ceibo-documents';
 const CLOUD_MAINTENANCE_SCHEMAS_TABLE = 'maintenance_schemas';
@@ -144,6 +149,7 @@ let cloudUserProfile = null;
 let cloudManagedUsers = [];
 let cloudAllowedUsersHasNameColumn = true;
 let routesCloudDirty = false;
+let arrivalAnalysesCloudDirty = false;
 let cloudResolvedProjectIdUuid = '';
 let cloudAuthSubscription = null;
 let cloudAutoPullTimer = null;
@@ -754,7 +760,10 @@ function applyLanguageToUi() {
     setElementText('#weatherGribHint', t('Astuce: sélectionne GRIB + JSON converti (même nom) en une fois pour chargement auto.', 'Consejo: selecciona GRIB + JSON convertido (mismo nombre) en una sola acción para carga automática.', 'Tip: select GRIB + converted JSON (same name) together for automatic loading.'));
 
     setElementText('#analyzeArrivalBtn', t('Conseiller mouillage à l\'arrivée', 'Sugerir fondeo a la llegada'));
+    setElementText('#loadLatestArrivalCacheBtn', t('Recharger analyse mémorisée', 'Recargar análisis guardado', 'Reload saved analysis'));
     setElementText('#arrivalSummary', t('Analyse mouillage: en attente', 'Análisis fondeo: en espera'));
+    setElementText('#arrivalCacheStatus', t('Mémoire arrivée: aucune analyse enregistrée.', 'Memoria llegada: ningún análisis guardado.', 'Arrival memory: no saved analysis.'));
+    setElementText('#arrivalSavedSearchesLabel', t('Analyses mémorisées:', 'Análisis guardados:', 'Saved analyses:'));
     setElementText('#nearbyRestaurantsLabel', t('Restaurants proches:', 'Restaurantes cercanos:'));
     setElementText('#nearbyShopsLabel', t('Magasins / courses:', 'Tiendas / compras:'));
     setElementText('label[for="waypointPhotoInput"]', t('Photo mouillage:', 'Foto fondeo:'));
@@ -1058,6 +1067,7 @@ function setProtectedTabsEnabled(enabled) {
 function clearProtectedUiData() {
     savedRoutesCache = [];
     refreshSavedList();
+    setArrivalAnalysisEntries([], { persistLocal: false, refreshUi: true });
     setWaypointPhotoEntries([], { persistLocal: false, refreshUi: true });
     setDocumentEntries([], { persistLocal: false, refreshUi: true });
     setDocumentEditMode(null);
@@ -1108,6 +1118,8 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
         if (isAuthRequiredRuntime()) {
             // Hydrate local caches first to avoid blanking maintenance data
             // if the cloud payload does not include maintenance fields.
+            loadArrivalAnalysisEntries();
+            renderArrivalSavedSearches();
             loadWaypointPhotoEntries();
             renderWaypointPhotoList();
             syncWaypointPhotoMarkersInView();
@@ -1126,6 +1138,8 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
             refreshSavedList();
             updateCloudDataSourceStatus('cache local (auth ok)', getSavedRoutes().length, waypointPhotoEntries.length);
         } else {
+            loadArrivalAnalysisEntries();
+            renderArrivalSavedSearches();
             loadWaypointPhotoEntries();
             renderWaypointPhotoList();
             syncWaypointPhotoMarkersInView();
@@ -5060,6 +5074,394 @@ function renderAnchorageRecommendations(recommendations) {
     });
 }
 
+function normalizeArrivalAnalysisHourIso(value) {
+    const date = value instanceof Date ? new Date(value.getTime()) : new Date(value || '');
+    if (Number.isNaN(date.getTime())) return '';
+    date.setUTCMinutes(0, 0, 0);
+    return date.toISOString();
+}
+
+function buildArrivalAnalysisCacheKey(destinationLat, destinationLng, arrivalDateTime) {
+    const lat = Number(destinationLat);
+    const lng = Number(destinationLng);
+    const arrivalIso = normalizeArrivalAnalysisHourIso(arrivalDateTime);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+    return `${lat.toFixed(4)}:${lng.toFixed(4)}:${arrivalIso || 'no-arrival-time'}`;
+}
+
+function sanitizeArrivalAnalysisAmenityItem(item, fallbackIndex = 0) {
+    const lat = Number(item?.lat);
+    const lon = Number(item?.lon ?? item?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    const distance = Number(item?.distanceNm);
+    return {
+        name: String(item?.name || `Lieu ${fallbackIndex + 1}`).trim() || `Lieu ${fallbackIndex + 1}`,
+        lat,
+        lon,
+        distanceNm: Number.isFinite(distance) ? distance : 0,
+        tags: item?.tags && typeof item.tags === 'object' && !Array.isArray(item.tags)
+            ? { ...item.tags }
+            : {}
+    };
+}
+
+function sanitizeArrivalAnalysisRecommendationItem(item, fallbackIndex = 0) {
+    const base = sanitizeArrivalAnalysisAmenityItem(item, fallbackIndex);
+    if (!base) return null;
+
+    const windSpeed = Number(item?.weather?.windSpeed ?? item?.weatherWindSpeed);
+    const waveHeight = Number(item?.weather?.waveHeight ?? item?.weatherWaveHeight);
+    const score = Number(item?.score);
+
+    return {
+        ...base,
+        score: Number.isFinite(score) ? score : null,
+        confidence: String(item?.confidence || '').trim() || 'prudence',
+        weather: {
+            windSpeed: Number.isFinite(windSpeed) ? windSpeed : null,
+            waveHeight: Number.isFinite(waveHeight) ? waveHeight : null
+        }
+    };
+}
+
+function sanitizeArrivalAnalysisEntry(entry, fallbackIndex = 0) {
+    const destinationLat = Number(entry?.destinationLat ?? entry?.destination?.lat);
+    const destinationLng = Number(entry?.destinationLng ?? entry?.destination?.lng ?? entry?.destination?.lon);
+    if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) return null;
+
+    const recommendations = (Array.isArray(entry?.recommendations) ? entry.recommendations : [])
+        .map((item, index) => sanitizeArrivalAnalysisRecommendationItem(item, index))
+        .filter(Boolean)
+        .slice(0, 8);
+    const restaurants = (Array.isArray(entry?.restaurants) ? entry.restaurants : [])
+        .map((item, index) => sanitizeArrivalAnalysisAmenityItem(item, index))
+        .filter(Boolean)
+        .slice(0, 12);
+    const shops = (Array.isArray(entry?.shops) ? entry.shops : [])
+        .map((item, index) => sanitizeArrivalAnalysisAmenityItem(item, index))
+        .filter(Boolean)
+        .slice(0, 12);
+    const arrivalIso = normalizeArrivalAnalysisHourIso(entry?.arrivalIso);
+    const cacheKey = String(entry?.cacheKey || buildArrivalAnalysisCacheKey(destinationLat, destinationLng, arrivalIso)).trim();
+    const nowIso = new Date().toISOString();
+
+    return {
+        id: isUuidString(entry?.id) ? String(entry.id) : generateClientUuid(),
+        cacheKey,
+        destinationLabel: String(entry?.destinationLabel || '').trim(),
+        destinationLat,
+        destinationLng,
+        arrivalIso,
+        routeName: String(entry?.routeName || '').trim(),
+        topAnchorageName: String(entry?.topAnchorageName || recommendations[0]?.name || '').trim(),
+        summaryText: String(entry?.summaryText || '').trim(),
+        recommendations,
+        restaurants,
+        shops,
+        creatorEmail: normalizeEmailForCompare(entry?.creatorEmail || ''),
+        creatorName: String(entry?.creatorName || '').trim(),
+        createdAt: String(entry?.createdAt || nowIso),
+        updatedAt: String(entry?.updatedAt || entry?.createdAt || nowIso)
+    };
+}
+
+function getArrivalAnalysisStorageList() {
+    try {
+        return loadArrayFromStorage(ARRIVAL_ANALYSIS_STORAGE_KEY);
+    } catch (_error) {
+        return [];
+    }
+}
+
+function setArrivalAnalysisStorageList(list) {
+    try {
+        saveArrayToStorage(ARRIVAL_ANALYSIS_STORAGE_KEY, list);
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function loadArrivalAnalysisEntries() {
+    arrivalAnalysisEntries = getArrivalAnalysisStorageList()
+        .map((entry, index) => sanitizeArrivalAnalysisEntry(entry, index))
+        .filter(Boolean)
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function setArrivalAnalysisEntries(list, { persistLocal = true, refreshUi = true } = {}) {
+    arrivalAnalysisEntries = (Array.isArray(list) ? list : [])
+        .map((entry, index) => sanitizeArrivalAnalysisEntry(entry, index))
+        .filter(Boolean)
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+        .slice(0, MAX_ARRIVAL_ANALYSIS_CACHE_ENTRIES);
+
+    if (persistLocal) {
+        setArrivalAnalysisStorageList(arrivalAnalysisEntries);
+    }
+
+    if (refreshUi) {
+        renderArrivalSavedSearches();
+    }
+}
+
+function persistArrivalAnalysisEntries() {
+    return setArrivalAnalysisStorageList(arrivalAnalysisEntries);
+}
+
+function setArrivalCacheStatus(message, isError = false) {
+    const status = document.getElementById('arrivalCacheStatus');
+    if (!status) return;
+    status.textContent = String(message || '');
+    status.style.color = isError ? '#ff8f8f' : '';
+}
+
+function buildArrivalSummaryText(recommendations) {
+    if (Array.isArray(recommendations) && recommendations.length > 0) {
+        return t(
+            `Top mouillage: ${recommendations[0].name} · ${recommendations[0].distanceNm.toFixed(2)} nm de l'arrivée`,
+            `Mejor fondeo: ${recommendations[0].name} · ${recommendations[0].distanceNm.toFixed(2)} mn de la llegada`,
+            `Top anchorage: ${recommendations[0].name} · ${recommendations[0].distanceNm.toFixed(2)} nm from arrival`
+        );
+    }
+
+    return t(
+        'Analyse mouillage: aucun mouillage adapté trouvé à proximité.',
+        'Análisis fondeo: no se encontró un fondeo adecuado cerca.',
+        'Anchorage analysis: no suitable anchorage found nearby.'
+    );
+}
+
+function renderArrivalSummary(recommendations) {
+    const summary = document.getElementById('arrivalSummary');
+    if (!summary) return;
+
+    if (Array.isArray(recommendations) && recommendations.length > 0) {
+        summary.innerHTML = `<strong>${t('Top mouillage:', 'Mejor fondeo:', 'Top anchorage:')}</strong> ${escapeHtml(recommendations[0].name)} · ${recommendations[0].distanceNm.toFixed(2)} nm ${t('de l\'arrivée', 'de la llegada', 'from arrival')}`;
+        return;
+    }
+
+    summary.textContent = buildArrivalSummaryText(recommendations);
+}
+
+function buildArrivalAnalysisLabel(entry) {
+    const routeName = String(entry?.routeName || '').trim();
+    const destinationLabel = String(entry?.destinationLabel || '').trim();
+    const topAnchorageName = String(entry?.topAnchorageName || '').trim();
+
+    if (routeName && destinationLabel) return `${routeName} · ${destinationLabel}`;
+    if (routeName && topAnchorageName) return `${routeName} · ${topAnchorageName}`;
+    if (destinationLabel) return destinationLabel;
+    if (topAnchorageName) return topAnchorageName;
+
+    return `${entry.destinationLat.toFixed(4)}, ${entry.destinationLng.toFixed(4)}`;
+}
+
+function renderArrivalAnalysisEntry(entry, { fromCache = false } = {}) {
+    if (!entry) return false;
+
+    clearArrivalPoiMarkers();
+    entry.recommendations.forEach(item => addArrivalPoiMarker(item.lat, item.lon, item.name, 'anchorage'));
+    entry.restaurants.forEach(item => addArrivalPoiMarker(item.lat, item.lon, item.name, 'restaurant'));
+    entry.shops.forEach(item => addArrivalPoiMarker(item.lat, item.lon, item.name, 'shop'));
+
+    renderArrivalSummary(entry.recommendations);
+    renderAnchorageRecommendations(entry.recommendations);
+    renderNearbyList('nearbyRestaurants', entry.restaurants, t('Aucun restaurant proche trouvé', 'No se encontraron restaurantes cercanos', 'No nearby restaurant found'));
+    renderNearbyList('nearbyShops', entry.shops, t('Aucun magasin proche trouvé', 'No se encontraron tiendas cercanas', 'No nearby shop found'));
+
+    setArrivalCacheStatus(
+        fromCache
+            ? t(
+                `Analyse mémorisée rechargée · ${buildArrivalAnalysisLabel(entry)}`,
+                `Análisis guardado recargado · ${buildArrivalAnalysisLabel(entry)}`,
+                `Saved analysis reloaded · ${buildArrivalAnalysisLabel(entry)}`
+            )
+            : t(
+                `Analyse mémorisée en local · ${buildArrivalAnalysisLabel(entry)}`,
+                `Análisis guardado en local · ${buildArrivalAnalysisLabel(entry)}`,
+                `Analysis cached locally · ${buildArrivalAnalysisLabel(entry)}`
+            )
+    );
+    return true;
+}
+
+function findBestArrivalAnalysisMatch(destination, arrivalDateTime = null) {
+    if (!destination || !Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) {
+        return arrivalAnalysisEntries[0] || null;
+    }
+
+    const exactKey = buildArrivalAnalysisCacheKey(destination.lat, destination.lng, arrivalDateTime);
+    if (exactKey) {
+        const exactMatch = arrivalAnalysisEntries.find(entry => entry.cacheKey === exactKey);
+        if (exactMatch) return exactMatch;
+    }
+
+    const nearbyMatches = arrivalAnalysisEntries
+        .map(entry => ({
+            entry,
+            distance: distanceNm(destination.lat, destination.lng, entry.destinationLat, entry.destinationLng),
+            timeDeltaMs: arrivalDateTime
+                ? Math.abs(new Date(entry.arrivalIso || 0).getTime() - new Date(arrivalDateTime).getTime())
+                : Number.POSITIVE_INFINITY
+        }))
+        .filter(item => Number.isFinite(item.distance) && item.distance <= ARRIVAL_ANALYSIS_MATCH_RADIUS_NM)
+        .sort((a, b) => {
+            if (a.distance !== b.distance) return a.distance - b.distance;
+            return a.timeDeltaMs - b.timeDeltaMs;
+        });
+
+    return nearbyMatches[0]?.entry || arrivalAnalysisEntries[0] || null;
+}
+
+function renderArrivalSavedSearches() {
+    const container = document.getElementById('arrivalSavedSearches');
+    const loadLatestBtn = document.getElementById('loadLatestArrivalCacheBtn');
+    if (loadLatestBtn) loadLatestBtn.disabled = arrivalAnalysisEntries.length === 0;
+    if (!container) return;
+
+    if (!arrivalAnalysisEntries.length) {
+        container.innerHTML = `<div class="arrival-list__item">${t('Aucune analyse mémorisée.', 'Ningún análisis guardado.', 'No saved analysis.')}</div>`;
+        return;
+    }
+
+    container.innerHTML = arrivalAnalysisEntries.map(entry => {
+        const label = escapeHtml(buildArrivalAnalysisLabel(entry));
+        const updatedAt = escapeHtml(formatUtcDateTime(entry.updatedAt || entry.createdAt));
+        const recCount = Array.isArray(entry.recommendations) ? entry.recommendations.length : 0;
+        const restCount = Array.isArray(entry.restaurants) ? entry.restaurants.length : 0;
+        const shopCount = Array.isArray(entry.shops) ? entry.shops.length : 0;
+        return `<div class="arrival-saved-item">
+            <div class="arrival-saved-item__title">
+                <span>${label}</span>
+                <span>${updatedAt}</span>
+            </div>
+            <div class="arrival-saved-item__meta">${escapeHtml(String(entry.summaryText || buildArrivalSummaryText(entry.recommendations)))}</div>
+            <div class="arrival-saved-item__meta">${t('Mouillages', 'Fondeos', 'Anchorages')}: ${recCount} · ${t('Restaurants', 'Restaurantes', 'Restaurants')}: ${restCount} · ${t('Magasins', 'Tiendas', 'Shops')}: ${shopCount}</div>
+            <div class="button-row">
+                <button type="button" class="js-arrival-analysis-load" data-id="${escapeHtml(entry.id)}">${t('Charger', 'Cargar', 'Load')}</button>
+                <button type="button" class="js-arrival-analysis-delete" data-id="${escapeHtml(entry.id)}">${t('Supprimer', 'Eliminar', 'Delete')}</button>
+            </div>
+        </div>`;
+    }).join('');
+
+    container.querySelectorAll('.js-arrival-analysis-load').forEach(button => {
+        button.addEventListener('click', () => {
+            const entry = arrivalAnalysisEntries.find(item => item.id === String(button.getAttribute('data-id') || ''));
+            if (!entry) return;
+            renderArrivalAnalysisEntry(entry, { fromCache: true });
+        });
+    });
+
+    container.querySelectorAll('.js-arrival-analysis-delete').forEach(button => {
+        button.addEventListener('click', () => {
+            deleteArrivalAnalysisEntry(String(button.getAttribute('data-id') || ''));
+        });
+    });
+}
+
+function deleteArrivalAnalysisEntry(entryId) {
+    const existingIndex = arrivalAnalysisEntries.findIndex(entry => entry.id === entryId);
+    if (existingIndex < 0) return false;
+
+    const target = arrivalAnalysisEntries[existingIndex];
+    const confirmed = window.confirm(t(
+        `Supprimer l'analyse mémorisée “${buildArrivalAnalysisLabel(target)}” ?`,
+        `¿Eliminar el análisis guardado “${buildArrivalAnalysisLabel(target)}”?`,
+        `Delete the saved analysis “${buildArrivalAnalysisLabel(target)}”?`
+    ));
+    if (!confirmed) return false;
+
+    const previousEntries = [...arrivalAnalysisEntries];
+    arrivalAnalysisEntries.splice(existingIndex, 1);
+    if (!persistArrivalAnalysisEntries()) {
+        arrivalAnalysisEntries = previousEntries;
+        setArrivalCacheStatus(t('Suppression impossible: stockage local saturé ou indisponible.', 'Eliminación imposible: almacenamiento local saturado o no disponible.', 'Delete failed: local storage unavailable or full.'), true);
+        return false;
+    }
+
+    arrivalAnalysesCloudDirty = true;
+    renderArrivalSavedSearches();
+    setArrivalCacheStatus(t('Analyse mémorisée supprimée.', 'Análisis guardado eliminado.', 'Saved analysis deleted.'));
+    tryFlushPendingCloudDataPush();
+    return true;
+}
+
+function storeArrivalAnalysisSnapshot({ destination, arrivalTime, recommendations, restaurants, shops }) {
+    if (!destination || !Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) {
+        return null;
+    }
+
+    const creator = getCreatorPatch();
+    const nowIso = new Date().toISOString();
+    const currentRoute = Number.isInteger(currentLoadedRouteIndex) ? getSavedRoutes()[currentLoadedRouteIndex] : null;
+    const destinationLabel = String(lastComputedReportData?.segments?.slice(-1)?.[0]?.arrivalLabel || '').trim();
+    const safeEntry = sanitizeArrivalAnalysisEntry({
+        id: generateClientUuid(),
+        cacheKey: buildArrivalAnalysisCacheKey(destination.lat, destination.lng, arrivalTime),
+        destinationLat: destination.lat,
+        destinationLng: destination.lng,
+        destinationLabel,
+        arrivalIso: arrivalTime,
+        routeName: String(currentRoute?.name || '').trim(),
+        topAnchorageName: recommendations?.[0]?.name || '',
+        summaryText: buildArrivalSummaryText(recommendations),
+        recommendations,
+        restaurants,
+        shops,
+        creatorEmail: creator.creatorEmail,
+        creatorName: creator.creatorName,
+        createdAt: nowIso,
+        updatedAt: nowIso
+    });
+
+    if (!safeEntry) return null;
+
+    const previousEntries = [...arrivalAnalysisEntries];
+    const existingIndex = arrivalAnalysisEntries.findIndex(entry => entry.cacheKey === safeEntry.cacheKey);
+    if (existingIndex >= 0) {
+        safeEntry.id = arrivalAnalysisEntries[existingIndex].id;
+        safeEntry.createdAt = arrivalAnalysisEntries[existingIndex].createdAt || nowIso;
+        arrivalAnalysisEntries.splice(existingIndex, 1);
+    }
+    arrivalAnalysisEntries.unshift(safeEntry);
+    arrivalAnalysisEntries = arrivalAnalysisEntries.slice(0, MAX_ARRIVAL_ANALYSIS_CACHE_ENTRIES);
+
+    if (!persistArrivalAnalysisEntries()) {
+        arrivalAnalysisEntries = previousEntries;
+        setArrivalCacheStatus(t('Analyse calculée mais non mémorisée: stockage local saturé.', 'Análisis calculado pero no guardado: almacenamiento local lleno.', 'Analysis computed but not cached: local storage full.'), true);
+        return null;
+    }
+
+    arrivalAnalysesCloudDirty = true;
+    renderArrivalSavedSearches();
+    setArrivalCacheStatus(
+        isCloudReady()
+            ? t('Analyse mémorisée en local. Sauvegarde cloud en cours.', 'Análisis guardado en local. Copia nube en curso.', 'Analysis cached locally. Cloud backup in progress.')
+            : t('Analyse mémorisée en local. Sauvegarde cloud en attente.', 'Análisis guardado en local. Copia nube en espera.', 'Analysis cached locally. Cloud backup pending.')
+    );
+    tryFlushPendingCloudDataPush();
+    return safeEntry;
+}
+
+function loadLatestArrivalAnalysisForCurrentRoute() {
+    if (!arrivalAnalysisEntries.length) {
+        setArrivalCacheStatus(t('Aucune analyse mémorisée disponible.', 'Ningún análisis guardado disponible.', 'No saved analysis available.'), true);
+        return false;
+    }
+
+    const destination = routePoints[routePoints.length - 1];
+    const arrivalTime = routePoints.length >= 2 ? getArrivalReferenceDateTime() : null;
+    const entry = findBestArrivalAnalysisMatch(destination, arrivalTime);
+    if (!entry) {
+        setArrivalCacheStatus(t('Aucune analyse mémorisée compatible avec cette arrivée.', 'Ningún análisis guardado compatible con esta llegada.', 'No saved analysis matches this arrival.'), true);
+        return false;
+    }
+
+    return renderArrivalAnalysisEntry(entry, { fromCache: true });
+}
+
 async function analyzeArrivalZone() {
     if (routePoints.length < 2) {
         alert(t('Ajoute au moins 2 waypoints pour analyser la zone d\'arrivée.', 'Añade al menos 2 waypoints para analizar la zona de llegada.'));
@@ -5116,22 +5518,37 @@ async function analyzeArrivalZone() {
         renderNearbyList('nearbyShops', shops, t('Aucun magasin proche trouvé', 'No se encontraron tiendas cercanas'));
         pushAiTrafficLog(t('Listes arrivée mises à jour', 'Listas de llegada actualizadas'));
 
-        if (summary) {
-            if (recommendations.length) {
-                summary.innerHTML = `<strong>${t('Top mouillage:', 'Mejor fondeo:')}</strong> ${escapeHtml(recommendations[0].name)} · ${recommendations[0].distanceNm.toFixed(2)} nm ${t('de l\'arrivée', 'de la llegada')}`;
-                pushAiTrafficLog(t(
-                    `Top mouillage: ${recommendations[0].name} (${recommendations[0].distanceNm.toFixed(2)} nm)`,
-                    `Mejor fondeo: ${recommendations[0].name} (${recommendations[0].distanceNm.toFixed(2)} nm)`
-                ));
-            } else {
-                summary.textContent = t('Analyse mouillage: aucun mouillage adapté trouvé à proximité.', 'Análisis fondeo: no se encontró un fondeo adecuado cerca.');
-                pushAiTrafficLog(t('Aucun mouillage adapté trouvé', 'No se encontro fondeo adecuado'));
-            }
+        renderArrivalSummary(recommendations);
+        if (recommendations.length) {
+            pushAiTrafficLog(t(
+                `Top mouillage: ${recommendations[0].name} (${recommendations[0].distanceNm.toFixed(2)} nm)`,
+                `Mejor fondeo: ${recommendations[0].name} (${recommendations[0].distanceNm.toFixed(2)} nm)`
+            ));
+        } else {
+            pushAiTrafficLog(t('Aucun mouillage adapté trouvé', 'No se encontro fondeo adecuado'));
         }
+
+        storeArrivalAnalysisSnapshot({
+            destination,
+            arrivalTime,
+            recommendations,
+            restaurants,
+            shops
+        });
         endAiTrafficSession(t('Analyse arrivée terminée', 'Analisis llegada terminado'));
     } catch (_error) {
         pushAiTrafficLog(t('Erreur pendant l\'analyse arrivée', 'Error durante el analisis de llegada'));
+        const destination = routePoints[routePoints.length - 1];
+        const arrivalTime = getArrivalReferenceDateTime();
+        const cachedEntry = findBestArrivalAnalysisMatch(destination, arrivalTime);
+        if (cachedEntry) {
+            renderArrivalAnalysisEntry(cachedEntry, { fromCache: true });
+            pushAiTrafficLog(t('Analyse live indisponible: cache ARRIVEE rechargé', 'Análisis live no disponible: caché LLEGADA recargado'));
+            endAiTrafficSession(t('Analyse arrivée rechargée depuis le cache', 'Analisis llegada recargado desde caché'));
+            return;
+        }
         if (summary) summary.textContent = t('Analyse mouillage: erreur de récupération des données.', 'Análisis fondeo: error al recuperar datos.');
+        setArrivalCacheStatus(t('Échec de l\'analyse et aucun cache compatible disponible.', 'Falló el análisis y no hay caché compatible disponible.', 'Analysis failed and no compatible cache is available.'), true);
         endAiTrafficSession(t('Analyse arrivée terminée en erreur', 'Analisis llegada terminado con error'));
     } finally {
         if (button) {
@@ -12500,7 +12917,7 @@ function tryFlushPendingCloudLogbookPush() {
 
 function tryFlushPendingCloudDataPush() {
     if (!isCloudReady()) return;
-    if (!routesCloudDirty) return;
+    if (!routesCloudDirty && !arrivalAnalysesCloudDirty) return;
     if (cloudPendingDataPushInFlight) return;
 
     cloudPendingDataPushInFlight = true;
@@ -12511,9 +12928,10 @@ function tryFlushPendingCloudDataPush() {
             await pushRoutesToCloud({
                 includeEngineLog: false,
                 includeWaypointPhotos: true,
-                includeMaintenanceBoards: false
+                includeMaintenanceBoards: false,
+                includeArrivalAnalyses: true
             });
-            setCloudStatus(t(`Cloud synchronisé · ${getSavedRoutes().length} route(s)`, `Nube sincronizada · ${getSavedRoutes().length} ruta(s)`));
+            setCloudStatus(t(`Cloud synchronisé · ${getSavedRoutes().length} route(s) · ${arrivalAnalysisEntries.length} analyse(s) arrivée`, `Nube sincronizada · ${getSavedRoutes().length} ruta(s) · ${arrivalAnalysisEntries.length} análisis llegada`));
             updateCloudDataSourceStatus('cloud', getSavedRoutes().length, waypointPhotoEntries.length);
             setCloudSyncBadge('ok', t('Synchro cloud: OK', 'Sincronización nube: OK'));
         } catch (error) {
@@ -16171,6 +16589,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         analyzeArrivalBtn.addEventListener('click', analyzeArrivalZone);
     }
 
+    const loadLatestArrivalCacheBtn = document.getElementById('loadLatestArrivalCacheBtn');
+    if (loadLatestArrivalCacheBtn) {
+        loadLatestArrivalCacheBtn.addEventListener('click', () => {
+            loadLatestArrivalAnalysisForCurrentRoute();
+        });
+    }
+
     const waypointPhotoInput = document.getElementById('waypointPhotoInput');
     if (waypointPhotoInput) {
         waypointPhotoInput.addEventListener('change', handleWaypointPhotoInputChange);
@@ -18955,6 +19380,7 @@ function estimateCloudPayloadSizeBytes() {
     const payload = {
         version: 5,
         routes: getSavedRoutes(),
+        arrivalAnalyses: arrivalAnalysisEntries,
         maintenanceBoards,
         maintenanceExpenses,
         maintenanceSuppliers,
@@ -19649,6 +20075,162 @@ async function pushWaypointPhotosToCloudV2(entries) {
     return true;
 }
 
+function parseArrivalAnalysisJsonField(rawValue) {
+    if (Array.isArray(rawValue)) return rawValue;
+    if (typeof rawValue === 'string') {
+        const text = rawValue.trim();
+        if (!text) return [];
+        try {
+            const parsed = JSON.parse(text);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_error) {
+            return [];
+        }
+    }
+    return [];
+}
+
+function buildArrivalAnalysesFromCloudRows(rows) {
+    return (Array.isArray(rows) ? rows : [])
+        .map((row, index) => sanitizeArrivalAnalysisEntry({
+            id: String(row?.id || ''),
+            cacheKey: row?.cache_key,
+            destinationLabel: row?.destination_label,
+            destinationLat: row?.destination_lat,
+            destinationLng: row?.destination_lng,
+            arrivalIso: row?.arrival_iso,
+            routeName: row?.route_name,
+            topAnchorageName: row?.top_anchorage_name,
+            summaryText: row?.summary_text,
+            recommendations: parseArrivalAnalysisJsonField(row?.recommendations),
+            restaurants: parseArrivalAnalysisJsonField(row?.restaurants),
+            shops: parseArrivalAnalysisJsonField(row?.shops),
+            creatorEmail: row?.creator_email,
+            creatorName: row?.creator_name,
+            createdAt: row?.created_at,
+            updatedAt: row?.updated_at
+        }, index))
+        .filter(Boolean)
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function mergeArrivalAnalysisEntriesPreservingDirtyLocal(localList, cloudList) {
+    const byKey = new Map();
+    const getKey = (entry) => String(entry?.cacheKey || entry?.id || '').trim();
+
+    (Array.isArray(cloudList) ? cloudList : []).forEach((entry, index) => {
+        const safe = sanitizeArrivalAnalysisEntry(entry, index);
+        if (!safe) return;
+        byKey.set(getKey(safe), safe);
+    });
+
+    (Array.isArray(localList) ? localList : []).forEach((entry, index) => {
+        const safeLocal = sanitizeArrivalAnalysisEntry(entry, index);
+        if (!safeLocal) return;
+        const key = getKey(safeLocal);
+        const remoteVersion = byKey.get(key);
+        if (!remoteVersion) {
+            byKey.set(key, safeLocal);
+            return;
+        }
+
+        const localUpdatedMs = Date.parse(String(safeLocal.updatedAt || safeLocal.createdAt || ''));
+        const remoteUpdatedMs = Date.parse(String(remoteVersion.updatedAt || remoteVersion.createdAt || ''));
+        if (Number.isFinite(localUpdatedMs) && Number.isFinite(remoteUpdatedMs) && localUpdatedMs >= remoteUpdatedMs) {
+            byKey.set(key, safeLocal);
+        }
+    });
+
+    return Array.from(byKey.values())
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+        .slice(0, MAX_ARRIVAL_ANALYSIS_CACHE_ENTRIES);
+}
+
+async function pullArrivalAnalysisEntriesFromCloudV2() {
+    if (!isCloudReady()) return [];
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) return [];
+
+    const resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    let query = cloudClient
+        .from(CLOUD_ARRIVAL_ANALYSES_TABLE)
+        .select('*')
+        .eq('creator_email', creatorEmail)
+        .order('updated_at', { ascending: false });
+
+    if (isUuidString(resolvedProjectIdUuid)) {
+        query = query.eq('project_id', resolvedProjectIdUuid);
+    }
+
+    const { data: rows, error } = await query;
+    if (error) throw error;
+    return buildArrivalAnalysesFromCloudRows(rows || []);
+}
+
+async function pushArrivalAnalysisEntriesToCloudV2(entries) {
+    if (!isCloudReady()) return false;
+
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) return false;
+
+    const safeEntries = (Array.isArray(entries) ? entries : [])
+        .map((entry, index) => sanitizeArrivalAnalysisEntry(entry, index))
+        .filter(Boolean);
+
+    let resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    if (!resolvedProjectIdUuid) {
+        throw new Error('project_id introuvable pour arrival_analyses.');
+    }
+    resolvedProjectIdUuid = await ensureCloudProjectRow(resolvedProjectIdUuid);
+
+    const { error: deleteError } = await cloudClient
+        .from(CLOUD_ARRIVAL_ANALYSES_TABLE)
+        .delete()
+        .eq('creator_email', creatorEmail)
+        .eq('project_id', resolvedProjectIdUuid);
+
+    if (deleteError) throw deleteError;
+
+    if (!safeEntries.length) {
+        return true;
+    }
+
+    const nowIso = new Date().toISOString();
+    const payload = safeEntries.map(entry => {
+        const row = {
+            cache_key: entry.cacheKey,
+            destination_label: entry.destinationLabel || null,
+            destination_lat: entry.destinationLat,
+            destination_lng: entry.destinationLng,
+            arrival_iso: entry.arrivalIso || null,
+            route_name: entry.routeName || null,
+            top_anchorage_name: entry.topAnchorageName || null,
+            summary_text: entry.summaryText || null,
+            recommendations: entry.recommendations,
+            restaurants: entry.restaurants,
+            shops: entry.shops,
+            creator_email: creatorEmail,
+            creator_name: entry.creatorName || null,
+            project_id: resolvedProjectIdUuid,
+            created_at: entry.createdAt || nowIso,
+            updated_at: entry.updatedAt || nowIso
+        };
+
+        if (isUuidString(entry.id)) {
+            row.id = entry.id;
+        }
+
+        return row;
+    });
+
+    const { error: insertError } = await cloudClient
+        .from(CLOUD_ARRIVAL_ANALYSES_TABLE)
+        .insert(payload);
+
+    if (insertError) throw insertError;
+    return true;
+}
+
 function buildMaintenanceBoardsFromCloudRows(schemaRows, pinRows) {
     const safeSchemaRows = Array.isArray(schemaRows) ? schemaRows : [];
     const safePinRows = Array.isArray(pinRows) ? pinRows : [];
@@ -20077,7 +20659,8 @@ async function pullRoutesFromCloud(options = {}) {
         includeNavLog = true,
         includeEngineLog = true,
         includeEngineSound = includeEngineLog,
-        includeWaypointPhotos = true
+        includeWaypointPhotos = true,
+        includeArrivalAnalyses = true
     } = options || {};
     const cloudNavEntriesFromTable = includeNavLog
         ? await pullNavLogEntriesFromCloudTable()
@@ -20091,6 +20674,9 @@ async function pullRoutesFromCloud(options = {}) {
     const cloudWaypointPhotosV2 = includeWaypointPhotos
         ? await pullWaypointPhotosFromCloudV2()
         : null;
+    const cloudArrivalAnalysesV2 = includeArrivalAnalyses
+        ? await pullArrivalAnalysisEntriesFromCloudV2()
+        : null;
 
     let cloudMaintenanceBoardsV2 = null;
     let cloudMaintenanceExpensesV2 = null;
@@ -20102,6 +20688,7 @@ async function pullRoutesFromCloud(options = {}) {
     }
 
     const localRoutesBeforePull = [...getSavedRoutes()];
+    const localArrivalAnalysesBeforePull = [...arrivalAnalysisEntries];
     const cloudRoutesV2 = await pullRoutesFromCloudV2();
     const cloudPolarProfilesFromCloud = await pullPolarProfilesFromCloudTable().catch(() => null);
     const effectiveRoutes = Array.isArray(cloudRoutesV2) ? cloudRoutesV2 : [];
@@ -20157,6 +20744,12 @@ async function pullRoutesFromCloud(options = {}) {
         if (includeWaypointPhotos && Array.isArray(cloudWaypointPhotosV2)) {
             setWaypointPhotoEntries(cloudWaypointPhotosV2, { persistLocal: true, refreshUi: true });
         }
+        if (includeArrivalAnalyses && Array.isArray(cloudArrivalAnalysesV2)) {
+            const mergedArrivalAnalyses = arrivalAnalysesCloudDirty
+                ? mergeArrivalAnalysisEntriesPreservingDirtyLocal(localArrivalAnalysesBeforePull, cloudArrivalAnalysesV2)
+                : cloudArrivalAnalysesV2;
+            setArrivalAnalysisEntries(mergedArrivalAnalyses, { persistLocal: true, refreshUi: true });
+        }
         if (allowMaintenanceOverwrite) {
             setMaintenanceBoards(cloudMaintenanceBoardsV2, { persistLocal: true, refreshUi: true, syncCloud: false });
             setMaintenanceExpenses(cloudMaintenanceExpensesV2, { refreshUi: true });
@@ -20188,6 +20781,12 @@ async function pullRoutesFromCloud(options = {}) {
 
     if (includeWaypointPhotos && Array.isArray(cloudWaypointPhotosV2)) {
         setWaypointPhotoEntries(cloudWaypointPhotosV2, { persistLocal: true, refreshUi: true });
+    }
+    if (includeArrivalAnalyses && Array.isArray(cloudArrivalAnalysesV2)) {
+        const arrivalEntriesToApply = arrivalAnalysesCloudDirty
+            ? mergeArrivalAnalysisEntriesPreservingDirtyLocal(localArrivalAnalysesBeforePull, cloudArrivalAnalysesV2)
+            : cloudArrivalAnalysesV2;
+        setArrivalAnalysisEntries(arrivalEntriesToApply, { persistLocal: true, refreshUi: true });
     }
     if (allowMaintenanceOverwrite) {
         setMaintenanceBoards(cloudMaintenanceBoardsV2, { persistLocal: true, refreshUi: true, syncCloud: false });
@@ -20225,7 +20824,8 @@ async function pushRoutesToCloud(options = {}) {
         includeEngineLog = true,
         includeEngineSound = includeEngineLog,
         includeWaypointPhotos = true,
-        includeMaintenanceBoards = true
+        includeMaintenanceBoards = true,
+        includeArrivalAnalyses = true
     } = options || {};
 
     const routesSnapshot = getSavedRoutes();
@@ -20242,11 +20842,15 @@ async function pushRoutesToCloud(options = {}) {
     if (includeWaypointPhotos) {
         await pushWaypointPhotosToCloudV2(waypointPhotoEntries);
     }
+    if (includeArrivalAnalyses) {
+        await pushArrivalAnalysisEntriesToCloudV2(arrivalAnalysisEntries);
+    }
     if (includeMaintenanceBoards) {
         await pushMaintenanceBoardsToCloudV2(maintenanceBoards);
     }
 
     routesCloudDirty = false;
+    arrivalAnalysesCloudDirty = false;
     cloudLastSeenUpdatedAtMs = Math.max(cloudLastSeenUpdatedAtMs, Date.now());
     return true;
 }
