@@ -168,6 +168,7 @@ let cloudAllowedUsersHasNameColumn = true;
 let cloudAllowedUsersHasPhoneColumn = true;
 let cloudAllowedUsersHasTelegramChatIdColumn = true;
 let cloudAllowedUsersHasTelegramAlertsEnabledColumn = true;
+let cloudNavLogHasTraceSamplesColumn = true;
 let routesCloudDirty = false;
 let arrivalAnalysesCloudDirty = false;
 let cloudResolvedProjectIdUuid = '';
@@ -214,6 +215,7 @@ let anchorDragActiveEventSession = null;
 let navHasCenteredOnFirstFix = false;
 let navLogLastSubmitMs = 0;
 let editingNavLogEntryId = null;
+let navSelectedTraceEntryId = '';
 let engineLogEntries = [];
 let engineSoundSnapshots = [];
 let engineAudioRegimeMode = 'auto';
@@ -13901,6 +13903,7 @@ function sanitizeNavLogEntry(entry, fallbackIndex = 0) {
         timestamp,
         watchTimeIso,
         watchEndTimeIso,
+        traceSamples: sanitizeNavGpsTraceSamplesList(readValue('traceSamples', 'trace_samples')),
         lat: toFiniteOrNull(readValue('lat')),
         lng: toFiniteOrNull(readValue('lng', 'lon')),
         speedKn: toFiniteOrNull(readValue('speedKn', 'speed_kn')),
@@ -14670,6 +14673,9 @@ async function pushNavLogEntriesToCloudTable() {
         project_id: resolvedProjectIdUuid,
         watch_time_iso: entry.watchTimeIso,
         watch_end_time_iso: entry.watchEndTimeIso,
+        ...(cloudNavLogHasTraceSamplesColumn ? {
+            trace_samples: sanitizeNavGpsTraceSamplesList(entry?.traceSamples)
+        } : {}),
         lat: entry.lat,
         lng: entry.lng,
         speed_kn: entry.speedKn,
@@ -14705,7 +14711,25 @@ async function pushNavLogEntriesToCloudTable() {
         .from(CLOUD_NAV_LOG_TABLE)
         .insert(rowPayloadSnake);
 
-    if (insertSnakeError) throw insertSnakeError;
+    if (insertSnakeError) {
+        const missingColumn = extractMissingColumnName(insertSnakeError);
+        if (missingColumn === 'trace_samples' || missingColumn === 'traceSamples') {
+            cloudNavLogHasTraceSamplesColumn = false;
+            const payloadWithoutTrace = rowPayloadSnake.map(entry => {
+                const cloned = { ...entry };
+                delete cloned.trace_samples;
+                return cloned;
+            });
+
+            const { error: retryInsertError } = await cloudClient
+                .from(CLOUD_NAV_LOG_TABLE)
+                .insert(payloadWithoutTrace);
+
+            if (retryInsertError) throw retryInsertError;
+            return true;
+        }
+        throw insertSnakeError;
+    }
     return true;
 }
 
@@ -15258,36 +15282,68 @@ function updateNavLiveDashboard() {
     const latestEntry = Array.isArray(navLogEntries) && navLogEntries.length
         ? navLogEntries[navLogEntries.length - 1]
         : null;
+    const selectedEntry = getSelectedNavTraceEntry();
+    const contextEntry = selectedEntry || latestEntry;
+    const contextTraceEntries = selectedEntry ? getNavTraceEntriesForEntry(selectedEntry) : getNavGpsTraceEntries();
+    const latestTraceEntry = contextTraceEntries.length
+        ? contextTraceEntries[contextTraceEntries.length - 1]
+        : null;
+    const previousTraceEntry = contextTraceEntries.length > 1
+        ? contextTraceEntries[contextTraceEntries.length - 2]
+        : null;
+    const derivedTraceMetrics = computeDerivedNavMetricsFromPoints(previousTraceEntry, latestTraceEntry);
 
     const headingInput = document.getElementById('watchHeadingInput');
     const windSpeedInput = document.getElementById('watchWindSpeedInput');
     const seaStateInput = document.getElementById('watchSeaStateInput');
 
-    const speed = Number.isFinite(navLatestSpeedKn)
-        ? navLatestSpeedKn
-        : (Number.isFinite(latestEntry?.speedKn) ? latestEntry.speedKn : null);
-    const heel = Number.isFinite(navLatestHeelDeg)
-        ? navLatestHeelDeg
-        : (Number.isFinite(latestEntry?.heelDeg) ? latestEntry.heelDeg : null);
+    const speed = selectedEntry
+        ? (Number.isFinite(latestTraceEntry?.speedKn)
+            ? latestTraceEntry.speedKn
+            : (Number.isFinite(derivedTraceMetrics.speedKn)
+                ? derivedTraceMetrics.speedKn
+                : (Number.isFinite(contextEntry?.speedKn) ? contextEntry.speedKn : null)))
+        : (Number.isFinite(navLatestSpeedKn)
+            ? navLatestSpeedKn
+            : (Number.isFinite(latestTraceEntry?.speedKn)
+                ? latestTraceEntry.speedKn
+                : (Number.isFinite(derivedTraceMetrics.speedKn)
+                    ? derivedTraceMetrics.speedKn
+                    : (Number.isFinite(contextEntry?.speedKn) ? contextEntry.speedKn : null))));
+    const heel = selectedEntry
+        ? (Number.isFinite(latestTraceEntry?.heelDeg)
+            ? latestTraceEntry.heelDeg
+            : (Number.isFinite(contextEntry?.heelDeg) ? contextEntry.heelDeg : null))
+        : (Number.isFinite(navLatestHeelDeg)
+            ? navLatestHeelDeg
+            : (Number.isFinite(latestTraceEntry?.heelDeg)
+                ? latestTraceEntry.heelDeg
+                : (Number.isFinite(contextEntry?.heelDeg) ? contextEntry.heelDeg : null)));
 
     const liveHeadingInput = Number.parseFloat(String(headingInput?.value || ''));
-    const heading = Number.isFinite(navLatestCourseDeg)
-        ? navLatestCourseDeg
-        : (Number.isFinite(liveHeadingInput)
-            ? liveHeadingInput
-            : (Number.isFinite(latestEntry?.headingDeg) ? latestEntry.headingDeg : null));
+    const heading = selectedEntry
+        ? (Number.isFinite(derivedTraceMetrics.courseDeg)
+            ? derivedTraceMetrics.courseDeg
+            : (Number.isFinite(contextEntry?.headingDeg) ? contextEntry.headingDeg : null))
+        : (Number.isFinite(navLatestCourseDeg)
+            ? navLatestCourseDeg
+            : (Number.isFinite(derivedTraceMetrics.courseDeg)
+                ? derivedTraceMetrics.courseDeg
+                : (Number.isFinite(liveHeadingInput)
+                    ? liveHeadingInput
+                    : (Number.isFinite(contextEntry?.headingDeg) ? contextEntry.headingDeg : null))));
 
     const liveWindInput = Number.parseFloat(String(windSpeedInput?.value || ''));
     const wind = Number.isFinite(liveWindInput)
         ? liveWindInput
-        : (Number.isFinite(latestEntry?.windSpeedKn) ? latestEntry.windSpeedKn : null);
+        : (Number.isFinite(contextEntry?.windSpeedKn) ? contextEntry.windSpeedKn : null);
 
-    const seaState = String(seaStateInput?.value || latestEntry?.seaState || '');
+    const seaState = String(seaStateInput?.value || contextEntry?.seaState || '');
     const swell = estimateSwellFromNavContext({ windSpeedKn: wind, heelDeg: heel, seaState });
 
     speedNode.textContent = Number.isFinite(speed) ? `${speed.toFixed(1)} kn` : '-- kn';
     heelNode.textContent = Number.isFinite(heel) ? `${heel.toFixed(1)} deg` : '-- deg';
-    headingNode.textContent = Number.isFinite(heading) ? `${Math.round(((heading % 360) + 360) % 360)} deg` : '-- deg';
+    headingNode.textContent = Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))} deg` : '-- deg';
     swellNode.textContent = `${swell.value.toFixed(1)} m`;
 
     const swellClass = swell.value >= 3.4
@@ -15397,7 +15453,8 @@ function renderNavLogList() {
             const watchRangeLabel = watchEndTime ? `${watchTime} -> ${watchEndTime}` : watchTime;
             const row = document.createElement('div');
             row.className = 'log-list-row';
-            if (editingNavLogEntryId && String(item?.id || '') === editingNavLogEntryId) {
+            if ((editingNavLogEntryId && String(item?.id || '') === editingNavLogEntryId)
+                || (navSelectedTraceEntryId && String(item?.id || '') === navSelectedTraceEntryId)) {
                 row.classList.add('log-list-row--active');
             }
 
@@ -15439,6 +15496,135 @@ function renderNavLogList() {
 function getNavGpsTraceEntries() {
     return (Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples : [])
         .filter(item => Number.isFinite(item?.lat) && Number.isFinite(item?.lng));
+}
+
+function normalizeCourseDegrees(value) {
+    const degrees = Number(value);
+    if (!Number.isFinite(degrees)) return null;
+    return ((degrees % 360) + 360) % 360;
+}
+
+function getNavTraceEntryTimestampMs(entry) {
+    if (!entry) return NaN;
+    const rawValue = entry?.timestamp ?? entry?.watchTimeIso ?? entry?.fixTimeMs ?? null;
+    return toTimestampMs(rawValue);
+}
+
+function computeDerivedNavMetricsFromPoints(previousPoint, currentPoint) {
+    const previousLat = Number(previousPoint?.lat);
+    const previousLng = Number(previousPoint?.lng ?? previousPoint?.lon);
+    const currentLat = Number(currentPoint?.lat);
+    const currentLng = Number(currentPoint?.lng ?? currentPoint?.lon);
+    const previousMs = getNavTraceEntryTimestampMs(previousPoint);
+    const currentMs = getNavTraceEntryTimestampMs(currentPoint);
+
+    if (!Number.isFinite(previousLat) || !Number.isFinite(previousLng) || !Number.isFinite(currentLat) || !Number.isFinite(currentLng)) {
+        return { speedKn: null, courseDeg: null };
+    }
+
+    if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || currentMs <= previousMs) {
+        return { speedKn: null, courseDeg: null };
+    }
+
+    const elapsedHours = (currentMs - previousMs) / (60 * 60 * 1000);
+    if (!Number.isFinite(elapsedHours) || elapsedHours <= 0) {
+        return { speedKn: null, courseDeg: null };
+    }
+
+    const distanceValueNm = distanceNm(previousLat, previousLng, currentLat, currentLng);
+    if (!Number.isFinite(distanceValueNm)) {
+        return { speedKn: null, courseDeg: null };
+    }
+
+    const hasMeaningfulMove = distanceValueNm >= 0.003;
+    const speedKn = hasMeaningfulMove ? (distanceValueNm / elapsedHours) : 0;
+    const courseDeg = hasMeaningfulMove
+        ? normalizeCourseDegrees(getBearing(
+            { lat: previousLat, lon: previousLng },
+            { lat: currentLat, lon: currentLng }
+        ))
+        : null;
+
+    return {
+        speedKn: Number.isFinite(speedKn) ? speedKn : null,
+        courseDeg
+    };
+}
+
+function getNavLogEntryById(entryId) {
+    const targetId = String(entryId || '').trim();
+    if (!targetId) return null;
+    return Array.isArray(navLogEntries)
+        ? (navLogEntries.find(item => String(item?.id || '') === targetId) || null)
+        : null;
+}
+
+function getNavLogEntryTimeRange(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const startMs = toTimestampMs(entry?.watchTimeIso || entry?.timestamp || null);
+    if (!Number.isFinite(startMs)) return null;
+
+    let endMs = toTimestampMs(entry?.watchEndTimeIso || null);
+    if (!Number.isFinite(endMs) || endMs < startMs) {
+        const safeEntries = sanitizeNavLogEntriesList(navLogEntries);
+        const entryIndex = safeEntries.findIndex(item => String(item?.id || '') === String(entry?.id || ''));
+        if (entryIndex >= 0) {
+            const nextEntry = safeEntries[entryIndex + 1] || null;
+            const nextStartMs = toTimestampMs(nextEntry?.watchTimeIso || nextEntry?.timestamp || null);
+            if (Number.isFinite(nextStartMs) && nextStartMs > startMs) {
+                endMs = nextStartMs - 1000;
+            }
+        }
+    }
+
+    if (!Number.isFinite(endMs) || endMs < startMs) {
+        endMs = startMs + NAV_GPS_SAMPLE_INTERVAL_MS + 120000;
+    }
+
+    return { startMs, endMs };
+}
+
+function getNavTraceEntriesForEntry(entry) {
+    const embeddedTrace = sanitizeNavGpsTraceSamplesList(entry?.traceSamples);
+    if (embeddedTrace.length) {
+        return embeddedTrace;
+    }
+
+    const timeRange = getNavLogEntryTimeRange(entry);
+    if (!timeRange) return [];
+
+    const startBoundaryMs = timeRange.startMs - 30000;
+    const endBoundaryMs = timeRange.endMs + 90000;
+
+    return getNavGpsTraceEntries().filter(item => {
+        const itemMs = getNavTraceEntryTimestampMs(item);
+        return Number.isFinite(itemMs) && itemMs >= startBoundaryMs && itemMs <= endBoundaryMs;
+    });
+}
+
+function getSelectedNavTraceEntry() {
+    return getNavLogEntryById(navSelectedTraceEntryId || editingNavLogEntryId || '');
+}
+
+function focusNavTraceEntriesOnMap(traceEntries) {
+    if (!map || !Array.isArray(traceEntries) || traceEntries.length === 0) return;
+
+    const latlngs = traceEntries
+        .map(item => [Number(item?.lat), Number(item?.lng)])
+        .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+
+    if (!latlngs.length) return;
+
+    if (latlngs.length === 1) {
+        map.setView(latlngs[0], Math.max(map.getZoom(), 14));
+        return;
+    }
+
+    const bounds = L.latLngBounds(latlngs);
+    if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [28, 28] });
+    }
 }
 
 function ensureNavGpsTraceLayerGroup() {
@@ -15504,7 +15690,10 @@ function getNavHeelTraceColor(heelDeg) {
 function renderNavGpsTraceOnMap() {
     if (!map) return;
 
-    const traceEntries = getNavGpsTraceEntries();
+    const selectedEntry = getSelectedNavTraceEntry();
+    const selectedTraceEntries = selectedEntry ? getNavTraceEntriesForEntry(selectedEntry) : [];
+    const traceEntries = selectedTraceEntries.length ? selectedTraceEntries : getNavGpsTraceEntries();
+    const isFocusedTrace = selectedTraceEntries.length > 0;
     const layerGroup = ensureNavGpsTraceLayerGroup();
     if (!layerGroup) return;
 
@@ -15513,10 +15702,14 @@ function renderNavGpsTraceOnMap() {
 
     const latlngs = traceEntries.map(item => [item.lat, item.lng]);
     const polyline = L.polyline(latlngs, {
-        color: '#5ac8fa',
+        color: isFocusedTrace ? '#ffd166' : '#5ac8fa',
         weight: 3,
         opacity: 0.9
     });
+    if (selectedEntry) {
+        const label = String(selectedEntry?.watchCrew || '').trim() || t('Session GPS', 'Sesion GPS');
+        polyline.bindPopup(`${t('Trace sélectionnée', 'Traza seleccionada')}<br>${escapeHtml(label)}`);
+    }
     layerGroup.addLayer(polyline);
 
     // Keep markers lightweight: show heel points only on recent samples.
@@ -15527,7 +15720,7 @@ function renderNavGpsTraceOnMap() {
             radius: 4,
             color: '#0b1f2e',
             weight: 1,
-            fillColor: getNavHeelTraceColor(heel),
+            fillColor: isFocusedTrace ? '#ffd166' : getNavHeelTraceColor(heel),
             fillOpacity: 0.9
         });
 
@@ -15581,6 +15774,7 @@ function updateNavLogFormMode() {
 
 function cancelNavLogEdit() {
     editingNavLogEntryId = null;
+    navSelectedTraceEntryId = '';
     resetNavLogEditorForm();
     updateNavLogFormMode();
     if (logWorkspaceMode === 'nav') {
@@ -15613,6 +15807,7 @@ function startEditNavLogEntry(entryId) {
     }
 
     editingNavLogEntryId = targetId;
+    navSelectedTraceEntryId = targetId;
     const entryDate = parseDateInputFlexible(entry?.watchTimeIso || entry?.timestamp || Date.now());
     watchTimeInput.value = toLocalDateTimeInputValue(entryDate || new Date());
     const entryEndDate = parseDateInputFlexible(entry?.watchEndTimeIso || null);
@@ -15634,6 +15829,7 @@ function startEditNavLogEntry(entryId) {
     renderNavLogList();
     renderLogWorkspacePanel();
     updateNavLiveDashboard();
+    focusNavTraceEntriesOnMap(getNavTraceEntriesForEntry(entry));
 }
 
 function deleteEditingNavLogEntry() {
@@ -15665,6 +15861,9 @@ function deleteEditingNavLogEntry() {
 
     navLogEntries = navLogEntries.filter(item => String(item?.id || '') !== targetId);
     editingNavLogEntryId = null;
+    if (navSelectedTraceEntryId === targetId) {
+        navSelectedTraceEntryId = '';
+    }
     logWorkspaceMode = 'none';
     resetNavLogEditorForm();
     updateNavLogFormMode();
@@ -15675,16 +15874,17 @@ function deleteEditingNavLogEntry() {
     updateNavLiveDashboard();
 }
 
-function appendNavLogEntry({ lat, lng, speedKn, heelDeg, source = 'gps', watchTimeIso = null, watchEndTimeIso = null, watchCrew = '', headingDeg = null, windDirectionDeg = null, windSpeedKn = null, seaState = '', sailConfig = '', barometerHpa = null, logDistanceNm = null, events = '' }) {
+function appendNavLogEntry({ lat, lng, speedKn, heelDeg, source = 'gps', watchTimeIso = null, watchEndTimeIso = null, watchCrew = '', headingDeg = null, windDirectionDeg = null, windSpeedKn = null, seaState = '', sailConfig = '', barometerHpa = null, logDistanceNm = null, events = '', traceSamples = [] }) {
     const hasPosition = Number.isFinite(lat) && Number.isFinite(lng);
 
     if (!hasPosition && source !== 'manual') return;
 
-    navLogEntries.push({
+    const createdEntry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: new Date().toISOString(),
         watchTimeIso,
         watchEndTimeIso,
+        traceSamples: sanitizeNavGpsTraceSamplesList(traceSamples),
         lat: hasPosition ? lat : null,
         lng: hasPosition ? lng : null,
         speedKn: Number.isFinite(speedKn) ? speedKn : null,
@@ -15701,7 +15901,9 @@ function appendNavLogEntry({ lat, lng, speedKn, heelDeg, source = 'gps', watchTi
         events,
         creatorEmail: getCreatorPatch().creatorEmail,
         creatorName: getCreatorPatch().creatorName
-    });
+    };
+
+    navLogEntries.push(createdEntry);
 
     if (navLogEntries.length > 1200) {
         navLogEntries = navLogEntries.slice(navLogEntries.length - 1200);
@@ -15710,6 +15912,7 @@ function appendNavLogEntry({ lat, lng, speedKn, heelDeg, source = 'gps', watchTi
     saveNavLogEntries();
     renderNavLogList();
     updateNavLiveDashboard();
+    return createdEntry;
 }
 
 function captureNavGpsSample(sampleSource = 'gps-watch') {
@@ -15749,7 +15952,7 @@ function appendAutoNavSessionSummaryEntry() {
     for (let index = 1; index < sessionEntries.length; index++) {
         const previous = sessionEntries[index - 1];
         const current = sessionEntries[index];
-        distance += distanceNm(previous, current);
+        distance += distanceNm(previous.lat, previous.lng, current.lat, current.lng);
     }
 
     const speedValues = sessionEntries.map(item => item?.speedKn).filter(value => Number.isFinite(value));
@@ -15763,7 +15966,7 @@ function appendAutoNavSessionSummaryEntry() {
         `Sesión GPS auto: ${sessionEntries.length} puntos · duración ${durationMinutes ? durationMinutes.toFixed(1) : '0.0'} min · distancia ${distance.toFixed(2)} NM · velocidad media ${Number.isFinite(averageSpeed) ? averageSpeed.toFixed(1) : 'N/A'} kn · inclinación media ${Number.isFinite(averageHeel) ? averageHeel.toFixed(1) : 'N/A'}°`
     );
 
-    appendNavLogEntry({
+    const summaryEntry = appendNavLogEntry({
         lat: null,
         lng: null,
         speedKn: averageSpeed,
@@ -15773,10 +15976,12 @@ function appendAutoNavSessionSummaryEntry() {
         watchEndTimeIso: new Date().toISOString(),
         watchCrew: t('AUTO GPS', 'AUTO GPS'),
         logDistanceNm: distance,
-        events: summaryText
+        events: summaryText,
+        traceSamples: sessionEntries
     });
 
     return {
+        entryId: String(summaryEntry?.id || ''),
         points: sessionEntries.length,
         distance,
         durationMinutes
@@ -16395,6 +16600,7 @@ function startNavigationLogging() {
     }
 
     navGpsLatestFix = null;
+    navSelectedTraceEntryId = '';
     navGpsSessionStartMs = Date.now();
     navGpsSessionStartEntryIndex = navLogEntries.length;
     navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
@@ -16420,17 +16626,30 @@ function startNavigationLogging() {
             const longitude = Number(position?.coords?.longitude);
             const speedMs = Number(position?.coords?.speed);
             const headingDeg = Number(position?.coords?.heading);
-            const speedKn = Number.isFinite(speedMs) ? speedMs * 1.943844 : null;
-            navLatestSpeedKn = speedKn;
-            navLatestCourseDeg = Number.isFinite(headingDeg) ? headingDeg : navLatestCourseDeg;
+            const nativeSpeedKn = Number.isFinite(speedMs) ? speedMs * 1.943844 : null;
 
             if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+            const nextFix = {
+                lat: latitude,
+                lng: longitude,
+                speedKn: nativeSpeedKn,
+                fixTimeMs: Date.now()
+            };
+            const derivedMetrics = computeDerivedNavMetricsFromPoints(navGpsLatestFix, nextFix);
+            const resolvedSpeedKn = Number.isFinite(nativeSpeedKn) ? nativeSpeedKn : derivedMetrics.speedKn;
+            const resolvedCourseDeg = Number.isFinite(headingDeg)
+                ? normalizeCourseDegrees(headingDeg)
+                : (Number.isFinite(derivedMetrics.courseDeg) ? derivedMetrics.courseDeg : navLatestCourseDeg);
+
+            navLatestSpeedKn = Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null;
+            navLatestCourseDeg = Number.isFinite(resolvedCourseDeg) ? resolvedCourseDeg : navLatestCourseDeg;
 
             navGpsLatestFix = {
                 lat: latitude,
                 lng: longitude,
-                speedKn,
-                fixTimeMs: Date.now()
+                speedKn: Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null,
+                fixTimeMs: nextFix.fixTimeMs
             };
 
             updateNavCurrentPositionMarker(navGpsLatestFix);
@@ -16486,6 +16705,13 @@ function stopNavigationLogging(options = {}) {
     }
 
     if (summary) {
+        navSelectedTraceEntryId = String(summary.entryId || '');
+        renderNavLogList();
+        renderNavGpsTraceOnMap();
+        const selectedEntry = getNavLogEntryById(navSelectedTraceEntryId);
+        if (selectedEntry) {
+            focusNavTraceEntriesOnMap(getNavTraceEntriesForEntry(selectedEntry));
+        }
         setNavLogStatus(t(
             `Log GPS arrêté · session enregistrée (${summary.points} points, ${summary.distance.toFixed(2)} NM).`,
             `Log GPS detenido · sesión guardada (${summary.points} puntos, ${summary.distance.toFixed(2)} NM).`
@@ -16511,6 +16737,7 @@ function clearNavigationLogbook() {
     navLatestHeelDeg = null;
     navLatestCourseDeg = null;
     editingNavLogEntryId = null;
+    navSelectedTraceEntryId = '';
     logWorkspaceMode = 'none';
     resetNavLogEditorForm();
     updateNavLogFormMode();
@@ -16528,6 +16755,7 @@ function loadNavigationLogbook() {
     loadAnchorDragAlarmState();
     navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
     editingNavLogEntryId = null;
+    navSelectedTraceEntryId = '';
     logWorkspaceMode = 'none';
     updateNavLogFormMode();
     const watchTimeInput = document.getElementById('watchTimeInput');
@@ -16548,6 +16776,7 @@ function loadNavigationLogbook() {
 
 function openNavLogCreateForm() {
     editingNavLogEntryId = null;
+    navSelectedTraceEntryId = '';
     resetNavLogEditorForm();
     logWorkspaceMode = 'nav';
     updateNavLogFormMode();
