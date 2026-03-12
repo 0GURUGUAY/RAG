@@ -10,7 +10,7 @@
     <link rel="icon" type="image/jpeg" href="ceibo-favicon.jpg">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <link rel="stylesheet" href="style.css?v=20260309-05"/>
+    <link rel="stylesheet" href="style.css?v=20260312-30"/>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -740,7 +740,8 @@
     <div id="sidebarFooterContainer">
         <div class="sidebar-footer">
             <span class="creator-credit">Programa creado por Max Patissier</span>
-            <span id="buildVersionBadge" class="build-version-badge">v20260310-01</span>
+            <span id="buildVersionBadge" class="build-version-badge">v20260312-30</span>
+            <button id="nightModeToggleBtn" class="night-mode-btn" type="button" aria-pressed="false">Mode nuit: OFF</button>
             <div class="lang-switch" aria-label="Sélecteur de langue">
                 <button id="langFrBtn" class="lang-btn" type="button">FR</button>
                 <button id="langEsBtn" class="lang-btn" type="button">ES</button>
@@ -855,6 +856,7 @@
 
                     <div class="button-row">
                         <button id="addManualNavLogBtn" type="button" style="flex:1;">Enregistrer entrée</button>
+                        <button id="deleteNavLogBtn" type="button" style="flex:1; display:none;">Supprimer ce log</button>
                         <button id="cancelNavLogEditBtn" type="button" style="flex:1;">Annuler</button>
                     </div>
 
@@ -967,7 +969,7 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=20260309-05"></script>
+<script type="module" src="app.js?v=20260312-30"></script>
 
 </body>
 </html>

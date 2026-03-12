@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260312-29';
+const APP_BUILD_VERSION = '20260312-30';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -262,6 +262,7 @@ let cloudTableStatsRemoteCounts = null;
 let cloudTableStatsRefreshPromise = null;
 let cloudTableStatsLastRefreshAtMs = 0;
 let protectedDataLoaded = false;
+let isNightModeEnabled = false;
 let googlePhotosAccessToken = '';
 let googlePhotosTokenExpiryMs = 0;
 let googlePhotosPickerItems = [];
@@ -273,6 +274,7 @@ let overpassPreferredEndpoint = OVERPASS_URLS[0];
 const MAP_STYLE_STORAGE_KEY = 'ceiboMapStyle';
 const MAP_VIEW_STORAGE_KEY = 'ceiboMapView';
 const APP_LANGUAGE_STORAGE_KEY = 'ceiboAppLanguage';
+const NIGHT_MODE_STORAGE_KEY = 'ceiboNightModeV1';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'ceiboSidebarCollapsedV1';
 const TRANSPARENT_TILE_DATA_URI = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 const OWM_TILE_APPID_STORAGE_KEY = 'ceiboOwmTileAppId';
@@ -417,6 +419,39 @@ function updateLanguageButtonsUi() {
     if (enBtn) enBtn.classList.toggle('active', currentLanguage === 'en');
 }
 
+function renderNightModeToggleUi() {
+    const button = document.getElementById('nightModeToggleBtn');
+    if (!button) return;
+
+    const isOn = !!isNightModeEnabled;
+    button.classList.toggle('is-on', isOn);
+    button.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+    button.textContent = isOn
+        ? t('Mode nuit: ON', 'Modo noche: ON', 'Night mode: ON')
+        : t('Mode nuit: OFF', 'Modo noche: OFF', 'Night mode: OFF');
+}
+
+function applyNightMode(enabled, { persist = true } = {}) {
+    isNightModeEnabled = !!enabled;
+    document.body.classList.toggle('night-mode', isNightModeEnabled);
+    renderNightModeToggleUi();
+
+    if (persist) {
+        localStorage.setItem(NIGHT_MODE_STORAGE_KEY, isNightModeEnabled ? '1' : '0');
+    }
+}
+
+function initializeNightModeToggle() {
+    const button = document.getElementById('nightModeToggleBtn');
+    const storedEnabled = localStorage.getItem(NIGHT_MODE_STORAGE_KEY) === '1';
+    applyNightMode(storedEnabled, { persist: false });
+
+    if (!button) return;
+    button.addEventListener('click', () => {
+        applyNightMode(!isNightModeEnabled);
+    });
+}
+
 function applyLanguageToUi() {
     document.documentElement.lang = currentLanguage;
 
@@ -429,6 +464,7 @@ function applyLanguageToUi() {
     setElementText('#arrivalTabBtn', t('Arrivée', 'Llegada'));
     setElementText('#waypointTabBtn', t('Waypoint', 'Waypoint'));
     setElementText('#maintenanceTabBtn', t('Maintenance', 'Mantenimiento'));
+    renderNightModeToggleUi();
 
     setElementText('label[for="routeNameInput"]', t('Nom de la route:', 'Nombre de la ruta:'));
     setElementPlaceholder('#routeNameInput', t('Nom de la route', 'Nombre de la ruta'));
@@ -634,6 +670,7 @@ function applyLanguageToUi() {
     setElementText('#clearNavLogBtn', t('Effacer journal nav', 'Borrar diario nav'));
     setElementText('#navLogOpenCreateBtn', t('Ajouter', 'Añadir'));
     setElementText('#addManualNavLogBtn', t('Enregistrer entrée', 'Guardar entrada'));
+    setElementText('#deleteNavLogBtn', t('Supprimer ce log', 'Eliminar este log', 'Delete this log'));
     setElementText('#cancelNavLogEditBtn', t('Annuler', 'Cancelar'));
     setElementText('#logWorkspaceTitle', t('Saisie journal', 'Edición diario'));
     setElementText('#logWorkspacePlaceholder', t('Clique sur Ajouter pour ouvrir le formulaire', 'Haz clic en Añadir para abrir el formulario'));
@@ -14182,9 +14219,25 @@ function resetNavLogEditorForm() {
     if (watchEventsInput) watchEventsInput.value = '';
 }
 
+function updateNavLogFormMode() {
+    const saveBtn = document.getElementById('addManualNavLogBtn');
+    const deleteBtn = document.getElementById('deleteNavLogBtn');
+
+    if (saveBtn) {
+        saveBtn.textContent = editingNavLogEntryId
+            ? t('Mettre à jour entrée', 'Actualizar entrada', 'Update entry')
+            : t('Enregistrer entrée', 'Guardar entrada', 'Save entry');
+    }
+
+    if (deleteBtn) {
+        deleteBtn.style.display = editingNavLogEntryId ? '' : 'none';
+    }
+}
+
 function cancelNavLogEdit() {
     editingNavLogEntryId = null;
     resetNavLogEditorForm();
+    updateNavLogFormMode();
     if (logWorkspaceMode === 'nav') {
         logWorkspaceMode = 'none';
     }
@@ -14232,8 +14285,48 @@ function startEditNavLogEntry(entryId) {
     watchEventsInput.value = String(entry?.events || '');
 
     logWorkspaceMode = 'nav';
+    updateNavLogFormMode();
     renderNavLogList();
     renderLogWorkspacePanel();
+    updateNavLiveDashboard();
+}
+
+function deleteEditingNavLogEntry() {
+    const targetId = String(editingNavLogEntryId || '').trim();
+    if (!targetId) return;
+
+    const entry = navLogEntries.find(item => String(item?.id || '') === targetId);
+    if (!entry) {
+        editingNavLogEntryId = null;
+        updateNavLogFormMode();
+        setNavLogStatus(t('Entrée introuvable.', 'Entrada no encontrada.', 'Entry not found.'), true);
+        renderNavLogList();
+        renderLogWorkspacePanel();
+        updateNavLiveDashboard();
+        return;
+    }
+
+    const watchTimeLabel = entry?.watchTimeIso
+        ? formatDateTimeFr(entry.watchTimeIso)
+        : formatDateTimeFr(entry?.timestamp || new Date().toISOString());
+    const confirmed = window.confirm(
+        t(
+            `Supprimer définitivement le log du ${watchTimeLabel} ?`,
+            `¿Eliminar definitivamente el log del ${watchTimeLabel}?`,
+            `Permanently delete the log from ${watchTimeLabel}?`
+        )
+    );
+    if (!confirmed) return;
+
+    navLogEntries = navLogEntries.filter(item => String(item?.id || '') !== targetId);
+    editingNavLogEntryId = null;
+    logWorkspaceMode = 'none';
+    resetNavLogEditorForm();
+    updateNavLogFormMode();
+    saveNavLogEntries();
+    renderNavLogList();
+    renderLogWorkspacePanel();
+    setNavLogStatus(t('Log de navigation supprimé.', 'Log de navegación eliminado.', 'Navigation log deleted.'));
     updateNavLiveDashboard();
 }
 
@@ -14374,6 +14467,7 @@ function addManualNavigationLogEntry(event) {
 
         if (updated) {
             saveNavLogEntries();
+            updateNavLogFormMode();
             renderNavLogList();
             setNavLogStatus(t('Entrée journal mise à jour.', 'Entrada de diario actualizada.'));
             alert(t('Mise à jour du log de navigation confirmée.', 'Actualizacion del log de navegacion confirmada.'));
@@ -14403,6 +14497,7 @@ function addManualNavigationLogEntry(event) {
     editingNavLogEntryId = null;
     logWorkspaceMode = 'none';
     resetNavLogEditorForm();
+    updateNavLogFormMode();
     renderLogWorkspacePanel();
     updateNavLiveDashboard();
 }
@@ -15073,6 +15168,7 @@ function clearNavigationLogbook() {
     editingNavLogEntryId = null;
     logWorkspaceMode = 'none';
     resetNavLogEditorForm();
+    updateNavLogFormMode();
     saveNavLogEntries();
     saveNavGpsTraceSamples();
     renderNavLogList();
@@ -15088,6 +15184,7 @@ function loadNavigationLogbook() {
     navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
     editingNavLogEntryId = null;
     logWorkspaceMode = 'none';
+    updateNavLogFormMode();
     const watchTimeInput = document.getElementById('watchTimeInput');
     if (watchTimeInput) {
         watchTimeInput.value = toLocalDateTimeInputValue(new Date());
@@ -15108,6 +15205,7 @@ function openNavLogCreateForm() {
     editingNavLogEntryId = null;
     resetNavLogEditorForm();
     logWorkspaceMode = 'nav';
+    updateNavLogFormMode();
     renderNavLogList();
     renderLogWorkspacePanel();
     updateNavLiveDashboard();
@@ -15182,6 +15280,7 @@ function renderLogWorkspacePanel() {
     placeholder.style.display = navVisible || engineVisible ? 'none' : 'flex';
 
     if (navVisible) {
+        updateNavLogFormMode();
         title.textContent = editingNavLogEntryId
             ? t('Modifier entrée de navigation', 'Editar entrada de navegación')
             : t('Créer entrée de navigation', 'Crear entrada de navegación');
@@ -15609,6 +15708,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const initialZoom = savedMapView?.zoom ?? 8;
     map = L.map('map').setView([initialLat, initialLng], initialZoom);
     initializeLanguageSwitcher();
+    initializeNightModeToggle();
     initializeSidebarToggle();
     populatePolarProfileSelects();
     loadPolarProfileEditor();
@@ -16217,6 +16317,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     const addManualNavLogBtn = document.getElementById('addManualNavLogBtn');
     if (addManualNavLogBtn) {
         addManualNavLogBtn.addEventListener('click', addManualNavigationLogEntry);
+    }
+
+    const deleteNavLogBtn = document.getElementById('deleteNavLogBtn');
+    if (deleteNavLogBtn) {
+        deleteNavLogBtn.addEventListener('click', deleteEditingNavLogEntry);
     }
 
     // Fallback delegation: keeps nav log actions working even if direct binding is missed
