@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260312-32';
+const APP_BUILD_VERSION = '20260312-33';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -248,6 +248,8 @@ let aisTargetsByMmsi = new Map();
 let aisMarkersByMmsi = new Map();
 let aisTrailPolylinesByMmsi = new Map();
 let aisProjectionPolylinesByMmsi = new Map();
+let aisVesselImageUrlsByMmsi = new Map();
+let aisVesselImageFetchInFlight = new Set();
 let aisLastSuccessRefreshAtMs = 0;
 let aisConsecutiveFailureCount = 0;
 let aisUsingCachedTargets = false;
@@ -12910,6 +12912,8 @@ function stopAisRefresh(options = {}) {
         aisMarkersByMmsi = new Map();
         aisTrailPolylinesByMmsi = new Map();
         aisProjectionPolylinesByMmsi = new Map();
+        aisVesselImageUrlsByMmsi = new Map();
+        aisVesselImageFetchInFlight = new Set();
         aisLastSuccessRefreshAtMs = 0;
         aisConsecutiveFailureCount = 0;
         aisUsingCachedTargets = false;
@@ -12972,6 +12976,77 @@ function createAisMarkerIcon(vessel) {
     });
 }
 
+function buildAisVesselImageUrl(vessel) {
+    const name = String(vessel?.name || vessel?.shipName || '').trim();
+    const mmsi = String(vessel?.mmsi || '').trim();
+    const query = [name, mmsi, 'ship'].filter(Boolean).join(' ');
+    if (!query) return '';
+    return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(query)}`;
+}
+
+function getAisVesselImageLookupQuery(vessel) {
+    const name = String(vessel?.name || vessel?.shipName || '').trim();
+    const mmsi = String(vessel?.mmsi || '').trim();
+    if (!name && !mmsi) return '';
+    return [name, mmsi, 'ship'].filter(Boolean).join(' ');
+}
+
+async function fetchAisVesselImageFromCommons(vessel) {
+    const query = getAisVesselImageLookupQuery(vessel);
+    if (!query) return '';
+
+    const params = new URLSearchParams({
+        action: 'query',
+        generator: 'search',
+        gsrsearch: query,
+        gsrnamespace: '6',
+        gsrlimit: '1',
+        prop: 'imageinfo',
+        iiprop: 'url',
+        iiurlwidth: '420',
+        format: 'json',
+        origin: '*'
+    });
+
+    const response = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`);
+    if (!response.ok) return '';
+    const payload = await response.json().catch(() => ({}));
+    const pages = payload?.query?.pages || {};
+    const page = Object.values(pages)[0];
+    const imageInfo = Array.isArray(page?.imageinfo) ? page.imageinfo[0] : null;
+    return String(imageInfo?.thumburl || imageInfo?.url || '').trim();
+}
+
+function ensureAisVesselImage(vessel) {
+    const mmsi = String(vessel?.mmsi || '').trim();
+    if (!mmsi) return;
+    if (aisVesselImageUrlsByMmsi.has(mmsi) || aisVesselImageFetchInFlight.has(mmsi)) return;
+
+    aisVesselImageFetchInFlight.add(mmsi);
+    void fetchAisVesselImageFromCommons(vessel)
+        .then(url => {
+            if (!url) return;
+            aisVesselImageUrlsByMmsi.set(mmsi, url);
+
+            const target = aisTargetsByMmsi.get(mmsi);
+            if (target) {
+                target._imageUrl = url;
+                aisTargetsByMmsi.set(mmsi, target);
+            }
+
+            const marker = aisMarkersByMmsi.get(mmsi);
+            if (marker && marker.isPopupOpen()) {
+                marker.setPopupContent(buildAisPopupHtml({ ...target, _imageUrl: url }));
+            }
+        })
+        .catch(() => {
+            // ignore image lookup failures
+        })
+        .finally(() => {
+            aisVesselImageFetchInFlight.delete(mmsi);
+        });
+}
+
 function buildAisPopupHtml(vessel) {
     const name = String(vessel?.name || vessel?.shipName || vessel?.mmsi || t('Navire inconnu', 'Barco desconocido', 'Unknown vessel')).trim();
     const mmsi = String(vessel?.mmsi || '').trim() || 'N/A';
@@ -12988,6 +13063,15 @@ function buildAisPopupHtml(vessel) {
         }
     }
 
+    const vesselImageUrl = buildAisVesselImageUrl(vessel);
+    const vesselImageLink = vesselImageUrl
+        ? `<br><a href="${vesselImageUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('📷 Voir photo du bateau', '📷 Ver foto del barco', '📷 See boat image'))}</a>`
+        : '';
+    const embeddedImageUrl = String(vessel?._imageUrl || '').trim();
+    const embeddedImageHtml = embeddedImageUrl
+        ? `<br><img src="${embeddedImageUrl}" alt="${escapeHtml(name)}" style="display:block;width:100%;max-width:260px;max-height:150px;object-fit:cover;border-radius:8px;margin-top:6px;" loading="lazy">`
+        : '';
+
     return [
         `<strong>${escapeHtml(name)}</strong>`,
         `MMSI: ${escapeHtml(mmsi)}`,
@@ -12995,7 +13079,7 @@ function buildAisPopupHtml(vessel) {
         `${escapeHtml(t('Cap fond', 'Rumbo', 'Course'))}: ${escapeHtml(course)}`,
         `${escapeHtml(t('Cap vrai', 'Rumbo real', 'Heading'))}: ${escapeHtml(heading)}`,
         `${escapeHtml(t('MAJ', 'Actualizado', 'Updated'))}: ${escapeHtml(updatedAt)}`
-    ].join('<br>') + distanceLabel;
+    ].join('<br>') + distanceLabel + embeddedImageHtml + vesselImageLink;
 }
 
 function getAisTimestampMs(vessel) {
@@ -13099,6 +13183,8 @@ function renderAisTargets(vessels, options = {}) {
         aisMarkersByMmsi = new Map();
         aisTrailPolylinesByMmsi = new Map();
         aisProjectionPolylinesByMmsi = new Map();
+        aisVesselImageUrlsByMmsi = new Map();
+        aisVesselImageFetchInFlight = new Set();
         return;
     }
 
@@ -13117,7 +13203,12 @@ function renderAisTargets(vessels, options = {}) {
             lon,
             mmsi
         });
+        const cachedImageUrl = aisVesselImageUrlsByMmsi.get(mmsi);
+        if (cachedImageUrl) {
+            merged._imageUrl = cachedImageUrl;
+        }
         aisTargetsByMmsi.set(mmsi, merged);
+        ensureAisVesselImage(merged);
     });
 
     const activeMmsiSet = new Set();
@@ -13164,7 +13255,7 @@ function renderAisTargets(vessels, options = {}) {
             const trailLine = aisTrailPolylinesByMmsi.get(mmsi);
             if (!trailLine) {
                 const nextTrail = L.polyline(trackPoints, {
-                    color: '#7fd8ff',
+                    color: '#ff4fd8',
                     weight: 3,
                     opacity: 0.72,
                     lineJoin: 'round',
