@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260311-28';
+const APP_BUILD_VERSION = '20260312-29';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -98,6 +98,7 @@ const SAVED_ROUTES_STORAGE_KEY = 'savedRoutes';
 const CLOUD_CONFIG_STORAGE_KEY = 'ceiboCloudConfigV1';
 const NAV_LOG_STORAGE_KEY = 'ceiboNavLogV1';
 const NAV_GPS_TRACE_STORAGE_KEY = 'ceiboNavGpsTraceV1';
+const ANCHOR_DRAG_ALARM_STORAGE_KEY = 'ceiboAnchorDragAlarmV1';
 const ENGINE_LOG_STORAGE_KEY = 'ceiboEngineLogV1';
 const ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY = 'ceiboEngineSoundSnapshotsV1';
 const POLAR_PROFILES_STORAGE_KEY = 'ceiboPolarProfilesV1';
@@ -125,6 +126,9 @@ const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
 const CLOUD_AUTO_PULL_INTERVAL_MS = 45000;
 const CLOUD_LOGBOOK_PUSH_DEBOUNCE_MS = 1800;
 const NAV_GPS_SAMPLE_INTERVAL_MS = 60 * 1000;
+const ANCHOR_DRAG_CONFIRMATION_MS = 90 * 1000;
+const ANCHOR_DRAG_ALERT_COOLDOWN_MS = 2 * 60 * 1000;
+const ANCHOR_DRAG_MIN_MOVING_SPEED_KN = 0.3;
 const ENGINE_SENSOR_ON_THRESHOLD = 0.62;
 const ENGINE_SENSOR_OFF_THRESHOLD = 0.37;
 const ENGINE_SENSOR_ON_HOLD_MS = 7000;
@@ -168,6 +172,19 @@ let navGpsSessionHasSample = false;
 let navGpsSessionSamples = [];
 let navGpsTraceLayerGroup = null;
 let navCurrentPositionMarker = null;
+let anchorDragCircleLayer = null;
+let anchorDragCenterMarker = null;
+let anchorDragAlarmState = {
+    enabled: false,
+    radiusM: 45,
+    anchorLat: null,
+    anchorLng: null,
+    breachSinceMs: 0,
+    isDragging: false,
+    lastAlertMs: 0,
+    lastDistanceM: null
+};
+let anchorDragActiveEventSession = null;
 let navHasCenteredOnFirstFix = false;
 let navLogLastSubmitMs = 0;
 let editingNavLogEntryId = null;
@@ -608,6 +625,12 @@ function applyLanguageToUi() {
         locatePreciseBtn.setAttribute('aria-label', locatePreciseLabel);
     }
     setElementText('#requestMotionPermissionBtn', t('Activer capteur inclinaison', 'Activar sensor inclinación'));
+    setElementText('#anchorDragTitle', t('Alarme mouillage (rippage ancre)', 'Alarma fondeo (garreo ancla)'));
+    setElementText('#anchorDragRadiusLabel', t('Rayon sécurité (m):', 'Radio seguridad (m):'));
+    setElementText('#anchorDragSetBtn', t('Définir centre (GPS actuel)', 'Definir centro (GPS actual)'));
+    setElementText('#anchorDragClearBtn', t('Réinitialiser', 'Reiniciar'));
+    setElementText('#anchorDragTestBtn', t('Test alarme', 'Probar alarma'));
+    setElementText('#anchorDragStatus', t('Alarme mouillage: inactive', 'Alarma fondeo: inactiva'));
     setElementText('#clearNavLogBtn', t('Effacer journal nav', 'Borrar diario nav'));
     setElementText('#navLogOpenCreateBtn', t('Ajouter', 'Añadir'));
     setElementText('#addManualNavLogBtn', t('Enregistrer entrée', 'Guardar entrada'));
@@ -646,6 +669,7 @@ function applyLanguageToUi() {
     setElementText('#navSwellProfileSelect option[value="conservative"]', t('Conservateur', 'Conservador'));
     setElementText('#navSwellProfileSelect option[value="balanced"]', t('Equilibre', 'Equilibrado'));
     setElementText('#navSwellProfileSelect option[value="sport"]', t('Sportif', 'Deportivo'));
+    renderAnchorDragAlarmUi();
 
     setElementText('#saveEngineLogBtn', t('Ajouter entrée moteur', 'Añadir entrada motor'));
     setElementText('#engineLogOpenCreateBtn', t('Ajouter', 'Añadir'));
@@ -11963,6 +11987,420 @@ function setNavLogStatus(message, isError = false) {
     status.style.color = isError ? '#ff8f8f' : '';
 }
 
+function sanitizeAnchorDragAlarmState(raw) {
+    const radiusRaw = Number(raw?.radiusM);
+    const radiusM = Number.isFinite(radiusRaw) ? Math.max(10, Math.min(300, Math.round(radiusRaw))) : 45;
+    const anchorLat = Number(raw?.anchorLat);
+    const anchorLng = Number(raw?.anchorLng);
+
+    return {
+        enabled: !!raw?.enabled,
+        radiusM,
+        anchorLat: Number.isFinite(anchorLat) ? anchorLat : null,
+        anchorLng: Number.isFinite(anchorLng) ? anchorLng : null,
+        breachSinceMs: 0,
+        isDragging: false,
+        lastAlertMs: 0,
+        lastDistanceM: null
+    };
+}
+
+function saveAnchorDragAlarmState() {
+    const payload = {
+        enabled: !!anchorDragAlarmState.enabled,
+        radiusM: Number(anchorDragAlarmState.radiusM) || 45,
+        anchorLat: Number.isFinite(anchorDragAlarmState.anchorLat) ? anchorDragAlarmState.anchorLat : null,
+        anchorLng: Number.isFinite(anchorDragAlarmState.anchorLng) ? anchorDragAlarmState.anchorLng : null
+    };
+    localStorage.setItem(ANCHOR_DRAG_ALARM_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function loadAnchorDragAlarmState() {
+    try {
+        const raw = localStorage.getItem(ANCHOR_DRAG_ALARM_STORAGE_KEY);
+        if (!raw) {
+            anchorDragAlarmState = sanitizeAnchorDragAlarmState(anchorDragAlarmState);
+        } else {
+            anchorDragAlarmState = sanitizeAnchorDragAlarmState(JSON.parse(raw));
+        }
+    } catch (_error) {
+        anchorDragAlarmState = sanitizeAnchorDragAlarmState({ enabled: false, radiusM: 45, anchorLat: null, anchorLng: null });
+    }
+
+    renderAnchorDragAlarmUi();
+    refreshAnchorDragAlarmOverlay();
+}
+
+function setAnchorDragStatus(message, isError = false) {
+    const status = document.getElementById('anchorDragStatus');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = isError ? '#ff8f8f' : '';
+}
+
+function ensureAnchorDragAlarmLayers() {
+    if (!map) return false;
+
+    if (!anchorDragCircleLayer) {
+        anchorDragCircleLayer = L.circle([0, 0], {
+            radius: 45,
+            color: '#4da3ff',
+            weight: 2,
+            fillColor: '#4da3ff',
+            fillOpacity: 0.08,
+            dashArray: '6 6'
+        });
+    }
+
+    if (!anchorDragCenterMarker) {
+        anchorDragCenterMarker = L.circleMarker([0, 0], {
+            radius: 5,
+            color: '#0f2a3d',
+            weight: 2,
+            fillColor: '#7fd8ff',
+            fillOpacity: 0.95
+        });
+    }
+
+    return true;
+}
+
+function refreshAnchorDragAlarmOverlay() {
+    if (!map) return;
+    if (!ensureAnchorDragAlarmLayers()) return;
+
+    const hasCenter = Number.isFinite(anchorDragAlarmState.anchorLat) && Number.isFinite(anchorDragAlarmState.anchorLng);
+    if (!hasCenter) {
+        if (anchorDragCircleLayer && map.hasLayer(anchorDragCircleLayer)) map.removeLayer(anchorDragCircleLayer);
+        if (anchorDragCenterMarker && map.hasLayer(anchorDragCenterMarker)) map.removeLayer(anchorDragCenterMarker);
+        return;
+    }
+
+    const isAlert = !!anchorDragAlarmState.isDragging;
+    const color = isAlert ? '#ff4d4d' : '#4da3ff';
+    const center = [anchorDragAlarmState.anchorLat, anchorDragAlarmState.anchorLng];
+
+    anchorDragCircleLayer
+        .setLatLng(center)
+        .setRadius(anchorDragAlarmState.radiusM)
+        .setStyle({
+            color,
+            fillColor: color,
+            fillOpacity: isAlert ? 0.16 : 0.08,
+            dashArray: anchorDragAlarmState.enabled ? null : '6 6'
+        });
+
+    anchorDragCenterMarker
+        .setLatLng(center)
+        .setStyle({
+            color: isAlert ? '#6b0000' : '#0f2a3d',
+            fillColor: isAlert ? '#ff7b7b' : '#7fd8ff'
+        })
+        .bindPopup(
+            `${t('Centre mouillage', 'Centro fondeo')}<br>` +
+            `${t('Rayon', 'Radio')}: ${Math.round(anchorDragAlarmState.radiusM)} m<br>` +
+            `${t('Alarme', 'Alarma')}: ${anchorDragAlarmState.enabled ? t('active', 'activa') : t('inactive', 'inactiva')}`
+        );
+
+    if (!map.hasLayer(anchorDragCircleLayer)) anchorDragCircleLayer.addTo(map);
+    if (!map.hasLayer(anchorDragCenterMarker)) anchorDragCenterMarker.addTo(map);
+}
+
+function renderAnchorDragAlarmUi() {
+    const radiusInput = document.getElementById('anchorDragRadiusInput');
+    const toggleBtn = document.getElementById('anchorDragToggleBtn');
+
+    if (radiusInput) {
+        radiusInput.value = String(Math.max(10, Math.min(300, Math.round(Number(anchorDragAlarmState.radiusM) || 45))));
+    }
+
+    if (toggleBtn) {
+        toggleBtn.textContent = anchorDragAlarmState.enabled
+            ? t('Désactiver alarme', 'Desactivar alarma')
+            : t('Activer alarme', 'Activar alarma');
+    }
+
+    const hasCenter = Number.isFinite(anchorDragAlarmState.anchorLat) && Number.isFinite(anchorDragAlarmState.anchorLng);
+    if (!hasCenter) {
+        setAnchorDragStatus(t('Alarme mouillage: centre non défini.', 'Alarma fondeo: centro no definido.'));
+    } else if (!anchorDragAlarmState.enabled) {
+        setAnchorDragStatus(t('Alarme mouillage: prête (désactivée).', 'Alarma fondeo: lista (desactivada).'));
+    }
+
+    refreshAnchorDragAlarmOverlay();
+}
+
+function triggerAnchorDragAlarm(distanceM, speedKn) {
+    const nowMs = Date.now();
+    if ((nowMs - Number(anchorDragAlarmState.lastAlertMs || 0)) < ANCHOR_DRAG_ALERT_COOLDOWN_MS) return;
+    anchorDragAlarmState.lastAlertMs = nowMs;
+
+    const speedLabel = Number.isFinite(speedKn) ? `${speedKn.toFixed(1)} kn` : 'N/A';
+    const alertText = t(
+        `⚠️ Rippage d'ancre probable: ${distanceM.toFixed(0)} m du centre (rayon ${Math.round(anchorDragAlarmState.radiusM)} m) · vitesse ${speedLabel}`,
+        `⚠️ Garreo de ancla probable: ${distanceM.toFixed(0)} m del centro (radio ${Math.round(anchorDragAlarmState.radiusM)} m) · velocidad ${speedLabel}`
+    );
+
+    setAnchorDragStatus(alertText, true);
+    setNavLogStatus(alertText, true);
+
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate([300, 180, 300]);
+    }
+    alert(alertText);
+}
+
+function logAnchorDragEventStart({ distanceM, speedKn }) {
+    const nowIso = new Date().toISOString();
+    const distanceNmValue = Number.isFinite(distanceM) ? (distanceM / 1852) : null;
+    const speedLabel = Number.isFinite(speedKn) ? `${speedKn.toFixed(1)} kn` : 'N/A';
+    const radius = Math.round(Number(anchorDragAlarmState.radiusM) || 45);
+    const eventText = t(
+        `ALERTE RIPPAGE DÉBUT · distance ${distanceM.toFixed(0)} m · rayon ${radius} m · vitesse ${speedLabel}`,
+        `INICIO ALERTA GARREO · distancia ${distanceM.toFixed(0)} m · radio ${radius} m · velocidad ${speedLabel}`
+    );
+
+    appendNavLogEntry({
+        lat: Number.isFinite(navGpsLatestFix?.lat) ? navGpsLatestFix.lat : null,
+        lng: Number.isFinite(navGpsLatestFix?.lng) ? navGpsLatestFix.lng : null,
+        speedKn: Number.isFinite(speedKn) ? speedKn : navLatestSpeedKn,
+        heelDeg: navLatestHeelDeg,
+        source: 'manual',
+        watchTimeIso: nowIso,
+        watchCrew: t('ALARME ANCRE', 'ALARMA ANCLA'),
+        logDistanceNm: Number.isFinite(distanceNmValue) ? distanceNmValue : null,
+        events: eventText
+    });
+}
+
+function logAnchorDragEventEnd({ startedAtMs, endedAtMs, maxDistanceM, lastDistanceM }) {
+    const startIso = Number.isFinite(startedAtMs) ? new Date(startedAtMs).toISOString() : new Date().toISOString();
+    const endIso = Number.isFinite(endedAtMs) ? new Date(endedAtMs).toISOString() : new Date().toISOString();
+    const durationMinutes = (Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs) && endedAtMs >= startedAtMs)
+        ? (endedAtMs - startedAtMs) / 60000
+        : 0;
+    const maxDistance = Number.isFinite(maxDistanceM) ? maxDistanceM : (Number.isFinite(lastDistanceM) ? lastDistanceM : 0);
+    const finalDistance = Number.isFinite(lastDistanceM) ? lastDistanceM : maxDistance;
+    const maxDistanceNmValue = maxDistance > 0 ? (maxDistance / 1852) : null;
+
+    const eventText = t(
+        `FIN ALERTE RIPPAGE · durée ${durationMinutes.toFixed(1)} min · distance max ${maxDistance.toFixed(0)} m · distance finale ${finalDistance.toFixed(0)} m`,
+        `FIN ALERTA GARREO · duración ${durationMinutes.toFixed(1)} min · distancia máx ${maxDistance.toFixed(0)} m · distancia final ${finalDistance.toFixed(0)} m`
+    );
+
+    appendNavLogEntry({
+        lat: Number.isFinite(navGpsLatestFix?.lat) ? navGpsLatestFix.lat : null,
+        lng: Number.isFinite(navGpsLatestFix?.lng) ? navGpsLatestFix.lng : null,
+        speedKn: navLatestSpeedKn,
+        heelDeg: navLatestHeelDeg,
+        source: 'manual',
+        watchTimeIso: startIso,
+        watchEndTimeIso: endIso,
+        watchCrew: t('ALARME ANCRE', 'ALARMA ANCLA'),
+        logDistanceNm: Number.isFinite(maxDistanceNmValue) ? maxDistanceNmValue : null,
+        events: eventText
+    });
+}
+
+function triggerAnchorDragAlarmTest() {
+    if (!anchorDragAlarmState.enabled) {
+        setAnchorDragStatus(t('Active d’abord l’alarme pour lancer un test.', 'Activa primero la alarma para lanzar una prueba.'), true);
+        return;
+    }
+
+    const baseDistance = Number.isFinite(anchorDragAlarmState.lastDistanceM)
+        ? anchorDragAlarmState.lastDistanceM
+        : Number(anchorDragAlarmState.radiusM || 45) + 12;
+    const testDistance = Math.max(baseDistance, Number(anchorDragAlarmState.radiusM || 45) + 8);
+    const testSpeed = Number.isFinite(navLatestSpeedKn) ? Math.max(0.5, navLatestSpeedKn) : 0.8;
+
+    logAnchorDragEventStart({ distanceM: testDistance, speedKn: testSpeed });
+    triggerAnchorDragAlarm(testDistance, testSpeed);
+
+    setAnchorDragStatus(
+        t('Test alarme exécuté: vérifie le journal nav pour l’événement.', 'Prueba de alarma ejecutada: revisa el diario nav para el evento.')
+    );
+}
+
+function evaluateAnchorDragAlarmWithFix(fix, { emitAlert = true } = {}) {
+    const hasCenter = Number.isFinite(anchorDragAlarmState.anchorLat) && Number.isFinite(anchorDragAlarmState.anchorLng);
+    if (!hasCenter) {
+        anchorDragAlarmState.breachSinceMs = 0;
+        anchorDragAlarmState.isDragging = false;
+        anchorDragAlarmState.lastDistanceM = null;
+        refreshAnchorDragAlarmOverlay();
+        return;
+    }
+
+    const lat = Number(fix?.lat);
+    const lng = Number(fix?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const distanceM = distanceNm(
+        { lat, lng },
+        { lat: anchorDragAlarmState.anchorLat, lng: anchorDragAlarmState.anchorLng }
+    ) * 1852;
+    anchorDragAlarmState.lastDistanceM = distanceM;
+
+    const speedKn = Number(fix?.speedKn);
+    const speedLabel = Number.isFinite(speedKn) ? `${speedKn.toFixed(1)} kn` : 'N/A';
+
+    if (!anchorDragAlarmState.enabled) {
+        setAnchorDragStatus(
+            t(
+                `Alarme mouillage: en veille · distance ${distanceM.toFixed(0)} m / rayon ${Math.round(anchorDragAlarmState.radiusM)} m`,
+                `Alarma fondeo: en espera · distancia ${distanceM.toFixed(0)} m / radio ${Math.round(anchorDragAlarmState.radiusM)} m`
+            )
+        );
+        anchorDragAlarmState.breachSinceMs = 0;
+        anchorDragAlarmState.isDragging = false;
+        refreshAnchorDragAlarmOverlay();
+        return;
+    }
+
+    const outsideRadius = distanceM > Number(anchorDragAlarmState.radiusM || 45);
+    const movingEnough = Number.isFinite(speedKn) ? speedKn >= ANCHOR_DRAG_MIN_MOVING_SPEED_KN : true;
+    const nowMs = Date.now();
+
+    if (outsideRadius && movingEnough) {
+        if (!anchorDragAlarmState.breachSinceMs) {
+            anchorDragAlarmState.breachSinceMs = nowMs;
+        }
+
+        const breachSeconds = Math.max(0, Math.round((nowMs - anchorDragAlarmState.breachSinceMs) / 1000));
+        const confirmed = (nowMs - anchorDragAlarmState.breachSinceMs) >= ANCHOR_DRAG_CONFIRMATION_MS;
+
+        if (confirmed) {
+            const wasDragging = !!anchorDragAlarmState.isDragging;
+            anchorDragAlarmState.isDragging = true;
+
+            if (!anchorDragActiveEventSession) {
+                anchorDragActiveEventSession = {
+                    startedAtMs: nowMs,
+                    maxDistanceM: distanceM
+                };
+            } else {
+                anchorDragActiveEventSession.maxDistanceM = Math.max(
+                    Number(anchorDragActiveEventSession.maxDistanceM) || 0,
+                    distanceM
+                );
+            }
+
+            setAnchorDragStatus(
+                t(
+                    `⚠️ Rippage probable · ${distanceM.toFixed(0)} m (rayon ${Math.round(anchorDragAlarmState.radiusM)} m) · vitesse ${speedLabel}`,
+                    `⚠️ Garreo probable · ${distanceM.toFixed(0)} m (radio ${Math.round(anchorDragAlarmState.radiusM)} m) · velocidad ${speedLabel}`
+                ),
+                true
+            );
+            if (!wasDragging && emitAlert) {
+                logAnchorDragEventStart({ distanceM, speedKn });
+                triggerAnchorDragAlarm(distanceM, speedKn);
+            }
+        } else {
+            anchorDragAlarmState.isDragging = false;
+            setAnchorDragStatus(
+                t(
+                    `Alerte en confirmation (${breachSeconds}s) · distance ${distanceM.toFixed(0)} m · vitesse ${speedLabel}`,
+                    `Alerta en confirmación (${breachSeconds}s) · distancia ${distanceM.toFixed(0)} m · velocidad ${speedLabel}`
+                )
+            );
+        }
+    } else {
+        if (anchorDragActiveEventSession) {
+            logAnchorDragEventEnd({
+                startedAtMs: anchorDragActiveEventSession.startedAtMs,
+                endedAtMs: nowMs,
+                maxDistanceM: anchorDragActiveEventSession.maxDistanceM,
+                lastDistanceM: distanceM
+            });
+            anchorDragActiveEventSession = null;
+        }
+
+        anchorDragAlarmState.breachSinceMs = 0;
+        anchorDragAlarmState.isDragging = false;
+        setAnchorDragStatus(
+            t(
+                `Mouillage stable · distance ${distanceM.toFixed(0)} m / rayon ${Math.round(anchorDragAlarmState.radiusM)} m · vitesse ${speedLabel}`,
+                `Fondeo estable · distancia ${distanceM.toFixed(0)} m / radio ${Math.round(anchorDragAlarmState.radiusM)} m · velocidad ${speedLabel}`
+            )
+        );
+    }
+
+    refreshAnchorDragAlarmOverlay();
+}
+
+function setAnchorDragCenterFromCurrentFix() {
+    if (!navGpsLatestFix || !Number.isFinite(navGpsLatestFix.lat) || !Number.isFinite(navGpsLatestFix.lng)) {
+        setAnchorDragStatus(t('Pas de position GPS actuelle pour définir le centre.', 'Sin posición GPS actual para definir el centro.'), true);
+        return;
+    }
+
+    anchorDragAlarmState.anchorLat = navGpsLatestFix.lat;
+    anchorDragAlarmState.anchorLng = navGpsLatestFix.lng;
+    anchorDragAlarmState.breachSinceMs = 0;
+    anchorDragAlarmState.isDragging = false;
+    saveAnchorDragAlarmState();
+    renderAnchorDragAlarmUi();
+    evaluateAnchorDragAlarmWithFix(navGpsLatestFix, { emitAlert: false });
+}
+
+function handleAnchorDragRadiusChange() {
+    const input = document.getElementById('anchorDragRadiusInput');
+    const radiusValue = Number.parseFloat(String(input?.value || ''));
+    anchorDragAlarmState.radiusM = Number.isFinite(radiusValue)
+        ? Math.max(10, Math.min(300, Math.round(radiusValue)))
+        : 45;
+    anchorDragAlarmState.breachSinceMs = 0;
+    anchorDragAlarmState.isDragging = false;
+    saveAnchorDragAlarmState();
+    renderAnchorDragAlarmUi();
+    if (navGpsLatestFix) {
+        evaluateAnchorDragAlarmWithFix(navGpsLatestFix, { emitAlert: false });
+    }
+}
+
+function toggleAnchorDragAlarm() {
+    const hasCenter = Number.isFinite(anchorDragAlarmState.anchorLat) && Number.isFinite(anchorDragAlarmState.anchorLng);
+    if (!anchorDragAlarmState.enabled && !hasCenter) {
+        setAnchorDragStatus(t('Définis d’abord le centre du mouillage.', 'Define primero el centro del fondeo.'), true);
+        return;
+    }
+
+    anchorDragAlarmState.enabled = !anchorDragAlarmState.enabled;
+    anchorDragAlarmState.breachSinceMs = 0;
+    anchorDragAlarmState.isDragging = false;
+    anchorDragActiveEventSession = null;
+    saveAnchorDragAlarmState();
+    renderAnchorDragAlarmUi();
+
+    if (anchorDragAlarmState.enabled) {
+        if (navGpsLatestFix) {
+            evaluateAnchorDragAlarmWithFix(navGpsLatestFix, { emitAlert: false });
+        } else {
+            setAnchorDragStatus(t('Alarme activée: en attente du prochain fix GPS.', 'Alarma activada: esperando próximo fix GPS.'));
+        }
+    } else {
+        setAnchorDragStatus(t('Alarme mouillage désactivée.', 'Alarma fondeo desactivada.'));
+    }
+}
+
+function clearAnchorDragAlarmCenter() {
+    anchorDragAlarmState = {
+        ...anchorDragAlarmState,
+        enabled: false,
+        anchorLat: null,
+        anchorLng: null,
+        breachSinceMs: 0,
+        isDragging: false,
+        lastDistanceM: null
+    };
+    anchorDragActiveEventSession = null;
+    saveAnchorDragAlarmState();
+    renderAnchorDragAlarmUi();
+    setAnchorDragStatus(t('Centre mouillage réinitialisé.', 'Centro de fondeo reiniciado.'));
+}
+
 function scheduleCloudLogbookPush({ includeNav = true, includeEngine = true } = {}) {
     cloudLogbookPushPendingNav = cloudLogbookPushPendingNav || !!includeNav;
     cloudLogbookPushPendingEngine = cloudLogbookPushPendingEngine || !!includeEngine;
@@ -13593,6 +14031,21 @@ function renderNavLogList() {
             });
 
             row.appendChild(summaryRow);
+
+            const eventLabel = String(item?.events || '').trim();
+            if (eventLabel) {
+                const eventsRow = document.createElement('div');
+                eventsRow.style.margin = '4px 0 0';
+                eventsRow.style.fontSize = '11px';
+                eventsRow.style.opacity = '0.88';
+                eventsRow.style.color = eventLabel.includes('ALERTE') || eventLabel.includes('⚠️') ? '#ffb3b3' : '#cbe9ff';
+                eventsRow.textContent = eventLabel.length > 170 ? `${eventLabel.slice(0, 170)}…` : eventLabel;
+                eventsRow.addEventListener('click', () => {
+                    startEditNavLogEntry(String(item?.id || ''));
+                });
+                row.appendChild(eventsRow);
+            }
+
             container.appendChild(row);
         });
 
@@ -14365,6 +14818,7 @@ function applyCurrentPositionFix(position) {
     };
 
     updateNavCurrentPositionMarker(navGpsLatestFix);
+    evaluateAnchorDragAlarmWithFix(navGpsLatestFix);
     if (map) {
         map.setView([latitude, longitude], Math.max(map.getZoom(), 13));
     }
@@ -14540,6 +14994,7 @@ function startNavigationLogging() {
             };
 
             updateNavCurrentPositionMarker(navGpsLatestFix);
+            evaluateAnchorDragAlarmWithFix(navGpsLatestFix);
             if (!navHasCenteredOnFirstFix && map) {
                 map.setView([latitude, longitude], Math.max(map.getZoom(), 13));
                 navHasCenteredOnFirstFix = true;
@@ -14629,6 +15084,7 @@ function clearNavigationLogbook() {
 function loadNavigationLogbook() {
     navLogEntries = loadArrayFromStorage(NAV_LOG_STORAGE_KEY);
     loadNavGpsTraceSamples();
+    loadAnchorDragAlarmState();
     navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
     editingNavLogEntryId = null;
     logWorkspaceMode = 'none';
@@ -15721,6 +16177,31 @@ document.addEventListener('DOMContentLoaded', async function() {
     const requestMotionPermissionBtn = document.getElementById('requestMotionPermissionBtn');
     if (requestMotionPermissionBtn) {
         requestMotionPermissionBtn.addEventListener('click', requestMotionPermissionIfNeeded);
+    }
+
+    const anchorDragSetBtn = document.getElementById('anchorDragSetBtn');
+    if (anchorDragSetBtn) {
+        anchorDragSetBtn.addEventListener('click', setAnchorDragCenterFromCurrentFix);
+    }
+
+    const anchorDragToggleBtn = document.getElementById('anchorDragToggleBtn');
+    if (anchorDragToggleBtn) {
+        anchorDragToggleBtn.addEventListener('click', toggleAnchorDragAlarm);
+    }
+
+    const anchorDragClearBtn = document.getElementById('anchorDragClearBtn');
+    if (anchorDragClearBtn) {
+        anchorDragClearBtn.addEventListener('click', clearAnchorDragAlarmCenter);
+    }
+
+    const anchorDragTestBtn = document.getElementById('anchorDragTestBtn');
+    if (anchorDragTestBtn) {
+        anchorDragTestBtn.addEventListener('click', triggerAnchorDragAlarmTest);
+    }
+
+    const anchorDragRadiusInput = document.getElementById('anchorDragRadiusInput');
+    if (anchorDragRadiusInput) {
+        anchorDragRadiusInput.addEventListener('change', handleAnchorDragRadiusChange);
     }
 
     const clearNavLogBtn = document.getElementById('clearNavLogBtn');
