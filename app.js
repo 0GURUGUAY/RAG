@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260312-31';
+const APP_BUILD_VERSION = '20260312-32';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -23,6 +23,7 @@ let weatherRainLayer;
 let weatherCloudLayer;
 let weatherTempLayer;
 let gribWeatherLayer;
+let aisTrafficLayer;
 let gribWeatherSourceName = '';
 let activeBaseLayer;
 let baseLayerControl;
@@ -128,9 +129,24 @@ const CLOUD_POLAR_PROFILES_TABLE = 'polar_profiles';
 const CLOUD_ALLOWED_USERS_TABLE = 'allowed_users';
 const CLOUD_PROJECTS_TABLE = 'projects';
 const CLOUD_TELEGRAM_PROXY_FUNCTION = 'telegram-proxy';
+const CLOUD_AIS_PROXY_FUNCTION = 'ais-proxy';
 const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
 const CLOUD_AUTO_PULL_INTERVAL_MS = 45000;
 const CLOUD_LOGBOOK_PUSH_DEBOUNCE_MS = 1800;
+const AIS_REFRESH_INTERVAL_MS = 45000;
+const AIS_REQUEST_SAMPLE_WINDOW_MS = 9000;
+const AIS_MIN_MAP_ZOOM = 9;
+const AIS_MAX_TARGETS = 320;
+const AIS_BOUNDS_PADDING_DEG = 0.06;
+const AIS_MIN_BBOX_SPAN_DEG = 0.34;
+const AIS_EMPTY_GRACE_REFRESHES = 4;
+const AIS_TARGET_STALE_TTL_MS = 12 * 60 * 1000;
+const AIS_TRACK_HISTORY_MAX_POINTS = 14;
+const AIS_TRACK_MIN_MOVE_NM = 0.03;
+const AIS_TRACK_FORCE_POINT_INTERVAL_MS = 3 * 60 * 1000;
+const AIS_PROJECTION_MIN_SPEED_KN = 0.7;
+const AIS_PROJECTION_HORIZON_MIN = 22;
+const AIS_PROJECTION_MAX_NM = 7;
 const NAV_GPS_SAMPLE_INTERVAL_MS = 60 * 1000;
 const ANCHOR_DRAG_CONFIRMATION_MS = 90 * 1000;
 const ANCHOR_DRAG_ALERT_COOLDOWN_MS = 2 * 60 * 1000;
@@ -219,6 +235,22 @@ let logWorkspaceMode = 'none';
 let lastAiRouteCandidates = [];
 let aiTrafficEntries = [];
 let aiTrafficAutoHideTimer = null;
+let aisRefreshTimerId = null;
+let aisFetchInFlight = false;
+let aisRefreshCountdownTimerId = null;
+let aisNextRefreshAtMs = 0;
+let aisStatusControl = null;
+let aisStatusElement = null;
+let aisLegendElement = null;
+let aisLastStableTargets = [];
+let aisEmptyRefreshCount = 0;
+let aisTargetsByMmsi = new Map();
+let aisMarkersByMmsi = new Map();
+let aisTrailPolylinesByMmsi = new Map();
+let aisProjectionPolylinesByMmsi = new Map();
+let aisLastSuccessRefreshAtMs = 0;
+let aisConsecutiveFailureCount = 0;
+let aisUsingCachedTargets = false;
 let weatherFocusMarker = null;
 let weatherFocusPoint = null;
 let weatherPointerPlacementMode = false;
@@ -983,6 +1015,7 @@ function getLayerControlLabels() {
         satellite: t('Satellite', 'Satélite'),
         marineDepth: t('Maritime · Profondeurs', 'Marítimo · Profundidades'),
         marineHazard: t('Maritime · Dangers', 'Marítimo · Peligros'),
+        aisLive: t('AIS · Live', 'AIS · Live', 'AIS · Live'),
         isobars: t('Météo · Isobares (lignes · clé OWM)', 'Meteo · Isobaras (líneas · clave OWM)', 'Weather · Isobars (lines · OWM key)'),
         weatherWind: t('Météo · Vent (OWM)', 'Meteo · Viento (OWM)', 'Weather · Wind (OWM)'),
         weatherRain: t('Météo · Pluie (OWM)', 'Meteo · Lluvia (OWM)', 'Weather · Rain (OWM)'),
@@ -1006,6 +1039,7 @@ function refreshBaseLayerControlLanguage() {
         {
             [labels.marineDepth]: marineDepthLayer,
             [labels.marineHazard]: marineHazardLayer,
+            [labels.aisLive]: aisTrafficLayer,
             [labels.isobars]: isobarLayer,
             [labels.weatherWind]: weatherWindLayer,
             [labels.weatherRain]: weatherRainLayer,
@@ -4944,6 +4978,21 @@ function renderNearbyList(containerId, items, emptyText) {
         return `https://maps.google.com/maps?q=${encodeURIComponent(safeQuery)}&hl=fr&z=14&output=embed`;
     };
 
+    const buildRestaurantMenuUrl = (item) => {
+        const tags = item?.tags || {};
+        const websiteRaw = String(tags.website || tags['contact:website'] || '').trim();
+        if (websiteRaw) {
+            return /^https?:\/\//i.test(websiteRaw) ? websiteRaw : `https://${websiteRaw}`;
+        }
+
+        const name = String(item?.name || '').trim();
+        const lat = Number(item?.lat);
+        const lon = Number(item?.lon);
+        const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
+        const query = [name, 'menu', hasCoords ? `${lat.toFixed(5)},${lon.toFixed(5)}` : ''].filter(Boolean).join(' ');
+        return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    };
+
     const formatAmenityScore = (item, amenityKind) => {
         const distance = Number(item?.distanceNm);
         const tags = item?.tags || {};
@@ -5011,6 +5060,9 @@ function renderNearbyList(containerId, items, emptyText) {
             </div>
             <div class="arrival-list__meta">${item.distanceNm.toFixed(2)} nm · ${escapeHtml(buildAmenitySummary(item, kind))}</div>
             <a class="arrival-list__link" href="${buildGoogleSearchUrl(item)}">${t('Voir sur Google', 'Ver en Google')}</a>
+            ${kind === 'restaurant'
+                ? `<a class="arrival-list__link arrival-list__link--menu" href="${buildRestaurantMenuUrl(item)}">${t('Carte / Menu', 'Carta / Menú', 'Menu')}</a>`
+                : ''}
         </div>`
     ).join('')}</div>`;
 
@@ -12720,10 +12772,602 @@ function buildAnchorDragTelegramAlertText(distanceM, speedKn) {
 }
 
 function getCloudFunctionUrl(functionName) {
-    const baseUrl = String(cloudConfig?.url || '').trim().replace(/\/+$/, '');
+    const baseUrl = String(cloudConfig?.url || document.getElementById('cloudUrlInput')?.value || '').trim().replace(/\/+$/, '');
     const fn = String(functionName || '').trim();
     if (!baseUrl || !fn) return '';
     return `${baseUrl}/functions/v1/${encodeURIComponent(fn)}`;
+}
+
+function getCloudAnonKey() {
+    return String(cloudConfig?.anonKey || document.getElementById('cloudAnonKeyInput')?.value || '').trim();
+}
+
+function isAisLayerEnabled() {
+    return !!(map && aisTrafficLayer && map.hasLayer(aisTrafficLayer));
+}
+
+function ensureAisStatusControl() {
+    if (aisStatusControl || !map) return;
+
+    aisStatusControl = L.control({ position: 'bottomright' });
+    aisStatusControl.onAdd = () => {
+        const container = L.DomUtil.create('div', 'ais-status-control');
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        aisStatusElement = L.DomUtil.create('div', 'ais-status-chip is-off', container);
+        aisStatusElement.textContent = 'AIS · OFF';
+        aisStatusElement.title = t(
+            'Cliquer pour activer AIS (si OFF) ou forcer un refresh immédiat.',
+            'Haz clic para activar AIS (si está OFF) o forzar actualización inmediata.',
+            'Click to enable AIS (if OFF) or force an immediate refresh.'
+        );
+        aisStatusElement.setAttribute('role', 'button');
+        aisStatusElement.setAttribute('tabindex', '0');
+        const forceRefresh = () => {
+            if (!map || !aisTrafficLayer) return;
+            if (!isAisLayerEnabled()) {
+                map.addLayer(aisTrafficLayer);
+                updateAisStatusIndicator();
+                return;
+            }
+            stopAisRefresh();
+            scheduleAisRefresh({ immediate: true });
+        };
+        aisStatusElement.addEventListener('click', forceRefresh);
+        aisStatusElement.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            forceRefresh();
+        });
+
+        aisLegendElement = L.DomUtil.create('div', 'ais-legend', container);
+        aisLegendElement.innerHTML = `
+            <span class="ais-legend__item"><span class="ais-legend__dot ais-legend__dot--moving"></span>${t('En mouvement', 'En movimiento', 'Moving')}</span>
+            <span class="ais-legend__item"><span class="ais-legend__dot ais-legend__dot--slow"></span>${t('Lent/à l\'arrêt', 'Lento/parado', 'Slow/stopped')}</span>
+            <span class="ais-legend__item"><span class="ais-legend__line ais-legend__line--trail"></span>${t('Trace', 'Traza', 'Trail')}</span>
+            <span class="ais-legend__item"><span class="ais-legend__line ais-legend__line--proj"></span>${t('Projection', 'Proyección', 'Projection')}</span>
+        `;
+        return container;
+    };
+
+    aisStatusControl.addTo(map);
+    updateAisStatusIndicator();
+}
+
+function startAisStatusCountdownTicker() {
+    if (aisRefreshCountdownTimerId) return;
+    aisRefreshCountdownTimerId = window.setInterval(() => {
+        updateAisStatusIndicator();
+    }, 1000);
+}
+
+function updateAisStatusIndicator() {
+    if (!aisStatusElement) return;
+    const aisEnabled = isAisLayerEnabled();
+    if (aisLegendElement) {
+        aisLegendElement.style.display = aisEnabled ? '' : 'none';
+    }
+
+    aisStatusElement.classList.remove('is-off', 'is-warning', 'is-on');
+
+    if (!aisEnabled) {
+        aisStatusElement.classList.add('is-off');
+        aisStatusElement.textContent = 'AIS · OFF';
+        return;
+    }
+
+    if (map && map.getZoom() < AIS_MIN_MAP_ZOOM) {
+        aisStatusElement.classList.add('is-warning');
+        aisStatusElement.textContent = t(
+            `AIS · zoom ≥ ${AIS_MIN_MAP_ZOOM}`,
+            `AIS · zoom ≥ ${AIS_MIN_MAP_ZOOM}`,
+            `AIS · zoom ≥ ${AIS_MIN_MAP_ZOOM}`
+        );
+        return;
+    }
+
+    if (aisFetchInFlight) {
+        aisStatusElement.classList.add('is-on');
+        aisStatusElement.textContent = t('AIS · refresh…', 'AIS · refresh…', 'AIS · refreshing…');
+        return;
+    }
+
+    const ageSinceSuccessMs = aisLastSuccessRefreshAtMs > 0 ? Math.max(0, Date.now() - aisLastSuccessRefreshAtMs) : Infinity;
+    const hasWeakFeed = aisConsecutiveFailureCount >= 2 || ageSinceSuccessMs > (AIS_REFRESH_INTERVAL_MS * 2);
+    if (hasWeakFeed) {
+        aisStatusElement.classList.add('is-warning');
+        aisStatusElement.textContent = aisUsingCachedTargets
+            ? t('AIS · flux faible (cache)', 'AIS · señal débil (cache)', 'AIS · weak feed (cache)')
+            : t('AIS · flux faible', 'AIS · señal débil', 'AIS · weak feed');
+        return;
+    }
+
+    const secondsLeft = aisNextRefreshAtMs > 0
+        ? Math.max(0, Math.ceil((aisNextRefreshAtMs - Date.now()) / 1000))
+        : 0;
+
+    aisStatusElement.classList.add('is-on');
+    aisStatusElement.textContent = secondsLeft > 0
+        ? `AIS · ${secondsLeft}s`
+        : t('AIS · prêt', 'AIS · listo', 'AIS · ready');
+}
+
+function stopAisRefresh(options = {}) {
+    const { clearLayer = false } = options;
+    if (aisRefreshTimerId) {
+        clearTimeout(aisRefreshTimerId);
+        aisRefreshTimerId = null;
+    }
+    aisNextRefreshAtMs = 0;
+    if (clearLayer && aisTrafficLayer && typeof aisTrafficLayer.clearLayers === 'function') {
+        aisTrafficLayer.clearLayers();
+        aisLastStableTargets = [];
+        aisEmptyRefreshCount = 0;
+        aisTargetsByMmsi = new Map();
+        aisMarkersByMmsi.forEach(marker => {
+            if (aisTrafficLayer.hasLayer(marker)) aisTrafficLayer.removeLayer(marker);
+        });
+        aisMarkersByMmsi = new Map();
+        aisTrailPolylinesByMmsi = new Map();
+        aisProjectionPolylinesByMmsi = new Map();
+        aisLastSuccessRefreshAtMs = 0;
+        aisConsecutiveFailureCount = 0;
+        aisUsingCachedTargets = false;
+    }
+    updateAisStatusIndicator();
+}
+
+function scheduleAisRefresh(options = {}) {
+    const { immediate = false } = options;
+    if (!isAisLayerEnabled()) {
+        stopAisRefresh();
+        return;
+    }
+
+    if (aisRefreshTimerId) {
+        clearTimeout(aisRefreshTimerId);
+        aisRefreshTimerId = null;
+    }
+
+    const delayMs = immediate ? 0 : AIS_REFRESH_INTERVAL_MS;
+    aisNextRefreshAtMs = Date.now() + delayMs;
+    updateAisStatusIndicator();
+
+    aisRefreshTimerId = window.setTimeout(() => {
+        aisRefreshTimerId = null;
+        aisNextRefreshAtMs = 0;
+        updateAisStatusIndicator();
+        void refreshAisTargets();
+    }, delayMs);
+}
+
+function formatAisHeadingLabel(value) {
+    return Number.isFinite(value) ? `${Math.round(value)}°` : 'N/A';
+}
+
+function formatAisSpeedLabel(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)} kn` : 'N/A';
+}
+
+function getAisVesselHeading(vessel) {
+    const heading = Number(vessel?.heading);
+    if (Number.isFinite(heading) && heading >= 0 && heading <= 360) return heading;
+    const cog = Number(vessel?.cog);
+    if (Number.isFinite(cog) && cog >= 0 && cog <= 360) return cog;
+    return 0;
+}
+
+function createAisMarkerIcon(vessel) {
+    const heading = getAisVesselHeading(vessel);
+    const moving = Number(vessel?.sog) > 0.4;
+    const color = moving ? '#ff7a59' : '#4fd2ff';
+    const size = moving ? 18 : 16;
+
+    return L.divIcon({
+        className: '',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+        popupAnchor: [0, -10],
+        html: `<div style="width:0;height:0;border-left:${size / 2}px solid transparent;border-right:${size / 2}px solid transparent;border-bottom:${size}px solid ${color};transform:rotate(${heading}deg);transform-origin:50% 60%;filter:drop-shadow(0 1px 4px rgba(0,0,0,.45));opacity:.96;"></div>`
+    });
+}
+
+function buildAisPopupHtml(vessel) {
+    const name = String(vessel?.name || vessel?.shipName || vessel?.mmsi || t('Navire inconnu', 'Barco desconocido', 'Unknown vessel')).trim();
+    const mmsi = String(vessel?.mmsi || '').trim() || 'N/A';
+    const speed = formatAisSpeedLabel(Number(vessel?.sog));
+    const course = formatAisHeadingLabel(Number(vessel?.cog));
+    const heading = formatAisHeadingLabel(Number(vessel?.heading));
+    const updatedAt = formatUtcDateTime(vessel?.timestamp || '');
+    let distanceLabel = '';
+
+    if (Number.isFinite(navGpsLatestFix?.lat) && Number.isFinite(navGpsLatestFix?.lng) && Number.isFinite(vessel?.lat) && Number.isFinite(vessel?.lon)) {
+        const distanceValueNm = distanceNm(navGpsLatestFix.lat, navGpsLatestFix.lng, Number(vessel.lat), Number(vessel.lon));
+        if (Number.isFinite(distanceValueNm)) {
+            distanceLabel = `<br>${escapeHtml(t('Distance', 'Distancia', 'Distance'))}: ${distanceValueNm.toFixed(1)} nm`;
+        }
+    }
+
+    return [
+        `<strong>${escapeHtml(name)}</strong>`,
+        `MMSI: ${escapeHtml(mmsi)}`,
+        `${escapeHtml(t('Vitesse', 'Velocidad', 'Speed'))}: ${escapeHtml(speed)}`,
+        `${escapeHtml(t('Cap fond', 'Rumbo', 'Course'))}: ${escapeHtml(course)}`,
+        `${escapeHtml(t('Cap vrai', 'Rumbo real', 'Heading'))}: ${escapeHtml(heading)}`,
+        `${escapeHtml(t('MAJ', 'Actualizado', 'Updated'))}: ${escapeHtml(updatedAt)}`
+    ].join('<br>') + distanceLabel;
+}
+
+function getAisTimestampMs(vessel) {
+    const value = Date.parse(String(vessel?.timestamp || ''));
+    return Number.isFinite(value) ? value : 0;
+}
+
+function buildAisTrack(existing, incoming, incomingMsgMs) {
+    const previousTrack = Array.isArray(existing?._track) ? [...existing._track] : [];
+    const lat = Number(incoming?.lat);
+    const lon = Number(incoming?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return previousTrack.slice(-AIS_TRACK_HISTORY_MAX_POINTS);
+    }
+
+    const nextPoint = {
+        lat,
+        lon,
+        atMs: incomingMsgMs > 0 ? incomingMsgMs : Date.now()
+    };
+
+    if (!previousTrack.length) {
+        return [nextPoint];
+    }
+
+    const lastPoint = previousTrack[previousTrack.length - 1];
+    const moveNm = distanceNm(lastPoint.lat, lastPoint.lon, nextPoint.lat, nextPoint.lon);
+    const elapsedMs = Math.max(0, (nextPoint.atMs || 0) - (lastPoint.atMs || 0));
+
+    if (moveNm >= AIS_TRACK_MIN_MOVE_NM || elapsedMs >= AIS_TRACK_FORCE_POINT_INTERVAL_MS) {
+        previousTrack.push(nextPoint);
+    }
+
+    return previousTrack.slice(-AIS_TRACK_HISTORY_MAX_POINTS);
+}
+
+function mergeAisVessel(existing, incoming) {
+    if (!existing) {
+        const initialTrack = buildAisTrack(null, incoming, getAisTimestampMs(incoming));
+        return {
+            ...incoming,
+            _track: initialTrack,
+            _lastSeenAtMs: Date.now(),
+            _lastMessageAtMs: getAisTimestampMs(incoming)
+        };
+    }
+
+    const existingMsgMs = Number(existing?._lastMessageAtMs || 0);
+    const incomingMsgMs = getAisTimestampMs(incoming);
+    const incomingIsNewer = incomingMsgMs > 0 ? incomingMsgMs >= existingMsgMs : true;
+
+    if (incomingIsNewer) {
+        return {
+            ...existing,
+            ...incoming,
+            _track: buildAisTrack(existing, incoming, incomingMsgMs),
+            _lastSeenAtMs: Date.now(),
+            _lastMessageAtMs: incomingMsgMs || existingMsgMs
+        };
+    }
+
+    return {
+        ...existing,
+        name: existing?.name || incoming?.name,
+        _lastSeenAtMs: Date.now(),
+        _lastMessageAtMs: existingMsgMs
+    };
+}
+
+function getAisTrailLatLngs(vessel) {
+    const trackPoints = Array.isArray(vessel?._track)
+        ? vessel._track
+            .filter(point => Number.isFinite(point?.lat) && Number.isFinite(point?.lon))
+            .map(point => [Number(point.lat), Number(point.lon)])
+        : [];
+
+    if (trackPoints.length >= 2) {
+        return trackPoints;
+    }
+
+    const lat = Number(vessel?.lat);
+    const lon = Number(vessel?.lon);
+    const sog = Number(vessel?.sog);
+    const cog = Number(vessel?.cog);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(sog) || !Number.isFinite(cog) || sog < AIS_PROJECTION_MIN_SPEED_KN) {
+        return trackPoints;
+    }
+
+    const fallbackDistanceNm = Math.min(1.8, Math.max(0.18, sog * (8 / 60)));
+    const backPoint = movePoint(lat, lon, (cog + 180) % 360, fallbackDistanceNm);
+    return [[backPoint.lat, backPoint.lon], [lat, lon]];
+}
+
+function renderAisTargets(vessels, options = {}) {
+    if (!aisTrafficLayer) return;
+
+    const { clearAll = false } = options;
+    if (clearAll) {
+        aisTrafficLayer.clearLayers();
+        aisTargetsByMmsi = new Map();
+        aisMarkersByMmsi = new Map();
+        aisTrailPolylinesByMmsi = new Map();
+        aisProjectionPolylinesByMmsi = new Map();
+        return;
+    }
+
+    const nowMs = Date.now();
+    const incomingList = Array.isArray(vessels) ? vessels : [];
+
+    incomingList.forEach(vessel => {
+        const mmsi = String(vessel?.mmsi || '').trim();
+        const lat = Number(vessel?.lat);
+        const lon = Number(vessel?.lon);
+        if (!mmsi || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+        const merged = mergeAisVessel(aisTargetsByMmsi.get(mmsi), {
+            ...vessel,
+            lat,
+            lon,
+            mmsi
+        });
+        aisTargetsByMmsi.set(mmsi, merged);
+    });
+
+    const activeMmsiSet = new Set();
+    aisTargetsByMmsi.forEach((target, mmsi) => {
+        const lastSeenMs = Number(target?._lastSeenAtMs || 0);
+        if (!Number.isFinite(lastSeenMs) || (nowMs - lastSeenMs) > AIS_TARGET_STALE_TTL_MS) {
+            aisTargetsByMmsi.delete(mmsi);
+            return;
+        }
+        activeMmsiSet.add(mmsi);
+    });
+
+    activeMmsiSet.forEach(mmsi => {
+        const vessel = aisTargetsByMmsi.get(mmsi);
+        if (!vessel) return;
+
+        const lat = Number(vessel?.lat);
+        const lon = Number(vessel?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+        const existingMarker = aisMarkersByMmsi.get(mmsi);
+        if (!existingMarker) {
+            const marker = L.marker([lat, lon], {
+                icon: createAisMarkerIcon(vessel),
+                keyboard: false,
+                zIndexOffset: 320
+            });
+            marker.bindPopup(buildAisPopupHtml(vessel), { maxWidth: 260, autoPan: true });
+            aisTrafficLayer.addLayer(marker);
+            aisMarkersByMmsi.set(mmsi, marker);
+            return;
+        }
+
+        existingMarker.setLatLng([lat, lon]);
+        existingMarker.setIcon(createAisMarkerIcon(vessel));
+        existingMarker.setPopupContent(buildAisPopupHtml(vessel));
+        if (!aisTrafficLayer.hasLayer(existingMarker)) {
+            aisTrafficLayer.addLayer(existingMarker);
+        }
+
+        const trackPoints = getAisTrailLatLngs(vessel);
+
+        if (trackPoints.length >= 2) {
+            const trailLine = aisTrailPolylinesByMmsi.get(mmsi);
+            if (!trailLine) {
+                const nextTrail = L.polyline(trackPoints, {
+                    color: '#7fd8ff',
+                    weight: 3,
+                    opacity: 0.72,
+                    lineJoin: 'round',
+                    lineCap: 'round'
+                });
+                aisTrailPolylinesByMmsi.set(mmsi, nextTrail);
+                aisTrafficLayer.addLayer(nextTrail);
+            } else {
+                trailLine.setLatLngs(trackPoints);
+                if (!aisTrafficLayer.hasLayer(trailLine)) aisTrafficLayer.addLayer(trailLine);
+            }
+        } else {
+            const trailLine = aisTrailPolylinesByMmsi.get(mmsi);
+            if (trailLine && aisTrafficLayer.hasLayer(trailLine)) aisTrafficLayer.removeLayer(trailLine);
+            aisTrailPolylinesByMmsi.delete(mmsi);
+        }
+
+        const sog = Number(vessel?.sog);
+        const cog = Number(vessel?.cog);
+        const shouldProject = Number.isFinite(sog) && sog >= AIS_PROJECTION_MIN_SPEED_KN && Number.isFinite(cog);
+        if (shouldProject) {
+            const projectionNm = Math.min(AIS_PROJECTION_MAX_NM, Math.max(0.35, sog * (AIS_PROJECTION_HORIZON_MIN / 60)));
+            const projected = movePoint(lat, lon, cog, projectionNm);
+            const projectionPoints = [[lat, lon], [projected.lat, projected.lon]];
+            const projectionLine = aisProjectionPolylinesByMmsi.get(mmsi);
+            if (!projectionLine) {
+                const nextProjection = L.polyline(projectionPoints, {
+                    color: '#ffc46a',
+                    weight: 2,
+                    opacity: 0.75,
+                    dashArray: '7 6',
+                    lineJoin: 'round',
+                    lineCap: 'round'
+                });
+                aisProjectionPolylinesByMmsi.set(mmsi, nextProjection);
+                aisTrafficLayer.addLayer(nextProjection);
+            } else {
+                projectionLine.setLatLngs(projectionPoints);
+                if (!aisTrafficLayer.hasLayer(projectionLine)) aisTrafficLayer.addLayer(projectionLine);
+            }
+        } else {
+            const projectionLine = aisProjectionPolylinesByMmsi.get(mmsi);
+            if (projectionLine && aisTrafficLayer.hasLayer(projectionLine)) aisTrafficLayer.removeLayer(projectionLine);
+            aisProjectionPolylinesByMmsi.delete(mmsi);
+        }
+    });
+
+    Array.from(aisMarkersByMmsi.keys()).forEach(mmsi => {
+        if (activeMmsiSet.has(mmsi)) return;
+        const marker = aisMarkersByMmsi.get(mmsi);
+        if (marker && aisTrafficLayer.hasLayer(marker)) {
+            aisTrafficLayer.removeLayer(marker);
+        }
+        aisMarkersByMmsi.delete(mmsi);
+
+        const trailLine = aisTrailPolylinesByMmsi.get(mmsi);
+        if (trailLine && aisTrafficLayer.hasLayer(trailLine)) aisTrafficLayer.removeLayer(trailLine);
+        aisTrailPolylinesByMmsi.delete(mmsi);
+
+        const projectionLine = aisProjectionPolylinesByMmsi.get(mmsi);
+        if (projectionLine && aisTrafficLayer.hasLayer(projectionLine)) aisTrafficLayer.removeLayer(projectionLine);
+        aisProjectionPolylinesByMmsi.delete(mmsi);
+    });
+}
+
+async function refreshAisTargets() {
+    if (!isAisLayerEnabled() || !map || !aisTrafficLayer || aisFetchInFlight) {
+        updateAisStatusIndicator();
+        return;
+    }
+
+    if (map.getZoom() < AIS_MIN_MAP_ZOOM) {
+        renderAisTargets([], { clearAll: true });
+        setCloudStatus(t(
+            'AIS: zoome davantage pour afficher le trafic.',
+            'AIS: acerca más el mapa para mostrar tráfico.',
+            'AIS: zoom in further to display traffic.'
+        ));
+        scheduleAisRefresh();
+        updateAisStatusIndicator();
+        return;
+    }
+
+    const bounds = map.getBounds();
+    if (!bounds) return;
+
+    const southRaw = Number(bounds.getSouth());
+    const westRaw = Number(bounds.getWest());
+    const northRaw = Number(bounds.getNorth());
+    const eastRaw = Number(bounds.getEast());
+    let south = Math.max(-90, southRaw - AIS_BOUNDS_PADDING_DEG);
+    let west = Math.max(-180, westRaw - AIS_BOUNDS_PADDING_DEG);
+    let north = Math.min(90, northRaw + AIS_BOUNDS_PADDING_DEG);
+    let east = Math.min(180, eastRaw + AIS_BOUNDS_PADDING_DEG);
+
+    const latSpan = north - south;
+    const lonSpan = east - west;
+    const centerLat = (south + north) / 2;
+    const centerLon = (west + east) / 2;
+
+    if (Number.isFinite(centerLat) && Number.isFinite(centerLon)) {
+        if (latSpan < AIS_MIN_BBOX_SPAN_DEG) {
+            const half = AIS_MIN_BBOX_SPAN_DEG / 2;
+            south = Math.max(-90, centerLat - half);
+            north = Math.min(90, centerLat + half);
+        }
+        if (lonSpan < AIS_MIN_BBOX_SPAN_DEG) {
+            const half = AIS_MIN_BBOX_SPAN_DEG / 2;
+            west = Math.max(-180, centerLon - half);
+            east = Math.min(180, centerLon + half);
+        }
+    }
+
+    if (![south, west, north, east].every(Number.isFinite)) return;
+    if (west > east) {
+        setCloudStatus(t(
+            'AIS: zone actuelle non supportée (passage antéméridien).',
+            'AIS: zona actual no soportada (cruce antimeridiano).',
+            'AIS: current area not supported (anti-meridian crossing).'
+        ), true);
+        updateAisStatusIndicator();
+        return;
+    }
+
+    const endpoint = getCloudFunctionUrl(CLOUD_AIS_PROXY_FUNCTION);
+    const anonKey = getCloudAnonKey();
+    if (!endpoint || !anonKey) {
+        setCloudStatus(t(
+            'AIS: configuration cloud incomplète pour appeler le proxy.',
+            'AIS: configuración cloud incompleta para llamar al proxy.',
+            'AIS: incomplete cloud configuration to call the proxy.'
+        ), true);
+        updateAisStatusIndicator();
+        return;
+    }
+
+    aisFetchInFlight = true;
+    aisNextRefreshAtMs = 0;
+    updateAisStatusIndicator();
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                apikey: anonKey
+            },
+            body: JSON.stringify({
+                bounds: { south, west, north, east },
+                limit: AIS_MAX_TARGETS,
+                sampleWindowMs: AIS_REQUEST_SAMPLE_WINDOW_MS
+            })
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const message = String(payload?.error || payload?.message || response.statusText || 'AIS proxy failed');
+            throw new Error(`ais-proxy ${response.status}: ${message}`);
+        }
+
+        const freshTargets = Array.isArray(payload?.vessels) ? payload.vessels : [];
+        if (freshTargets.length > 0) {
+            aisLastStableTargets = freshTargets;
+            aisEmptyRefreshCount = 0;
+            aisConsecutiveFailureCount = 0;
+            aisUsingCachedTargets = false;
+            aisLastSuccessRefreshAtMs = Date.now();
+            renderAisTargets(freshTargets);
+        } else {
+            aisEmptyRefreshCount += 1;
+            aisConsecutiveFailureCount += 1;
+            if (aisLastStableTargets.length > 0 && aisEmptyRefreshCount <= AIS_EMPTY_GRACE_REFRESHES) {
+                aisUsingCachedTargets = true;
+                renderAisTargets(aisLastStableTargets);
+                setCloudStatus(t(
+                    'AIS: signal temporairement faible, conservation des dernières cibles.',
+                    'AIS: señal temporalmente débil, se conservan los últimos objetivos.',
+                    'AIS: temporary weak signal, keeping last known targets.'
+                ));
+            } else {
+                aisUsingCachedTargets = false;
+                renderAisTargets([]);
+            }
+        }
+    } catch (error) {
+        aisEmptyRefreshCount += 1;
+        aisConsecutiveFailureCount += 1;
+        if (!(aisLastStableTargets.length > 0 && aisEmptyRefreshCount <= AIS_EMPTY_GRACE_REFRESHES)) {
+            aisUsingCachedTargets = false;
+            renderAisTargets([]);
+        } else {
+            aisUsingCachedTargets = true;
+            renderAisTargets(aisLastStableTargets);
+        }
+        setCloudStatus(t(
+            `AIS indisponible: ${String(error?.message || error)}`,
+            `AIS no disponible: ${String(error?.message || error)}`,
+            `AIS unavailable: ${String(error?.message || error)}`
+        ), true);
+    } finally {
+        aisFetchInFlight = false;
+        scheduleAisRefresh();
+        updateAisStatusIndicator();
+    }
 }
 
 async function getCloudAuthAccessToken(options = {}) {
@@ -16352,6 +16996,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
 
     gribWeatherLayer = L.layerGroup();
+    aisTrafficLayer = L.layerGroup();
 
     const openWeatherTileAppId = getStoredOpenWeatherTileAppId();
     rebuildOpenWeatherOverlays(openWeatherTileAppId);
@@ -16365,6 +17010,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         {
             [layerLabels.marineDepth]: marineDepthLayer,
             [layerLabels.marineHazard]: marineHazardLayer,
+            [layerLabels.aisLive]: aisTrafficLayer,
             [layerLabels.isobars]: isobarLayer,
             [layerLabels.weatherWind]: weatherWindLayer,
             [layerLabels.weatherRain]: weatherRainLayer,
@@ -16374,6 +17020,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         },
         { position: 'topright', collapsed: true }
     ).addTo(map);
+
+    ensureAisStatusControl();
+    startAisStatusCountdownTicker();
 
     activeBaseLayer = standardTileLayer.addTo(map);
 
@@ -16421,10 +17070,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     map.on('moveend zoomend', () => {
         syncWaypointPhotoMarkersInView();
         persistMapView();
+        scheduleAisRefresh({ immediate: true });
+        updateAisStatusIndicator();
     });
 
     map.on('overlayadd', event => {
         const selectedLayer = event?.layer;
+        if (selectedLayer === aisTrafficLayer) {
+            scheduleAisRefresh({ immediate: true });
+            updateAisStatusIndicator();
+            return;
+        }
+
         const selectedKey = selectedLayer === isobarLayer
             ? 'isobars'
             : selectedLayer === weatherWindLayer
@@ -16484,7 +17141,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         renderWeatherOverlayLegend();
     });
 
-    map.on('overlayremove', () => {
+    map.on('overlayremove', event => {
+        if (event?.layer === aisTrafficLayer) {
+            stopAisRefresh({ clearLayer: true });
+            updateAisStatusIndicator();
+        }
         renderWeatherOverlayLegend();
     });
 
