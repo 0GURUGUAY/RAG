@@ -244,6 +244,12 @@
                 <div class="cloud-config-title" id="cloudUserCreateTitle" style="margin-top:10px;">Créer un utilisateur autorisé</div>
                 <input type="email" id="cloudAdminUserEmailInput" placeholder="Email (clé unique)" class="cloud-input" autocomplete="off">
                 <input type="text" id="cloudAdminUserNameInput" placeholder="Nom" class="cloud-input" autocomplete="off">
+                <input type="text" id="cloudAdminUserPhoneInput" placeholder="Téléphone (optionnel)" class="cloud-input" autocomplete="off">
+                <input type="text" id="cloudAdminUserTelegramChatIdInput" placeholder="Telegram chat ID (optionnel)" class="cloud-input" autocomplete="off">
+                <label id="cloudAdminUserTelegramEnabledLabel" style="display:flex; align-items:center; gap:6px; margin:6px 0 8px; font-size:12px;">
+                    <input type="checkbox" id="cloudAdminUserTelegramEnabledInput" checked>
+                    Alertes Telegram activées
+                </label>
                 <select id="cloudAdminUserRoleInput" class="cloud-input">
                     <option value="utilisateur">utilisateur</option>
                     <option value="administrateur">administrateur</option>

@@ -127,6 +127,7 @@ const CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE = 'engine_sound_snapshots';
 const CLOUD_POLAR_PROFILES_TABLE = 'polar_profiles';
 const CLOUD_ALLOWED_USERS_TABLE = 'allowed_users';
 const CLOUD_PROJECTS_TABLE = 'projects';
+const CLOUD_TELEGRAM_PROXY_FUNCTION = 'telegram-proxy';
 const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
 const CLOUD_AUTO_PULL_INTERVAL_MS = 45000;
 const CLOUD_LOGBOOK_PUSH_DEBOUNCE_MS = 1800;
@@ -148,6 +149,9 @@ let cloudAuthUser = null;
 let cloudUserProfile = null;
 let cloudManagedUsers = [];
 let cloudAllowedUsersHasNameColumn = true;
+let cloudAllowedUsersHasPhoneColumn = true;
+let cloudAllowedUsersHasTelegramChatIdColumn = true;
+let cloudAllowedUsersHasTelegramAlertsEnabledColumn = true;
 let routesCloudDirty = false;
 let arrivalAnalysesCloudDirty = false;
 let cloudResolvedProjectIdUuid = '';
@@ -627,8 +631,11 @@ function applyLanguageToUi() {
     setElementPlaceholder('#cloudConfirmPasswordInput', t('Confirmer le nouveau mot de passe', 'Confirmar nueva contraseña'));
     setElementPlaceholder('#cloudAdminUserEmailInput', t('Email (clé unique)', 'Email (clave única)'));
     setElementPlaceholder('#cloudAdminUserNameInput', t('Nom', 'Nombre'));
+    setElementPlaceholder('#cloudAdminUserPhoneInput', t('Téléphone (optionnel)', 'Teléfono (opcional)'));
+    setElementPlaceholder('#cloudAdminUserTelegramChatIdInput', t('Telegram chat ID (optionnel)', 'Telegram chat ID (opcional)'));
     setElementText('#cloudAdminUserRoleInput option[value="utilisateur"]', t('utilisateur', 'usuario'));
     setElementText('#cloudAdminUserRoleInput option[value="administrateur"]', t('administrateur', 'administrador'));
+    setElementText('#cloudAdminUserTelegramEnabledLabel', t('Alertes Telegram activées', 'Alertas Telegram activadas'));
     setElementText('#cloudEmailSignInBtn', t('Se connecter email', 'Conectar email'));
     setElementText('#cloudEmailSignUpBtn', t('Créer compte', 'Crear cuenta'));
     setElementText('#cloudSignOutBtn', t('Se déconnecter', 'Desconectar'));
@@ -11995,7 +12002,10 @@ async function loadCloudUserProfile() {
         cloudUserProfile = {
             email,
             name,
-            role
+            role,
+            phone: String(data?.phone || '').trim(),
+            telegramChatId: String(data?.telegram_chat_id || '').trim(),
+            telegramAlertsEnabled: data?.telegram_alerts_enabled !== false
         };
 
         return cloudUserProfile;
@@ -12049,6 +12059,72 @@ async function fetchCloudManagedUsers() {
     return cloudManagedUsers;
 }
 
+function normalizePhoneValue(value) {
+    return String(value || '').trim();
+}
+
+function normalizeTelegramChatIdValue(value) {
+    return String(value || '').trim();
+}
+
+function normalizeTelegramAlertsEnabledValue(value) {
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return true;
+    return !(normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no');
+}
+
+function isMissingAllowedUsersColumnError(error, columnName) {
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || '').toLowerCase();
+    if (code !== 'PGRST204') return false;
+    const needle = `'${String(columnName || '').toLowerCase()}'`;
+    return message.includes('allowed_users') && message.includes(needle);
+}
+
+function buildAllowedUserPayload({ email, name, role, phone, telegramChatId, telegramAlertsEnabled }) {
+    const payload = {
+        email: normalizeEmailForCompare(email),
+        role: normalizeCloudUserRole(role),
+        updated_at: new Date().toISOString()
+    };
+
+    if (cloudAllowedUsersHasNameColumn) {
+        payload.name = String(name || '').trim();
+    }
+    if (cloudAllowedUsersHasPhoneColumn) {
+        payload.phone = normalizePhoneValue(phone);
+    }
+    if (cloudAllowedUsersHasTelegramChatIdColumn) {
+        payload.telegram_chat_id = normalizeTelegramChatIdValue(telegramChatId);
+    }
+    if (cloudAllowedUsersHasTelegramAlertsEnabledColumn) {
+        payload.telegram_alerts_enabled = normalizeTelegramAlertsEnabledValue(telegramAlertsEnabled);
+    }
+
+    return payload;
+}
+
+function markAllowedUsersColumnAsMissing(error) {
+    if (isMissingAllowedUsersColumnError(error, 'name')) {
+        cloudAllowedUsersHasNameColumn = false;
+        return true;
+    }
+    if (isMissingAllowedUsersColumnError(error, 'phone')) {
+        cloudAllowedUsersHasPhoneColumn = false;
+        return true;
+    }
+    if (isMissingAllowedUsersColumnError(error, 'telegram_chat_id')) {
+        cloudAllowedUsersHasTelegramChatIdColumn = false;
+        return true;
+    }
+    if (isMissingAllowedUsersColumnError(error, 'telegram_alerts_enabled')) {
+        cloudAllowedUsersHasTelegramAlertsEnabledColumn = false;
+        return true;
+    }
+    return false;
+}
+
 function renderCloudUsersList() {
     const container = document.getElementById('cloudUsersList');
     const createBtn = document.getElementById('cloudAdminCreateUserBtn');
@@ -12086,6 +12162,16 @@ function renderCloudUsersList() {
                     <option value="administrateur" ${user.role === 'administrateur' ? 'selected' : ''}>${t('administrateur', 'administrador')}</option>
                 </select>
             </div>
+            <div class="cloud-user-row__line">
+                <input type="text" class="cloud-user-phone-input" value="${escapeHtml(user.phone || '')}" placeholder="${escapeHtml(t('Téléphone (optionnel)', 'Teléfono (opcional)'))}">
+                <input type="text" class="cloud-user-telegram-chat-id-input" value="${escapeHtml(user.telegramChatId || '')}" placeholder="${escapeHtml(t('Telegram chat ID (optionnel)', 'Telegram chat ID (opcional)'))}">
+            </div>
+            <div class="cloud-user-row__line">
+                <label style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                    <input type="checkbox" class="cloud-user-telegram-enabled-input" ${user.telegramAlertsEnabled ? 'checked' : ''}>
+                    <span>${escapeHtml(t('Alertes Telegram activées', 'Alertas Telegram activadas'))}</span>
+                </label>
+            </div>
             <div class="button-row">
                 <button type="button" class="cloud-user-save-btn" style="flex:1;">${t('Mettre à jour', 'Actualizar')}</button>
                 <button type="button" class="cloud-user-delete-btn" style="flex:1;">${t('Supprimer', 'Eliminar')}</button>
@@ -12103,11 +12189,24 @@ function renderCloudUsersList() {
             const target = cloudManagedUsers[index];
             const nameInput = row.querySelector('.cloud-user-name-input');
             const roleInput = row.querySelector('.cloud-user-role-input');
+            const phoneInput = row.querySelector('.cloud-user-phone-input');
+            const telegramChatIdInput = row.querySelector('.cloud-user-telegram-chat-id-input');
+            const telegramEnabledInput = row.querySelector('.cloud-user-telegram-enabled-input');
             const name = String(nameInput?.value || '').trim();
             const role = normalizeCloudUserRole(roleInput?.value || 'utilisateur');
+            const phone = normalizePhoneValue(phoneInput?.value || '');
+            const telegramChatId = normalizeTelegramChatIdValue(telegramChatIdInput?.value || '');
+            const telegramAlertsEnabled = !!telegramEnabledInput?.checked;
 
             try {
-                await upsertAllowedUserRecord({ email: target.email, name, role });
+                await upsertAllowedUserRecord({
+                    email: target.email,
+                    name,
+                    role,
+                    phone,
+                    telegramChatId,
+                    telegramAlertsEnabled
+                });
 
                 setCloudUserManagementStatus(t(`Utilisateur mis à jour: ${target.email}`, `Usuario actualizado: ${target.email}`));
                 await loadCloudUserProfile();
@@ -12174,45 +12273,35 @@ function isForcedCloudAdminEmail(email) {
     return CLOUD_OWNER_ADMIN_EMAILS.has(normalizeEmailForCompare(email));
 }
 
-function isMissingAllowedUsersNameColumnError(error) {
-    const code = String(error?.code || '').toUpperCase();
-    const message = String(error?.message || '').toLowerCase();
-    if (code !== 'PGRST204') return false;
-    return message.includes("could not find the 'name' column")
-        || (message.includes('allowed_users') && message.includes("'name'"));
-}
+async function upsertAllowedUserRecord({ email, name, role, phone, telegramChatId, telegramAlertsEnabled }) {
+    let attempts = 0;
+    let lastError = null;
 
-async function upsertAllowedUserRecord({ email, name, role }) {
-    const basePayload = {
-        email: normalizeEmailForCompare(email),
-        role: normalizeCloudUserRole(role),
-        updated_at: new Date().toISOString()
-    };
+    while (attempts < 5) {
+        attempts += 1;
+        const payload = buildAllowedUserPayload({
+            email,
+            name,
+            role,
+            phone,
+            telegramChatId,
+            telegramAlertsEnabled
+        });
 
-    const payloadWithName = {
-        ...basePayload,
-        name: String(name || '').trim()
-    };
-
-    const payloadWithoutName = { ...basePayload };
-
-    const firstPayload = cloudAllowedUsersHasNameColumn ? payloadWithName : payloadWithoutName;
-    const { error: firstError } = await cloudClient
-        .from(CLOUD_ALLOWED_USERS_TABLE)
-        .upsert(firstPayload, { onConflict: 'email' });
-
-    if (!firstError) return;
-
-    if (cloudAllowedUsersHasNameColumn && isMissingAllowedUsersNameColumnError(firstError)) {
-        cloudAllowedUsersHasNameColumn = false;
-        const { error: retryError } = await cloudClient
+        const { error } = await cloudClient
             .from(CLOUD_ALLOWED_USERS_TABLE)
-            .upsert(payloadWithoutName, { onConflict: 'email' });
-        if (retryError) throw retryError;
-        return;
+            .upsert(payload, { onConflict: 'email' });
+
+        if (!error) return;
+        lastError = error;
+
+        const downgraded = markAllowedUsersColumnAsMissing(error);
+        if (!downgraded) {
+            throw error;
+        }
     }
 
-    throw firstError;
+    throw lastError || new Error('allowed_users upsert failed');
 }
 
 function normalizeCloudUserRole(value) {
@@ -12257,6 +12346,9 @@ function sanitizeManagedCloudUser(entry, fallbackIndex = 0) {
         email,
         name,
         role,
+        phone: normalizePhoneValue(entry?.phone || ''),
+        telegramChatId: normalizeTelegramChatIdValue(entry?.telegram_chat_id || entry?.telegramChatId || ''),
+        telegramAlertsEnabled: normalizeTelegramAlertsEnabledValue(entry?.telegram_alerts_enabled),
         createdAt: String(entry?.created_at || entry?.createdAt || ''),
         updatedAt: String(entry?.updated_at || entry?.updatedAt || '')
     };
@@ -12601,7 +12693,84 @@ function triggerAnchorDragAlarm(distanceM, speedKn) {
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         navigator.vibrate([300, 180, 300]);
     }
+    void sendAnchorDragTelegramAlert(distanceM, speedKn);
     alert(alertText);
+}
+
+function buildAnchorDragTelegramAlertText(distanceM, speedKn) {
+    const speedLabel = Number.isFinite(speedKn) ? `${speedKn.toFixed(1)} kn` : 'N/A';
+    const radiusLabel = Math.round(Number(anchorDragAlarmState.radiusM) || 45);
+    const timestamp = new Date().toISOString();
+    const lat = Number(navGpsLatestFix?.lat);
+    const lng = Number(navGpsLatestFix?.lng);
+    const mapsLink = Number.isFinite(lat) && Number.isFinite(lng)
+        ? `https://maps.google.com/?q=${lat.toFixed(6)},${lng.toFixed(6)}`
+        : '';
+
+    const lines = [
+        '⚠️ CEIBO · Alerte rippage ancre',
+        `Distance: ${distanceM.toFixed(0)} m`,
+        `Rayon: ${radiusLabel} m`,
+        `Vitesse: ${speedLabel}`,
+        `Heure UTC: ${timestamp}`
+    ];
+
+    if (mapsLink) lines.push(`Position: ${mapsLink}`);
+    return lines.join('\n');
+}
+
+function getCloudFunctionUrl(functionName) {
+    const baseUrl = String(cloudConfig?.url || '').trim().replace(/\/+$/, '');
+    const fn = String(functionName || '').trim();
+    if (!baseUrl || !fn) return '';
+    return `${baseUrl}/functions/v1/${encodeURIComponent(fn)}`;
+}
+
+async function getCloudAuthAccessToken() {
+    if (!cloudClient) return '';
+    const { data, error } = await cloudClient.auth.getSession();
+    if (error) throw error;
+    return String(data?.session?.access_token || '').trim();
+}
+
+async function sendAnchorDragTelegramAlert(distanceM, speedKn) {
+    try {
+        if (!cloudClient || !cloudConfig || !cloudAuthUser) return false;
+        const chatId = normalizeTelegramChatIdValue(cloudUserProfile?.telegramChatId || '');
+        const enabled = normalizeTelegramAlertsEnabledValue(cloudUserProfile?.telegramAlertsEnabled);
+        if (!enabled || !chatId) return false;
+
+        const accessToken = await getCloudAuthAccessToken();
+        if (!accessToken) return false;
+
+        const endpoint = getCloudFunctionUrl(CLOUD_TELEGRAM_PROXY_FUNCTION);
+        if (!endpoint) return false;
+
+        const payload = {
+            chatId,
+            text: buildAnchorDragTelegramAlertText(distanceM, speedKn)
+        };
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                apikey: String(cloudConfig.anonKey || ''),
+                Authorization: `Bearer ${accessToken}`
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`telegram-proxy ${response.status}: ${errorText}`);
+        }
+
+        return true;
+    } catch (error) {
+        console.warn('Anchor drag Telegram alert failed:', error);
+        return false;
+    }
 }
 
 function logAnchorDragEventStart({ distanceM, speedKn }) {
@@ -17188,6 +17357,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             const email = normalizeEmailForCompare(document.getElementById('cloudAdminUserEmailInput')?.value || '');
             const name = String(document.getElementById('cloudAdminUserNameInput')?.value || '').trim();
             const role = normalizeCloudUserRole(document.getElementById('cloudAdminUserRoleInput')?.value || 'utilisateur');
+            const phone = normalizePhoneValue(document.getElementById('cloudAdminUserPhoneInput')?.value || '');
+            const telegramChatId = normalizeTelegramChatIdValue(document.getElementById('cloudAdminUserTelegramChatIdInput')?.value || '');
+            const telegramAlertsEnabled = !!document.getElementById('cloudAdminUserTelegramEnabledInput')?.checked;
 
             if (!email || !email.includes('@')) {
                 setCloudUserManagementStatus(t('Email invalide.', 'Email inválido.'), true);
@@ -17195,7 +17367,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
 
             try {
-                await upsertAllowedUserRecord({ email, name, role });
+                await upsertAllowedUserRecord({
+                    email,
+                    name,
+                    role,
+                    phone,
+                    telegramChatId,
+                    telegramAlertsEnabled
+                });
 
                 setCloudUserManagementStatus(t(`Utilisateur enregistré: ${email}`, `Usuario guardado: ${email}`));
                 await loadCloudUserProfile();
@@ -17204,8 +17383,14 @@ document.addEventListener('DOMContentLoaded', async function() {
 
                 const emailInput = document.getElementById('cloudAdminUserEmailInput');
                 const nameInput = document.getElementById('cloudAdminUserNameInput');
+                const phoneInput = document.getElementById('cloudAdminUserPhoneInput');
+                const telegramChatIdInput = document.getElementById('cloudAdminUserTelegramChatIdInput');
+                const telegramEnabledInput = document.getElementById('cloudAdminUserTelegramEnabledInput');
                 if (emailInput) emailInput.value = '';
                 if (nameInput) nameInput.value = '';
+                if (phoneInput) phoneInput.value = '';
+                if (telegramChatIdInput) telegramChatIdInput.value = '';
+                if (telegramEnabledInput) telegramEnabledInput.checked = true;
             } catch (error) {
                 setCloudUserManagementStatus(t(`Création impossible: ${formatCloudError(error)}`, `Creación imposible: ${formatCloudError(error)}`), true);
             }

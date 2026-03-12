@@ -12,7 +12,7 @@ body {
 }
 
 body.night-mode {
-    filter: brightness(0.72) contrast(1.04) saturate(0.84);
+    filter: brightness(0.6) contrast(1.08) saturate(0.58) sepia(0.92) hue-rotate(-34deg);
 }
 
 body.night-mode #map {
@@ -1904,9 +1904,9 @@ button:focus-visible {
 }
 
 .night-mode-btn.is-on {
-    background: rgba(255, 154, 58, 0.95);
-    border-color: rgba(255, 154, 58, 0.95);
-    color: #1d1206;
+    background: rgba(114, 18, 26, 0.95);
+    border-color: rgba(255, 122, 122, 0.72);
+    color: #ffd9d9;
 }
 
 .page-subtabs {
