@@ -80,3 +80,13 @@ __recovery/
 
 # Boss dependency manager vendor folder https://github.com/HashLoad/boss
 modules/
+
+# Local workspace artifacts
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+.env
+backup/
+supabase/.temp/
+.wrangler/
