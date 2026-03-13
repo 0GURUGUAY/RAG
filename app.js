@@ -1855,6 +1855,12 @@ function savePolarProfileFromEditor() {
     loadPolarProfileEditor(baseProfile.id);
     updateRoutingPolarProfileUi();
     setPolarProfileStatus(t(`Polaire enregistrée: ${baseProfile.name}`, `Polar guardada: ${baseProfile.name}`, `Polar saved: ${baseProfile.name}`));
+
+    if (isCloudReady()) {
+        void pushPolarProfilesToCloudTable()
+            .then(() => setCloudStatus(t('Polaires synchronisées cloud.', 'Polares sincronizadas en la nube.', 'Polars synced to cloud.')))
+            .catch(error => setCloudStatus(t(`Synchro polaires échouée: ${formatCloudError(error)}`, `Sincronización polares fallida: ${formatCloudError(error)}`, `Polars sync failed: ${formatCloudError(error)}`), true));
+    }
 }
 
 function deletePolarProfileFromEditor() {
@@ -1879,6 +1885,12 @@ function deletePolarProfileFromEditor() {
     loadPolarProfileEditor(selectedPolarProfileEditorId);
     updateRoutingPolarProfileUi();
     setPolarProfileStatus(t(`Polaire supprimée: ${profile?.name || ''}`, `Polar eliminada: ${profile?.name || ''}`, `Polar deleted: ${profile?.name || ''}`));
+
+    if (isCloudReady()) {
+        void pushPolarProfilesToCloudTable()
+            .then(() => setCloudStatus(t('Polaires synchronisées cloud.', 'Polares sincronizadas en la nube.', 'Polars synced to cloud.')))
+            .catch(error => setCloudStatus(t(`Synchro polaires échouée: ${formatCloudError(error)}`, `Sincronización polares fallida: ${formatCloudError(error)}`, `Polars sync failed: ${formatCloudError(error)}`), true));
+    }
 }
 
 // ---- POLAR GRID VISUAL EDITOR ----
@@ -2089,25 +2101,15 @@ async function pullPolarProfilesFromCloudTable() {
         createdAt: row.created_at || new Date().toISOString(),
         updatedAt: row.updated_at || row.created_at || new Date().toISOString()
     }));
-    return mapped.length > 0 ? sanitizePolarProfilesList(mapped) : null;
+    return mapped.length > 0 ? sanitizePolarProfilesList(mapped) : [];
 }
 
 function applySyncedPolarProfiles(cloudProfiles) {
-    if (!Array.isArray(cloudProfiles) || cloudProfiles.length === 0) return;
-    const cloudById = new Map(cloudProfiles.map(p => [p.id, p]));
-    const localById = new Map(polarProfiles.map(p => [p.id, p]));
-    const allIds = new Set([...cloudById.keys(), ...localById.keys()]);
-    const merged = [];
-    allIds.forEach(id => {
-        const cloudP = cloudById.get(id);
-        const localP = localById.get(id);
-        if (!cloudP) { merged.push(localP); return; }
-        if (!localP) { merged.push(cloudP); return; }
-        const localMs = Date.parse(String(localP.updatedAt || localP.createdAt || ''));
-        const cloudMs = Date.parse(String(cloudP.updatedAt || cloudP.createdAt || ''));
-        merged.push(!Number.isFinite(cloudMs) || (Number.isFinite(localMs) && localMs >= cloudMs) ? localP : cloudP);
-    });
-    polarProfiles = sanitizePolarProfilesList(merged);
+    if (!Array.isArray(cloudProfiles)) return;
+
+    // Cloud is the source of truth for profile membership.
+    // This ensures that a profile deleted in SQL/Supabase does not reappear from stale local cache.
+    polarProfiles = sanitizePolarProfilesList(cloudProfiles);
     savePolarProfiles();
     populatePolarProfileSelects();
     updateRoutingPolarProfileUi();
