@@ -1,6 +1,7 @@
 -- CEIBO - Polar profiles schema
--- Stores user-defined polar (speed vs wind angle) matrices by rigging / sail configuration.
--- One row per saved profile, per user, per project.
+-- Stores polar (speed vs wind angle) matrices by rigging / sail configuration.
+-- Profiles are shared project-wide: all authenticated users can read all profiles for any project.
+-- Write operations (insert/update/delete) remain scoped to the creator_email.
 
 create table if not exists public.polar_profiles (
     id          text        primary key,          -- client-generated id (UUID or slug like 'default-d56-standard')
@@ -17,10 +18,18 @@ create table if not exists public.polar_profiles (
 -- Row-Level Security
 alter table public.polar_profiles enable row level security;
 
-create policy "polar_profiles: authenticated read own"
+-- Drop all existing policies before (re)creating them
+drop policy if exists "polar_profiles: authenticated read own"   on public.polar_profiles;
+drop policy if exists "polar_profiles: authenticated read all"   on public.polar_profiles;
+drop policy if exists "polar_profiles: authenticated insert own" on public.polar_profiles;
+drop policy if exists "polar_profiles: authenticated update own" on public.polar_profiles;
+drop policy if exists "polar_profiles: authenticated delete own" on public.polar_profiles;
+
+-- Any authenticated user can read all polar profiles (shared project-wide)
+create policy "polar_profiles: authenticated read all"
     on public.polar_profiles for select
     to authenticated
-    using ((auth.jwt() ->> 'email') = creator_email);
+    using (auth.role() = 'authenticated');
 
 create policy "polar_profiles: authenticated insert own"
     on public.polar_profiles for insert

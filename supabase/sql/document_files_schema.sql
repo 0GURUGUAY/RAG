@@ -32,7 +32,7 @@ create policy "document_files_select_authenticated"
 on public.document_files
 for select
 to authenticated
-using (creator_email = auth.email());
+using (auth.role() = 'authenticated'); -- all authenticated users can read all documents
 
 drop policy if exists "document_files_insert_authenticated" on public.document_files;
 create policy "document_files_insert_authenticated"

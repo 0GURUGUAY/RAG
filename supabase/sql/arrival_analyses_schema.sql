@@ -51,7 +51,7 @@ create policy "arrival_analyses_select_own"
 on public.arrival_analyses
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all arrival analyses
 
 drop policy if exists "arrival_analyses_insert_own" on public.arrival_analyses;
 create policy "arrival_analyses_insert_own"

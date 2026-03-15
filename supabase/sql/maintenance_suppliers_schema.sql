@@ -95,13 +95,13 @@ for each row execute function public.set_row_updated_at();
 
 alter table public.maintenance_suppliers enable row level security;
 
--- Policies: each authenticated user reads/writes only their own rows.
+-- Policies: all authenticated users can read; writes are scoped to the creator.
 drop policy if exists "maintenance_suppliers_select_own" on public.maintenance_suppliers;
 create policy "maintenance_suppliers_select_own"
 on public.maintenance_suppliers
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all suppliers
 
 drop policy if exists "maintenance_suppliers_insert_own" on public.maintenance_suppliers;
 create policy "maintenance_suppliers_insert_own"

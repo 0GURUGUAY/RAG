@@ -84,7 +84,7 @@ create policy "engine_sound_snapshots_select_own"
 on public.engine_sound_snapshots
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all sound snapshots
 
 drop policy if exists "engine_sound_snapshots_insert_own" on public.engine_sound_snapshots;
 create policy "engine_sound_snapshots_insert_own"

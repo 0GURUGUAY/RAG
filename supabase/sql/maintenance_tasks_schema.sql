@@ -57,13 +57,13 @@ for each row execute function public.set_row_updated_at();
 alter table public.maintenance_schemas enable row level security;
 alter table public.maintenance_pins enable row level security;
 
--- Policies: each authenticated user reads/writes only their own rows.
+-- Policies: all authenticated users can read; writes are scoped to the creator.
 drop policy if exists "maintenance_schemas_select_own" on public.maintenance_schemas;
 create policy "maintenance_schemas_select_own"
 on public.maintenance_schemas
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all schemas
 
 drop policy if exists "maintenance_schemas_insert_own" on public.maintenance_schemas;
 create policy "maintenance_schemas_insert_own"
@@ -86,7 +86,7 @@ create policy "maintenance_pins_select_own"
 on public.maintenance_pins
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all pins
 
 drop policy if exists "maintenance_pins_insert_own" on public.maintenance_pins;
 create policy "maintenance_pins_insert_own"

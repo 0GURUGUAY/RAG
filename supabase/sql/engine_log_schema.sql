@@ -43,7 +43,7 @@ create policy "engine_log_select_own"
 on public.engine_log
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all engine logs
 
 drop policy if exists "engine_log_insert_own" on public.engine_log;
 create policy "engine_log_insert_own"

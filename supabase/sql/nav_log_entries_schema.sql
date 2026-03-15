@@ -95,7 +95,7 @@ create policy "nav_log_entries_select_own"
 on public.nav_log_entries
 for select
 to authenticated
-using (lower(creator_email) = lower(auth.jwt() ->> 'email'));
+using (auth.role() = 'authenticated'); -- all authenticated users can read all log entries
 
 drop policy if exists "nav_log_entries_insert_own" on public.nav_log_entries;
 create policy "nav_log_entries_insert_own"
