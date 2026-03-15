@@ -2,7 +2,7 @@ import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoin
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BUILD_VERSION = '20260312-34';
+const APP_BUILD_VERSION = '20260315-35';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -1383,6 +1383,50 @@ function loadPolarProfiles() {
         polarProfiles = buildDefaultPolarProfiles();
     }
 
+    const hasProfileMatching = (predicate) => polarProfiles.some(profile => {
+        const text = `${String(profile?.id || '')} ${String(profile?.name || '')}`
+            .toUpperCase()
+            .replace(/_/g, ' ');
+        return predicate(text);
+    });
+
+    const nowIso = new Date().toISOString();
+    const basePolarData = clonePolarData(getActivePolarData());
+    const seededProfiles = [];
+
+    const hasGv2Trinquette = hasProfileMatching(text =>
+        (text.includes('GV2') || text.includes('2 RIS')) && text.includes('TRINQUETTE')
+    );
+    if (!hasGv2Trinquette) {
+        seededProfiles.push({
+            id: 'ceibo-gv2-trinquette',
+            name: 'DUFOUR 56 · GV2 Trinquette',
+            notes: 'Profil sécurité vent fort (à ajuster selon ton gréement réel).',
+            polarData: clonePolarData(basePolarData),
+            createdAt: nowIso,
+            updatedAt: nowIso
+        });
+    }
+
+    const hasGv1Trinquette = hasProfileMatching(text =>
+        (text.includes('GV1') || text.includes('1 RIS')) && text.includes('TRINQUETTE')
+    );
+    if (!hasGv1Trinquette) {
+        seededProfiles.push({
+            id: 'ceibo-gv1-trinquette',
+            name: 'DUFOUR 56 · GV1 Trinquette',
+            notes: 'Profil intermédiaire brise soutenue (à ajuster selon ton gréement réel).',
+            polarData: clonePolarData(basePolarData),
+            createdAt: nowIso,
+            updatedAt: nowIso
+        });
+    }
+
+    if (seededProfiles.length > 0) {
+        polarProfiles = sanitizePolarProfilesList(polarProfiles.concat(seededProfiles));
+        saveArrayToStorage(POLAR_PROFILES_STORAGE_KEY, polarProfiles);
+    }
+
     const storedActiveId = String(localStorage.getItem(ACTIVE_POLAR_PROFILE_STORAGE_KEY) || '').trim();
     const fallbackProfile = polarProfiles[0] || null;
     activePolarProfileId = storedActiveId === POLAR_AUTO_PROFILE_ID
@@ -1598,6 +1642,55 @@ function getPolarProfileSuitabilityForConditions(profile, tws, twa) {
     return true;
 }
 
+function getPolarProfileFallbackSafetyScore(profile, tws, twa) {
+    const name = `${String(profile?.id || '')} ${String(profile?.name || '')}`
+        .toUpperCase()
+        .replace(/_/g, ' ');
+    const absTwa = Math.abs(Number.isFinite(twa) ? twa : 90);
+
+    const isGennaker = name.includes('GENNAKER');
+    const isJib = name.includes('JIB') || name.includes('TRINQUETTE');
+    const isGenoa = name.includes('GENOA') || name.includes('GENOIS');
+    const isReef2 = name.includes('GV2') || name.includes('2 RIS');
+    const isReef1 = name.includes('GV1') || name.includes('1 RIS');
+
+    let score = 0;
+
+    if (tws >= 30) {
+        if (isJib && isReef2) score += 1000;
+        else if (isJib && isReef1) score += 850;
+        else if (isJib) score += 700;
+        else if (isGenoa && isReef2) score += 350;
+        else if (isGenoa && isReef1) score += 150;
+        else if (isGenoa) score -= 50;
+        if (isGennaker) score -= 3000;
+    } else if (tws >= 25) {
+        if (isJib && isReef2) score += 900;
+        else if (isJib && isReef1) score += 780;
+        else if (isJib) score += 650;
+        else if (isGenoa && isReef2) score += 250;
+        else if (isGenoa && isReef1) score += 120;
+        else if (isGenoa) score -= 80;
+        if (isGennaker) score -= 2500;
+    } else if (tws >= 18) {
+        if (isJib && isReef2) score += 550;
+        else if (isJib && isReef1) score += 450;
+        else if (isJib) score += 300;
+        else if (isGenoa && isReef1) score += 150;
+        else if (isGenoa) score += 60;
+        if (isGennaker && absTwa < 145) score -= 1200;
+        else if (isGennaker) score -= 150;
+    } else {
+        if (isGennaker && absTwa >= 95 && absTwa <= 150) score += 180;
+        if (isGenoa) score += 120;
+        if (isJib) score += 80;
+        if (isReef2) score -= 120;
+        else if (isReef1) score -= 40;
+    }
+
+    return score;
+}
+
 function getPolarProfileTieBreakScore(profile, twa) {
     const name = `${String(profile?.id || '')} ${String(profile?.name || '')}`
         .toUpperCase()
@@ -1649,6 +1742,45 @@ function getBestPolarForConditions(tws, twa) {
     // Filtre : obtenir les profils acceptables au TWS actuel
     const acceptableProfiles = polarProfiles.filter(p => getPolarProfileSuitabilityForConditions(p, tws, absTwa));
     const profilesToRank = acceptableProfiles.length > 0 ? acceptableProfiles : polarProfiles;
+
+    if (acceptableProfiles.length === 0) {
+        let safestProfile = profilesToRank[0] || null;
+        let bestSafetyScore = Number.NEGATIVE_INFINITY;
+        let bestSpeed = Number.NEGATIVE_INFINITY;
+        let bestTieBreakScore = Number.NEGATIVE_INFINITY;
+
+        profilesToRank.forEach(profile => {
+            const safetyScore = getPolarProfileFallbackSafetyScore(profile, tws, absTwa);
+            const speed = polarLookup(tws, absTwa, profile.polarData);
+            const tieBreakScore = getPolarProfileTieBreakScore(profile, absTwa);
+
+            if (safetyScore > bestSafetyScore + 0.01) {
+                safestProfile = profile;
+                bestSafetyScore = safetyScore;
+                bestSpeed = speed;
+                bestTieBreakScore = tieBreakScore;
+                return;
+            }
+
+            if (Math.abs(safetyScore - bestSafetyScore) <= 0.01 && speed > bestSpeed + 0.01) {
+                safestProfile = profile;
+                bestSpeed = speed;
+                bestTieBreakScore = tieBreakScore;
+                return;
+            }
+
+            if (
+                Math.abs(safetyScore - bestSafetyScore) <= 0.01
+                && Math.abs(speed - bestSpeed) <= 0.01
+                && tieBreakScore > bestTieBreakScore
+            ) {
+                safestProfile = profile;
+                bestTieBreakScore = tieBreakScore;
+            }
+        });
+
+        return safestProfile;
+    }
     
     let bestProfile = profilesToRank[0];
     let bestSpeed = -1;
@@ -4688,6 +4820,20 @@ function invalidateComputedRouteDisplay() {
     if (windLegend) windLegend.innerHTML = '';
 }
 
+function refreshEditableRouteOverlay() {
+    if (!map) return;
+
+    if (Array.isArray(routePoints) && routePoints.length >= 2) {
+        drawRoute(routePoints);
+        return;
+    }
+
+    if (routeLayer && map.hasLayer(routeLayer)) {
+        map.removeLayer(routeLayer);
+    }
+    routeLayer = null;
+}
+
 function selectUserWaypoint(marker) {
     const index = markers.indexOf(marker);
     selectedUserWaypointIndex = index;
@@ -4712,6 +4858,7 @@ function deleteUserWaypointAtIndex(index) {
     }
 
     invalidateComputedRouteDisplay();
+    refreshEditableRouteOverlay();
     updateSelectedWaypointInfo();
 }
 
@@ -4795,6 +4942,7 @@ function addUserWaypoint(latlng, options = {}) {
 
     if (invalidate) {
         invalidateComputedRouteDisplay();
+        refreshEditableRouteOverlay();
     }
 
     return marker;
@@ -6574,44 +6722,55 @@ function getSeaComfortLevel(weather) {
 function getSailRecommendation({ isMotorSegment, tws, twa, sailModeValue }) {
     if (isMotorSegment) return t('Moteur', 'Motor');
 
+    const safeTws = Number(tws);
+    const safeTwa = Number(twa);
+    const normalizedTws = Number.isFinite(safeTws) ? safeTws : 0;
+    const normalizedTwa = Number.isFinite(safeTwa) ? safeTwa : 90;
+
     const prudentOffset = sailModeValue === 'prudent' ? -2 : 0;
     const perfOffset = sailModeValue === 'performance' ? 2 : 0;
 
-    if (tws >= (22 + prudentOffset)) return t('GV 2 ris + trinquette', 'Mayor 2 rizos + trinqueta');
-    if (tws >= (16 + prudentOffset)) {
-        if (twa > 145) {
+    // Garde de sécurité vent fort : pas de gennaker à partir de 25 kn.
+    if (normalizedTws >= 25) return t('GV 2 ris + trinquette', 'Mayor 2 rizos + trinqueta');
+
+    if (normalizedTws >= (22 + prudentOffset)) return t('GV 2 ris + trinquette', 'Mayor 2 rizos + trinqueta');
+    if (normalizedTws >= (16 + prudentOffset)) {
+        if (normalizedTwa > 145) {
             if (sailModeValue === 'prudent') return t('GV 1 ris + génois tangonné', 'Mayor 1 rizo + génova tangonada');
             if (sailModeValue === 'performance') return t('GV 1 ris + spi', 'Mayor 1 rizo + spi');
             return t('GV + gennaker', 'Mayor + gennaker');
         }
-        if (twa > 130 && sailModeValue === 'performance') return t('GV 1 ris + spi', 'Mayor 1 rizo + spi');
+        if (normalizedTwa > 130 && sailModeValue === 'performance') return t('GV 1 ris + spi', 'Mayor 1 rizo + spi');
         return t('GV 1 ris + génois réduit', 'Mayor 1 rizo + génova reducida');
     }
 
-    if (twa < 60) return sailModeValue === 'prudent'
+    if (normalizedTwa < 60) return sailModeValue === 'prudent'
         ? t('GV pleine + génois réduit', 'Mayor completa + génova reducida')
         : t('GV pleine + génois', 'Mayor completa + génova');
-    if (twa < 115) return t('GV pleine + génois', 'Mayor completa + génova');
-    if (twa < 145) return sailModeValue === 'prudent'
+    if (normalizedTwa < 115) return t('GV pleine + génois', 'Mayor completa + génova');
+    if (normalizedTwa < 145) return sailModeValue === 'prudent'
         ? t('GV + génois tangonné', 'Mayor + génova tangonada')
         : t('GV + gennaker', 'Mayor + gennaker');
 
-    if (sailModeValue === 'performance' && tws < (18 + perfOffset)) return t('GV + spi', 'Mayor + spi');
+    if (sailModeValue === 'performance' && normalizedTws < (18 + perfOffset)) return t('GV + spi', 'Mayor + spi');
     return t('GV + génois tangonné', 'Mayor + génova tangonada');
 }
 
 function getSailPerformanceFactor({ isMotorSegment, sailModeValue, tws, twa, sailSetup }) {
     if (isMotorSegment) return 1;
 
+    const safeTws = Number(tws);
+    const normalizedTws = Number.isFinite(safeTws) ? safeTws : 0;
+
     let baseFactor = 1;
     if (sailModeValue === 'prudent') {
-        baseFactor = tws >= 24 ? 0.88 : 0.92;
+        baseFactor = normalizedTws >= 24 ? 0.88 : 0.92;
     } else if (sailModeValue === 'performance') {
-        baseFactor = tws >= 24 ? 1.0 : 1.08;
+        baseFactor = normalizedTws >= 24 ? 1.0 : 1.08;
     }
 
     const isGennakerSetup = typeof sailSetup === 'string' && sailSetup.toLowerCase().includes('gennaker');
-    const gennakerBoost = isGennakerSetup && Number.isFinite(twa) && twa >= 95 && twa <= 150 ? 1.1 : 1;
+    const gennakerBoost = isGennakerSetup && normalizedTws < 25 && Number.isFinite(twa) && twa >= 95 && twa <= 150 ? 1.1 : 1;
 
     return baseFactor * gennakerBoost;
 }
@@ -12355,6 +12514,25 @@ function readCloudUserCredentials() {
     return { email, password };
 }
 
+function getCloudAuthEmailRedirectUrl() {
+    try {
+        const href = String(window?.location?.href || '').trim();
+        if (!href) return '';
+
+        const url = new URL(href);
+        url.hash = '';
+
+        const params = new URLSearchParams(url.search);
+        ['access_token', 'refresh_token', 'type', 'expires_in', 'token_type'].forEach(key => params.delete(key));
+        const cleanedSearch = params.toString();
+        url.search = cleanedSearch ? `?${cleanedSearch}` : '';
+
+        return url.toString();
+    } catch (_error) {
+        return '';
+    }
+}
+
 function normalizeEmailForCompare(value) {
     return String(value || '').trim().toLowerCase();
 }
@@ -12400,6 +12578,15 @@ function normalizeCloudUserRole(value) {
         return 'administrateur';
     }
     return 'utilisateur';
+}
+
+function isCloudAuthUserAlreadyExistsError(error) {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+    return code === 'user_already_exists'
+        || message.includes('user already registered')
+        || message.includes('already registered')
+        || message.includes('already exists');
 }
 
 function getCurrentCloudUserEmail() {
@@ -18557,12 +18744,21 @@ document.addEventListener('DOMContentLoaded', async function() {
 
             const emailVerdict = await checkCloudEmailAllowed(email);
             if (!emailVerdict.allowed) {
-                setCloudAuthStatus(t(`Email non autorisé (${email}). Demande à un administrateur de te créer dans ${CLOUD_ALLOWED_USERS_TABLE}.`, `Email no autorizado (${email}). Pide a un administrador que te cree en ${CLOUD_ALLOWED_USERS_TABLE}.`), true);
-                return;
+                setCloudAuthStatus(
+                    t(
+                        `Vérification whitelist non concluante (${emailVerdict.reason}). Tentative de création du compte...`,
+                        `Verificación whitelist no concluyente (${emailVerdict.reason}). Intentando crear la cuenta...`
+                    )
+                );
             }
 
             try {
-                const { data, error } = await cloudClient.auth.signUp({ email, password });
+                const emailRedirectTo = getCloudAuthEmailRedirectUrl();
+                const signUpPayload = emailRedirectTo
+                    ? { email, password, options: { emailRedirectTo } }
+                    : { email, password };
+
+                const { data, error } = await cloudClient.auth.signUp(signUpPayload);
                 if (error) throw error;
 
                 if (data?.user && !data?.session) {
@@ -18572,6 +18768,16 @@ document.addEventListener('DOMContentLoaded', async function() {
                     activateTab('routes');
                 }
             } catch (error) {
+                if (isCloudAuthUserAlreadyExistsError(error)) {
+                    setCloudAuthStatus(
+                        t(
+                            `Compte déjà existant pour ${email}. Utilise « Se connecter email » (ou réinitialise le mot de passe).`,
+                            `La cuenta ya existe para ${email}. Usa « Conectar email » (o restablece la contraseña).`
+                        ),
+                        true
+                    );
+                    return;
+                }
                 setCloudAuthStatus(t(`Création compte impossible: ${formatCloudError(error)}`, `Creación de cuenta imposible: ${formatCloudError(error)}`), true);
             }
         });
@@ -20026,6 +20232,7 @@ function createWaypointMarker(latlng) {
             routePoints[index] = marker.getLatLng();
             selectUserWaypoint(marker);
             invalidateComputedRouteDisplay();
+            refreshEditableRouteOverlay();
         }
     });
 
