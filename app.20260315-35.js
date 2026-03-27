@@ -1,9 +1,8 @@
 import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_POLAR_DATA, clonePolarData, normalizePolarData } from './polarRouter.js';
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260315-36';
+const APP_BUILD_VERSION = '20260315-35';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -158,7 +157,6 @@ const ENGINE_SENSOR_ON_HOLD_MS = 7000;
 const ENGINE_SENSOR_OFF_HOLD_MS = 12000;
 const ENGINE_SENSOR_TICK_INTERVAL_MS = 1000;
 const GOOGLE_PHOTOS_CLIENT_ID_STORAGE_KEY = 'ceiboGooglePhotosClientIdV1';
-const SIGNALK_CONFIG_STORAGE_KEY = 'ceiboSignalKConfigV1';
 let savedRoutesCache = [];
 let cloudClient = null;
 let cloudConfig = null;
@@ -235,13 +233,6 @@ let engineSensorRunningStartMs = 0;
 let engineSensorRunningHoursBaseline = null;
 let engineSensorLastSpeedKn = null;
 let engineSensorGeoWatchId = null;
-// ---- SignalK ----
-let signalkClient = null;
-let signalkConfig = { mode: 'auto', host: '' }; // mode: 'auto' | 'signalk'
-let signalkLoggingActive = false; // true while SignalK streaming replaces browser GPS
-let signalkLatestWindDir = null; // TWD degrees true (used to auto-fill wind form)
-let signalkLatestWindSpeedKn = null;
-let signalkLatestEngineRpm = null;
 let logWorkspaceMode = 'none';
 let lastAiRouteCandidates = [];
 let aiTrafficEntries = [];
@@ -779,7 +770,6 @@ function applyLanguageToUi() {
     setElementText('#engineSensorScoreLabel', t('Score:', 'Puntuación:', 'Score:'));
     setElementText('#engineSensorVibrationLabel', t('Vibration:', 'Vibración:', 'Vibration:'));
     setElementText('#engineSensorSpeedLabel', t('Vitesse:', 'Velocidad:', 'Speed:'));
-    setElementText('#engineSensorRpmLabel', t('RPM:', 'RPM:', 'RPM:'));
     setElementText('#engineSensorStartBtn', t('Activer détection', 'Activar detección', 'Start detection'));
     setElementText('#engineSensorStopBtn', t('Stop détection', 'Detener detección', 'Stop detection'));
     setElementText('#engineSensorHint', t('Astuce: lance en mer avec iPad fixe pour une détection plus stable.', 'Consejo: inicia en mar con iPad fijo para una detección más estable.', 'Tip: start offshore with a fixed iPad for a more stable detection.'));
@@ -1016,7 +1006,7 @@ function initializeSidebarToggle() {
 }
 
 function syncNavLogGpsCompactUi() {
-    const isGpsLoggingActive = navWatchId !== null || signalkLoggingActive;
+    const isGpsLoggingActive = navWatchId !== null;
     const shouldCompactTabs = activeTabName === 'navlog' && isGpsLoggingActive;
     const startNavLogBtn = document.getElementById('startNavLogBtn');
     const stopNavLogBtn = document.getElementById('stopNavLogBtn');
@@ -9781,35 +9771,67 @@ function renderMaintenanceExpenseDetailPanel() {
     docsSection.appendChild(addDocsBtn);
     detailPanel.appendChild(docsSection);
 
+    const postCommentLabel = document.createElement('div');
+    postCommentLabel.className = 'maintenance-detail-block';
+    postCommentLabel.innerHTML = `<strong>${t('Commentaire suivi', 'Comentario de seguimiento')}</strong>`;
+    detailPanel.appendChild(postCommentLabel);
+
     if (canEditExpense) {
-        const postCommentLabel = document.createElement('div');
-        postCommentLabel.className = 'maintenance-detail-block';
-        postCommentLabel.innerHTML = `<strong>${t('Commentaire suivi', 'Comentario de seguimiento')}</strong>`;
-        detailPanel.appendChild(postCommentLabel);
+        const addDocsInput = document.createElement('input');
+        addDocsInput.type = 'file';
+        addDocsInput.multiple = true;
+        addDocsInput.accept = 'image/*,.pdf';
+        addDocsInput.style.marginTop = '8px';
+        addDocsInput.style.width = '100%';
+        docsSection.appendChild(addDocsInput);
 
-        const postCommentInput = document.createElement('textarea');
-        postCommentInput.rows = 3;
-        postCommentInput.value = String(selectedExpense.postComment || '');
-        postCommentInput.placeholder = t('Ajoute un commentaire après enregistrement', 'Añade un comentario después del registro');
-        postCommentInput.style.width = '100%';
-        postCommentInput.style.marginTop = '6px';
-        postCommentInput.style.boxSizing = 'border-box';
-        detailPanel.appendChild(postCommentInput);
+        const addDocsBtn = document.createElement('button');
+        addDocsBtn.type = 'button';
+        addDocsBtn.className = 'maintenance-delete-btn';
+        addDocsBtn.style.marginTop = '6px';
+        addDocsBtn.textContent = t('Ajouter des fichiers au dossier', 'Añadir archivos al expediente');
+        addDocsBtn.addEventListener('click', async () => {
+            const files = Array.from(addDocsInput.files || []);
+            if (!files.length) return;
 
-        const savePostCommentBtn = document.createElement('button');
-        savePostCommentBtn.type = 'button';
-        savePostCommentBtn.className = 'maintenance-delete-btn';
-        savePostCommentBtn.style.marginTop = '6px';
-        savePostCommentBtn.textContent = t('Enregistrer commentaire suivi', 'Guardar comentario de seguimiento');
-        savePostCommentBtn.addEventListener('click', async () => {
-            await updateMaintenanceExpenseById(selectedExpense.id, {
-                postComment: String(postCommentInput.value || '').trim()
-            }, { refreshUi: false });
-            renderMaintenanceExpenseDetailPanel();
+            const newDocs = [];
+            for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+                const file = files[fileIndex];
+                try {
+                    const preparedDoc = await prepareDocumentForStorage(file);
+                    newDocs.push(sanitizeMaintenanceInvoiceDocument({
+                        id: `expense-doc-${Date.now()}-${fileIndex}`,
+                        name: file.name,
+                        dataUrl: preparedDoc.dataUrl,
+                        mimeType: preparedDoc.mimeType,
+                        sizeBytes: preparedDoc.sizeBytes
+                    }, fileIndex));
+                } catch (_error) {
+                    continue;
+                }
+            }
+
+            if (!newDocs.length) return;
+
+            await updateMaintenanceExpenseById(selectedExpense.id, currentExpense => {
+                const currentDocs = Array.isArray(currentExpense.invoiceDocuments)
+                    ? currentExpense.invoiceDocuments.filter(item => String(item?.dataUrl || ''))
+                    : [];
+                const nextDocs = [...currentDocs, ...newDocs];
+                const firstDoc = nextDocs[0] || null;
+
+                return {
+                    invoiceDocuments: nextDocs,
+                    invoiceName: String(firstDoc?.name || currentExpense.invoiceName || ''),
+                    invoiceDataUrl: String(firstDoc?.dataUrl || currentExpense.invoiceDataUrl || ''),
+                    invoiceMimeType: String(firstDoc?.mimeType || currentExpense.invoiceMimeType || ''),
+                    invoiceSizeBytes: Math.max(0, Number(firstDoc?.sizeBytes || currentExpense.invoiceSizeBytes || 0) || 0)
+                };
+            });
+            addDocsInput.value = '';
         });
-        detailPanel.appendChild(savePostCommentBtn);
+        docsSection.appendChild(addDocsBtn);
     }
-}
 
 function renderMaintenanceSuppliers() {
     const container = document.getElementById('maintenanceSuppliersList');
@@ -12172,6 +12194,70 @@ function setCloudAuthStatus(message, isError = false) {
     status.style.color = isError ? '#ff8f8f' : '';
 }
 
+function renderMaintenanceSuppliers() {
+    const container = document.getElementById('maintenanceSuppliersList');
+    if (!container) return;
+
+    if (!maintenanceSuppliers.length) {
+        container.innerHTML = `<div class="maintenance-legend-empty">${t('Aucun fournisseur enregistré.', 'Ningún proveedor registrado.')}</div>`;
+        if (activeMaintenanceSubtab === 'suppliers') {
+            renderMaintenanceSupplierDetailPanel();
+        }
+        return;
+    }
+
+    container.innerHTML = '';
+    const headerRow = document.createElement('div');
+    headerRow.className = 'maintenance-supplier-list-header';
+    headerRow.innerHTML =
+        `<span>${t('Nom', 'Nombre')}</span>` +
+        `<span>${t('Contact', 'Contacto')}</span>` +
+        `<span>${t('Urgence', 'Urgencia')}</span>`;
+    container.appendChild(headerRow);
+
+    maintenanceSuppliers.forEach((supplier, index) => {
+        const card = document.createElement('div');
+        card.className = 'maintenance-supplier-row';
+        if (supplier.id === selectedMaintenanceSupplierId) {
+            card.classList.add('maintenance-supplier-row--active');
+        }
+
+        const summaryBtn = document.createElement('button');
+        summaryBtn.type = 'button';
+        summaryBtn.className = 'maintenance-supplier-summary-btn';
+        summaryBtn.innerHTML =
+            `<span class="maintenance-expense-col">${escapeHtml(supplier.name || `${t('Fournisseur', 'Proveedor')} ${index + 1}`)}</span>` +
+            `<span class="maintenance-expense-col">${escapeHtml(supplier.contact || '—')}</span>` +
+            `<span class="maintenance-expense-col">${escapeHtml(supplier.emergencyPhone || '—')}</span>`;
+        summaryBtn.addEventListener('click', () => {
+            clearMaintenanceSupplierDraft();
+            selectedMaintenanceSupplierId = supplier.id;
+            renderMaintenanceSuppliers();
+        });
+        card.appendChild(summaryBtn);
+
+        const actions = document.createElement('div');
+        actions.className = 'maintenance-card-actions';
+        if (isOwnedByCurrentCloudUser(supplier?.creatorEmail)) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'maintenance-delete-btn';
+            deleteBtn.textContent = t('Supprimer', 'Eliminar');
+            deleteBtn.addEventListener('click', async () => {
+                await deleteMaintenanceSupplierById(supplier.id);
+            });
+            actions.appendChild(deleteBtn);
+        }
+        card.appendChild(actions);
+
+        container.appendChild(card);
+    });
+
+    if (activeMaintenanceSubtab === 'suppliers') {
+        renderMaintenanceSupplierDetailPanel();
+    }
+}
+
 function unsubscribeCloudAuthSubscription() {
     const subscription =
         cloudAuthSubscription?.data?.subscription ||
@@ -14271,13 +14357,6 @@ function detectEngineAudioRegimeAuto(snapshot = {}) {
         return 'high';
     }
 
-    const liveRpm = resolveCurrentEngineRpm();
-    if (Number.isFinite(liveRpm) && liveRpm >= 0) {
-        if (liveRpm < 1100) return 'idle';
-        if (liveRpm < 2200) return 'cruise';
-        return 'high';
-    }
-
     const speed = Number.isFinite(snapshot?.speedKn) ? Number(snapshot.speedKn) : navLatestSpeedKn;
     const vibration = Number.isFinite(snapshot?.rms) ? Number(snapshot.rms) : engineSensorSmoothedVibration;
 
@@ -14410,7 +14489,6 @@ function recordEngineSoundSnapshot(snapshot = {}) {
         id: generateClientUuid(),
         capturedAt: new Date().toISOString(),
         engineHours: engineLast?.hours ?? null,
-        rpm: resolveCurrentEngineRpm(),
         speedKn: Number.isFinite(navLatestSpeedKn) ? navLatestSpeedKn : null,
         heelDeg: Number.isFinite(navLatestHeelDeg) ? navLatestHeelDeg : null,
         courseDeg: Number.isFinite(navLatestCourseDeg) ? navLatestCourseDeg : null,
@@ -16452,7 +16530,6 @@ function renderEngineSensorUi() {
     const scoreValue = document.getElementById('engineSensorScoreValue');
     const vibrationValue = document.getElementById('engineSensorVibrationValue');
     const speedValue = document.getElementById('engineSensorSpeedValue');
-    const rpmValue = document.getElementById('engineSensorRpmValue');
     const startBtn = document.getElementById('engineSensorStartBtn');
     const stopBtn = document.getElementById('engineSensorStopBtn');
 
@@ -16466,10 +16543,6 @@ function renderEngineSensorUi() {
         } else {
             speedValue.textContent = '-- kn';
         }
-    }
-    if (rpmValue) {
-        const rpm = resolveCurrentEngineRpm();
-        rpmValue.textContent = Number.isFinite(rpm) ? `${Math.round(rpm)} rpm` : '-- rpm';
     }
 
     if (stateValue) {
@@ -16735,13 +16808,6 @@ function stopEngineSensorDetection() {
     renderEngineSensorUi();
 }
 
-function resolveCurrentEngineRpm() {
-    if (Number.isFinite(signalkLatestEngineRpm)) {
-        return signalkLatestEngineRpm;
-    }
-    return null;
-}
-
 async function startEngineSensorDetectionWithPermission() {
     const ok = await requestEngineMotionPermissionIfNeeded();
     if (!ok) return;
@@ -16916,12 +16982,6 @@ function locatePreciselyOnMap() {
 }
 
 function startNavigationLogging() {
-    // ---- Route vers SignalK si le mode est activé ----
-    if (signalkConfig.mode === 'signalk') {
-        startSignalKNavigationLogging();
-        return;
-    }
-
     if (!navigator.geolocation) {
         setNavLogStatus(t('GPS non disponible sur cet appareil.', 'GPS no disponible en este dispositivo.'), true);
         return;
@@ -17003,302 +17063,16 @@ function startNavigationLogging() {
                 lng: longitude,
                 speedKn: Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null,
                 fixTimeMs
-            }
-        );
-    }
+            };
 
-    // ============================================================
-    // SIGNALK INTEGRATION
-    // ============================================================
-
-    function loadSignalKConfig() {
-        try {
-            const raw = localStorage.getItem(SIGNALK_CONFIG_STORAGE_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object') {
-                    signalkConfig = {
-                        mode: parsed.mode === 'signalk' ? 'signalk' : 'auto',
-                        host: typeof parsed.host === 'string' ? parsed.host : ''
-                    };
-                }
-            }
-        } catch (_) { /* ignore */ }
-    }
-
-    function saveSignalKConfig() {
-        try {
-            localStorage.setItem(SIGNALK_CONFIG_STORAGE_KEY, JSON.stringify(signalkConfig));
-        } catch (_) { /* ignore */ }
-    }
-
-    function updateSignalKStatusBadge(status) {
-        const badge = document.getElementById('signalkStatusBadge');
-        const text  = document.getElementById('signalkStatusText');
-        if (!badge || !text) return;
-        badge.className = 'signalk-badge signalk-badge--' + status;
-        const labels = {
-            disconnected: '⚫ Déconnecté',
-            connecting:   '🟡 Connexion…',
-            connected:    '🟢 Connecté',
-            error:        '🔴 Erreur'
-        };
-        text.textContent = labels[status] || status;
-    }
-
-    function setSignalKManagedInputValue(inputId, value, formatter = null) {
-        const input = document.getElementById(inputId);
-        if (!input || input.dataset.userEdited) return;
-        if (!Number.isFinite(value)) return;
-
-        const nextValue = typeof formatter === 'function'
-            ? formatter(value)
-            : String(value);
-
-        input.value = String(nextValue);
-    }
-
-    function resetSignalKManagedInputUserEdits() {
-        ['watchHeadingInput', 'watchWindDirInput', 'watchWindSpeedInput', 'watchBarometerInput', 'watchLogNmInput'].forEach(id => {
-            const input = document.getElementById(id);
-            if (!input) return;
-            delete input.dataset.userEdited;
-        });
-    }
-
-    function applySignalKUpdate(data) {
-        const fix = navGpsLatestFix;
-        const now = Date.now();
-        const headingValue = Number.isFinite(data.headingDeg)
-            ? data.headingDeg
-            : (Number.isFinite(data.courseDeg) ? data.courseDeg : null);
-        const windDirectionValue = Number.isFinite(data.twdDeg)
-            ? data.twdDeg
-            : (Number.isFinite(data.twaDeg) && Number.isFinite(headingValue)
-                ? normalizeCourseDegrees(headingValue + data.twaDeg)
-                : null);
-
-        // ---- GPS position ----
-        if (Number.isFinite(data.lat) && Number.isFinite(data.lng)) {
-            const speedKn = Number.isFinite(data.speedKn) ? data.speedKn : null;
-            const nextFix = { lat: data.lat, lng: data.lng, speedKn, fixTimeMs: now };
-            const derived = computeDerivedNavMetricsFromPoints(fix, nextFix);
-            navLatestSpeedKn = Number.isFinite(speedKn) ? speedKn
-                : (Number.isFinite(derived.speedKn) ? derived.speedKn : navLatestSpeedKn);
-            navLatestCourseDeg = Number.isFinite(data.courseDeg) ? data.courseDeg
-                : (Number.isFinite(derived.courseDeg) ? derived.courseDeg : navLatestCourseDeg);
-            navGpsLatestFix = nextFix;
             updateNavCurrentPositionMarker(navGpsLatestFix);
             evaluateAnchorDragAlarmWithFix(navGpsLatestFix);
             if (!navHasCenteredOnFirstFix && map) {
-                map.setView([data.lat, data.lng], Math.max(map.getZoom(), 13));
+                map.setView([latitude, longitude], Math.max(map.getZoom(), 13));
                 navHasCenteredOnFirstFix = true;
             }
-            if (!navGpsSessionHasSample) captureNavGpsSample('signalk');
-            const pts = getCurrentNavGpsSessionSamples().length;
-            setNavLogStatus(t(
-                `SignalK · fix reçu · ${pts} point(s)`,
-                `SignalK · fix recibido · ${pts} punto(s)`
-            ));
-        }
 
-        if (Number.isFinite(headingValue)) {
-            setSignalKManagedInputValue('watchHeadingInput', normalizeCourseDegrees(headingValue), value => Math.round(value));
-        }
-
-        // ---- Gîte (heel) ----
-        if (Number.isFinite(data.heelDeg)) {
-            navLatestHeelDeg = data.heelDeg;
-        }
-
-        // ---- Vent ----
-        if (Number.isFinite(data.twsKn)) {
-            signalkLatestWindSpeedKn = data.twsKn;
-            setSignalKManagedInputValue('watchWindSpeedInput', data.twsKn, value => value.toFixed(1));
-        }
-        if (Number.isFinite(windDirectionValue)) {
-            signalkLatestWindDir = windDirectionValue;
-            setSignalKManagedInputValue('watchWindDirInput', windDirectionValue, value => Math.round(normalizeCourseDegrees(value)));
-        }
-
-        // ---- Baromètre / loch ----
-        if (Number.isFinite(data.baroHpa)) {
-            setSignalKManagedInputValue('watchBarometerInput', data.baroHpa, value => value.toFixed(1));
-        }
-        if (Number.isFinite(data.logNm)) {
-            setSignalKManagedInputValue('watchLogNmInput', data.logNm, value => value.toFixed(1));
-        }
-
-        // ---- Moteur ----
-        if (typeof data.engineRunning === 'boolean') {
-            engineSensorDetectedRunning = data.engineRunning;
-            if (!data.engineRunning && !Number.isFinite(data.engineRpm)) {
-                signalkLatestEngineRpm = null;
-                updateEngineAudioRegimeUi();
-            }
-            renderEngineSensorUi();
-        }
-        if (Number.isFinite(data.engineRpm)) {
-            signalkLatestEngineRpm = data.engineRpm;
-            renderEngineSensorUi();
-            updateEngineAudioRegimeUi();
-        }
-
-        updateNavLiveDashboard();
-    }
-
-    function startSignalKNavigationLogging() {
-        const host = signalkConfig.host.trim();
-        if (!host) {
-            setNavLogStatus(t(
-                'SignalK: adresse du serveur manquante (paramètre SignalK).',
-                'SignalK: dirección de servidor faltante (parámetro SignalK).'
-            ), true);
-            return;
-        }
-
-        navGpsLatestFix = null;
-        navHasCenteredOnFirstFix = false;
-        navGpsSessionStartMs = Date.now();
-        navGpsSessionStartEntryIndex = navLogEntries.length;
-        navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
-        navGpsSessionHasSample = false;
-        signalkLoggingActive = true;
-        resetSignalKManagedInputUserEdits();
-
-        if (navGpsSampleTimerId !== null) {
-            window.clearInterval(navGpsSampleTimerId);
-            navGpsSampleTimerId = null;
-        }
-        navGpsSampleTimerId = window.setInterval(() => {
-            const captured = captureNavGpsSample('signalk');
-            if (captured) {
-                const pts = getCurrentNavGpsSessionSamples().length;
-                setNavLogStatus(t(
-                    `SignalK · point capturé · ${pts} point(s)`,
-                    `SignalK · punto capturado · ${pts} punto(s)`
-                ));
-            }
-        }, NAV_GPS_SAMPLE_INTERVAL_MS);
-
-        if (!signalkClient) {
-            signalkClient = new SignalKClient();
-        }
-        signalkClient.onStatusChange = (status) => {
-            updateSignalKStatusBadge(status);
-            if (status === 'error') {
-                setNavLogStatus(t(
-                    'SignalK: connexion perdue — vérifiez le serveur RPi.',
-                    'SignalK: conexión perdida — verifique el servidor RPi.'
-                ), true);
-            }
-        };
-        signalkClient.onUpdate = applySignalKUpdate;
-        signalkClient.connect(host);
-
-        syncNavLogGpsCompactUi();
-        setNavLogStatus(t(`SignalK · connexion vers ${host}…`, `SignalK · conectando a ${host}…`));
-    }
-
-    function stopSignalKNavigationLogging() {
-        signalkLoggingActive = false;
-        signalkLatestEngineRpm = null;
-        if (signalkClient) {
-            signalkClient.disconnect();
-            updateSignalKStatusBadge('disconnected');
-        }
-        if (navGpsSampleTimerId !== null) {
-            window.clearInterval(navGpsSampleTimerId);
-            navGpsSampleTimerId = null;
-        }
-        renderEngineSensorUi();
-        updateEngineAudioRegimeUi();
-    }
-
-    function initSignalKUi() {
-        const modeAutoBtn = document.getElementById('signalkModeAutoBtn');
-        const modeSkBtn   = document.getElementById('signalkModeSkBtn');
-        const hostInput   = document.getElementById('signalkHostInput');
-        const connectBtn  = document.getElementById('signalkConnectBtn');
-
-        if (!modeAutoBtn || !modeSkBtn || !hostInput || !connectBtn) return;
-
-        // Restore saved config
-        loadSignalKConfig();
-        hostInput.value = signalkConfig.host;
-        _applySignalKModeButtons();
-
-        modeAutoBtn.addEventListener('click', () => {
-            signalkConfig.mode = 'auto';
-            saveSignalKConfig();
-            _applySignalKModeButtons();
-            stopSignalKNavigationLogging();
-            updateSignalKStatusBadge('disconnected');
-            setNavLogStatus(t('Mode autonome activé (GPS + capteurs iPad).', 'Modo autónomo activado (GPS + sensores iPad).'));
-        });
-
-        modeSkBtn.addEventListener('click', () => {
-            signalkConfig.mode = 'signalk';
-            saveSignalKConfig();
-            _applySignalKModeButtons();
-            resetSignalKManagedInputUserEdits();
-            setNavLogStatus(t('Mode SignalK activé. Clique "Démarrer log GPS" pour connecter.', 'Modo SignalK activado. Toca "Iniciar log GPS" para conectar.'));
-        });
-
-        hostInput.addEventListener('input', () => {
-            signalkConfig.host = hostInput.value.trim();
-            saveSignalKConfig();
-        });
-
-        connectBtn.addEventListener('click', () => {
-            signalkConfig.host = hostInput.value.trim();
-            saveSignalKConfig();
-            if (!signalkConfig.host) {
-                setNavLogStatus(t('SignalK: entrez l\'adresse du serveur.', 'SignalK: ingrese la dirección del servidor.'), true);
-                return;
-            }
-            resetSignalKManagedInputUserEdits();
-            if (!signalkClient) signalkClient = new SignalKClient();
-            signalkClient.onStatusChange = updateSignalKStatusBadge;
-            signalkClient.onUpdate = applySignalKUpdate;
-            updateSignalKStatusBadge('connecting');
-            signalkClient.connect(signalkConfig.host);
-        });
-
-        // Manual edits pause SignalK autofill for the targeted field until the next SignalK session/connect.
-        ['watchHeadingInput', 'watchWindSpeedInput', 'watchWindDirInput', 'watchBarometerInput', 'watchLogNmInput'].forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.addEventListener('input', () => { el.dataset.userEdited = '1'; });
-        });
-
-        updateSignalKStatusBadge('disconnected');
-    }
-
-    function _applySignalKModeButtons() {
-        const modeAutoBtn  = document.getElementById('signalkModeAutoBtn');
-        const modeSkBtn    = document.getElementById('signalkModeSkBtn');
-        const skPanel      = document.getElementById('signalkSkPanel');
-        const motionBtn    = document.getElementById('requestMotionPermissionBtn');
-        if (!modeAutoBtn || !modeSkBtn) return;
-        const isAuto = signalkConfig.mode === 'auto';
-        modeAutoBtn.classList.toggle('signalk-mode-btn--active', isAuto);
-        modeSkBtn.classList.toggle('signalk-mode-btn--active', !isAuto);
-        if (skPanel) skPanel.style.display = isAuto ? 'none' : '';
-        // Capteur inclinaison iPad inutile en mode SignalK (le gîte vient du serveur)
-        if (motionBtn) motionBtn.style.display = isAuto ? '' : 'none';
-    }
-
-    // ============================================================
-    // END SIGNALK INTEGRATION
-    // ============================================================
-
-    function startNavigationLogging() {
-        // ---- Route vers SignalK si le mode est activé ----
-        if (signalkConfig.mode === 'signalk') {
-            startSignalKNavigationLogging();
-            return;
-        }
+            if (!navGpsSessionHasSample) {
                 captureNavGpsSample('gps-watch');
             }
 
@@ -17321,11 +17095,6 @@ function startNavigationLogging() {
 
 function stopNavigationLogging(options = {}) {
     const { createAutoSessionSummary = true } = options;
-
-    // Stop SignalK streaming if active
-    if (signalkConfig.mode === 'signalk') {
-        stopSignalKNavigationLogging();
-    }
 
     if (navWatchId !== null && navigator.geolocation) {
         navigator.geolocation.clearWatch(navWatchId);
@@ -17364,7 +17133,6 @@ function stopNavigationLogging(options = {}) {
         setNavLogStatus(t(`Log GPS arrêté · ${navLogEntries.length} point(s) enregistrés.`, `Log GPS detenido · ${navLogEntries.length} punto(s) guardado(s).`));
     }
 
-    signalkLoggingActive = false;
     navGpsLatestFix = null;
     navGpsSessionStartMs = 0;
     navGpsSessionStartEntryIndex = navLogEntries.length;
@@ -18521,8 +18289,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (requestMotionPermissionBtn) {
         requestMotionPermissionBtn.addEventListener('click', requestMotionPermissionIfNeeded);
     }
-
-    initSignalKUi();
 
     const anchorDragSetBtn = document.getElementById('anchorDragSetBtn');
     if (anchorDragSetBtn) {

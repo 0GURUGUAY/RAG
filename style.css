@@ -1429,6 +1429,159 @@ body.navlog-gps-inactive #navLogStatus {
     color: #cfe4f7;
 }
 
+/* ---- SignalK mode buttons ---- */
+.signalk-mode-btn {
+    background: #2a3a4e;
+    color: #b0c8e0;
+    border: 1.5px solid #3e5572;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.signalk-mode-btn--active {
+    background: #16527a;
+    color: #e0f4ff;
+    border-color: #3999cc;
+    font-weight: 700;
+}
+.signalk-mode-btn:hover:not(.signalk-mode-btn--active) {
+    background: #1e3248;
+    color: #d0e8f8;
+}
+
+/* ---- SignalK status badge ---- */
+.signalk-badge {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.signalk-badge--disconnected { background: #666; }
+.signalk-badge--connecting   { background: #e0b800; }
+.signalk-badge--connected    { background: #28c76f; box-shadow: 0 0 5px #28c76f88; }
+.signalk-badge--error        { background: #ff4a4a; }
+
+.signalk-monitor-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.signalk-monitor-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.signalk-monitor-toolbar .signalk-mode-btn {
+    flex: 1 1 150px;
+}
+
+.signalk-monitor-config {
+    display: grid;
+    gap: 8px;
+}
+
+.signalk-monitor-config__host {
+    width: 100%;
+}
+
+.signalk-monitor-config__actions {
+    margin-top: 0;
+}
+
+.signalk-monitor-status {
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(7, 20, 31, 0.72);
+    border: 1px solid rgba(130, 201, 255, 0.2);
+}
+
+.signalk-monitor-status__main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.signalk-monitor-status__meta {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.signalk-monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.signalk-monitor-grid > div,
+.signalk-monitor-status__meta > div {
+    min-width: 0;
+}
+
+.signalk-monitor-events {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.signalk-monitor-event {
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.signalk-monitor-event--error {
+    border-color: rgba(255, 74, 74, 0.4);
+    background: rgba(120, 22, 22, 0.22);
+}
+
+.signalk-monitor-event--connected {
+    border-color: rgba(40, 199, 111, 0.35);
+}
+
+.signalk-monitor-event--muted {
+    opacity: 0.8;
+}
+
+.signalk-monitor-event__time {
+    flex: 0 0 138px;
+    color: #8fe7ff;
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .signalk-monitor-status__meta,
+    .signalk-monitor-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .signalk-monitor-event {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .signalk-monitor-event__time {
+        flex-basis: auto;
+    }
+}
+
 #navLogStatus.nav-log-status--active::before {
     content: '● ';
     color: #4ee38a;
@@ -1830,6 +1983,7 @@ button:focus-visible {
 
 .maintenance-subtabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 8px;
 }

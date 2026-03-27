@@ -1,6 +1,7 @@
 import { routeSegment, polarLookup, distanceNm, getBearing, computeTWA, movePoint, DEFAULT_POLAR_DATA, clonePolarData, normalizePolarData } from './polarRouter.js';
 import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojson-client@3/+esm';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { SignalKClient } from './signalk.js';
 
 const APP_BUILD_VERSION = '20260315-36';
 
@@ -157,6 +158,7 @@ const ENGINE_SENSOR_ON_HOLD_MS = 7000;
 const ENGINE_SENSOR_OFF_HOLD_MS = 12000;
 const ENGINE_SENSOR_TICK_INTERVAL_MS = 1000;
 const GOOGLE_PHOTOS_CLIENT_ID_STORAGE_KEY = 'ceiboGooglePhotosClientIdV1';
+const SIGNALK_CONFIG_STORAGE_KEY = 'ceiboSignalKConfigV1';
 let savedRoutesCache = [];
 let cloudClient = null;
 let cloudConfig = null;
@@ -233,6 +235,25 @@ let engineSensorRunningStartMs = 0;
 let engineSensorRunningHoursBaseline = null;
 let engineSensorLastSpeedKn = null;
 let engineSensorGeoWatchId = null;
+let signalkClient = null;
+let signalkConfig = { mode: 'auto', host: '' };
+let signalkLoggingActive = false;
+let signalkLatestWindDir = null;
+let signalkLatestWindSpeedKn = null;
+let signalkLatestEngineRpm = null;
+let signalkLatestSnapshot = {};
+let signalkLatestStatus = 'disconnected';
+let signalkLastStatusAtMs = 0;
+let signalkLastUpdateAtMs = 0;
+let signalkUpdateCount = 0;
+let signalkPositionUpdateCount = 0;
+let signalkWindUpdateCount = 0;
+let signalkEngineUpdateCount = 0;
+let signalkWeatherUpdateCount = 0;
+let signalkMonitorEvents = [];
+let signalkLastWeatherSummary = '';
+let signalkLastWeatherEventAtMs = 0;
+let signalkLastWeatherPath = '';
 let logWorkspaceMode = 'none';
 let lastAiRouteCandidates = [];
 let aiTrafficEntries = [];
@@ -836,6 +857,15 @@ function applyLanguageToUi() {
     setElementText('#maintenanceExpensesSubtabBtn', t('Dépenses & factures', 'Gastos y facturas'));
     setElementText('#maintenanceSuppliersSubtabBtn', t('Fournisseurs', 'Proveedores'));
     setElementText('#maintenanceEngineSubtabBtn', t('Moteur', 'Motor'));
+    setElementText('#maintenanceSignalKSubtabBtn', 'SIGNALK');
+    setElementText('#maintenanceSignalKTitle', t('SignalK · configuration et monitoring', 'SignalK · configuración y monitorización', 'SignalK · configuration and monitoring'));
+    setElementText('#maintenanceSignalKHint', t('Flux live Raymarine/SignalK. Utilise cette page pour tester la connexion, voir les dernières données reçues et diagnostiquer le stream.', 'Flujo live Raymarine/SignalK. Usa esta página para probar la conexión, ver los últimos datos recibidos y diagnosticar el stream.', 'Live Raymarine/SignalK feed. Use this page to test connectivity, inspect the latest values, and diagnose the stream.'));
+    setElementText('#maintenanceSignalKModeAutoBtn', t('Auto iPad', 'Auto iPad', 'iPad auto'));
+    setElementText('#maintenanceSignalKModeSkBtn', 'SignalK');
+    setElementText('#maintenanceSignalKHostLabel', t('Serveur SignalK (IP ou hostname):', 'Servidor SignalK (IP o hostname):', 'SignalK server (IP or hostname):'));
+    setElementText('#maintenanceSignalKConnectBtn', t('Tester / reconnecter', 'Probar / reconectar', 'Test / reconnect'));
+    setElementText('#maintenanceSignalKDisconnectBtn', t('Déconnecter', 'Desconectar', 'Disconnect'));
+    setElementText('#maintenanceSignalKEventsLabel', t('Événements récents:', 'Eventos recientes:', 'Recent events:'));
     setElementText('label[for="maintenanceSchemaInput"]', t('Importer schéma (image):', 'Importar esquema (imagen):'));
     setElementText('#maintenanceToggleSchemaManagerBtn', t('Gérer les schémas', 'Gestionar esquemas'));
     setElementText('#maintenanceAddSchemaBtn', t('Ajouter schéma', 'Añadir esquema'));
@@ -1006,7 +1036,7 @@ function initializeSidebarToggle() {
 }
 
 function syncNavLogGpsCompactUi() {
-    const isGpsLoggingActive = navWatchId !== null;
+    const isGpsLoggingActive = navWatchId !== null || signalkLoggingActive;
     const shouldCompactTabs = activeTabName === 'navlog' && isGpsLoggingActive;
     const startNavLogBtn = document.getElementById('startNavLogBtn');
     const stopNavLogBtn = document.getElementById('stopNavLogBtn');
@@ -11182,19 +11212,21 @@ function setActiveMaintenanceAnnotation(annotationId) {
 }
 
 function setActiveMaintenanceSubtab(tabKey) {
-    activeMaintenanceSubtab = ['tasks', 'expenses', 'suppliers', 'engine'].includes(tabKey) ? tabKey : 'tasks';
+    activeMaintenanceSubtab = ['tasks', 'expenses', 'suppliers', 'engine', 'signalk'].includes(tabKey) ? tabKey : 'tasks';
 
     const tabBtnMap = {
         tasks: document.getElementById('maintenanceTasksSubtabBtn'),
         expenses: document.getElementById('maintenanceExpensesSubtabBtn'),
         suppliers: document.getElementById('maintenanceSuppliersSubtabBtn'),
-        engine: document.getElementById('maintenanceEngineSubtabBtn')
+        engine: document.getElementById('maintenanceEngineSubtabBtn'),
+        signalk: document.getElementById('maintenanceSignalKSubtabBtn')
     };
     const panelMap = {
         tasks: document.getElementById('maintenanceTasksPanel'),
         expenses: document.getElementById('maintenanceExpensesPanel'),
         suppliers: document.getElementById('maintenanceSuppliersPanel'),
-        engine: document.getElementById('engineTab')
+        engine: document.getElementById('engineTab'),
+        signalk: document.getElementById('maintenanceSignalKPanel')
     };
 
     Object.entries(tabBtnMap).forEach(([key, node]) => {
@@ -11521,6 +11553,7 @@ function initializeMaintenanceFeature() {
     const expensesSubtabBtn = document.getElementById('maintenanceExpensesSubtabBtn');
     const suppliersSubtabBtn = document.getElementById('maintenanceSuppliersSubtabBtn');
     const engineSubtabBtn = document.getElementById('maintenanceEngineSubtabBtn');
+    const signalkSubtabBtn = document.getElementById('maintenanceSignalKSubtabBtn');
     const expenseListTabBtn = document.getElementById('maintenanceExpenseListTabBtn');
     const expenseAddTabBtn = document.getElementById('maintenanceExpenseAddTabBtn');
     const schemaNameInput = document.getElementById('maintenanceSchemaNameInput');
@@ -11750,6 +11783,9 @@ function initializeMaintenanceFeature() {
     suppliersSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('suppliers'));
     if (engineSubtabBtn) {
         engineSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('engine'));
+    }
+    if (signalkSubtabBtn) {
+        signalkSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('signalk'));
     }
     if (expenseListTabBtn) {
         expenseListTabBtn.addEventListener('click', () => setActiveMaintenanceExpensesView('list'));
@@ -14261,6 +14297,13 @@ function detectEngineAudioRegimeAuto(snapshot = {}) {
         return 'high';
     }
 
+    const liveRpm = resolveCurrentEngineRpm();
+    if (Number.isFinite(liveRpm) && liveRpm >= 0) {
+        if (liveRpm < 1100) return 'idle';
+        if (liveRpm < 2200) return 'cruise';
+        return 'high';
+    }
+
     const speed = Number.isFinite(snapshot?.speedKn) ? Number(snapshot.speedKn) : navLatestSpeedKn;
     const vibration = Number.isFinite(snapshot?.rms) ? Number(snapshot.rms) : engineSensorSmoothedVibration;
 
@@ -14393,6 +14436,7 @@ function recordEngineSoundSnapshot(snapshot = {}) {
         id: generateClientUuid(),
         capturedAt: new Date().toISOString(),
         engineHours: engineLast?.hours ?? null,
+        rpm: resolveCurrentEngineRpm(),
         speedKn: Number.isFinite(navLatestSpeedKn) ? navLatestSpeedKn : null,
         heelDeg: Number.isFinite(navLatestHeelDeg) ? navLatestHeelDeg : null,
         courseDeg: Number.isFinite(navLatestCourseDeg) ? navLatestCourseDeg : null,
@@ -16434,6 +16478,7 @@ function renderEngineSensorUi() {
     const scoreValue = document.getElementById('engineSensorScoreValue');
     const vibrationValue = document.getElementById('engineSensorVibrationValue');
     const speedValue = document.getElementById('engineSensorSpeedValue');
+    const rpmValue = document.getElementById('engineSensorRpmValue');
     const startBtn = document.getElementById('engineSensorStartBtn');
     const stopBtn = document.getElementById('engineSensorStopBtn');
 
@@ -16447,6 +16492,10 @@ function renderEngineSensorUi() {
         } else {
             speedValue.textContent = '-- kn';
         }
+    }
+    if (rpmValue) {
+        const rpm = resolveCurrentEngineRpm();
+        rpmValue.textContent = Number.isFinite(rpm) ? `${Math.round(rpm)} rpm` : '-- rpm';
     }
 
     if (stateValue) {
@@ -16712,6 +16761,13 @@ function stopEngineSensorDetection() {
     renderEngineSensorUi();
 }
 
+function resolveCurrentEngineRpm() {
+    if (Number.isFinite(signalkLatestEngineRpm)) {
+        return signalkLatestEngineRpm;
+    }
+    return null;
+}
+
 async function startEngineSensorDetectionWithPermission() {
     const ok = await requestEngineMotionPermissionIfNeeded();
     if (!ok) return;
@@ -16885,7 +16941,679 @@ function locatePreciselyOnMap() {
     );
 }
 
+function loadSignalKConfig() {
+    try {
+        const raw = localStorage.getItem(SIGNALK_CONFIG_STORAGE_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                signalkConfig = {
+                    mode: parsed.mode === 'signalk' ? 'signalk' : 'auto',
+                    host: typeof parsed.host === 'string' ? parsed.host : ''
+                };
+            }
+        }
+    } catch (_) { /* ignore */ }
+}
+
+function saveSignalKConfig() {
+    try {
+        localStorage.setItem(SIGNALK_CONFIG_STORAGE_KEY, JSON.stringify(signalkConfig));
+    } catch (_) { /* ignore */ }
+}
+
+function getSignalKStatusLabel(status) {
+    return {
+        disconnected: t('Déconnecté', 'Desconectado', 'Disconnected'),
+        connecting: t('Connexion...', 'Conectando...', 'Connecting...'),
+        connected: t('Connecté', 'Conectado', 'Connected'),
+        error: t('Erreur', 'Error', 'Error')
+    }[status] || String(status || '--');
+}
+
+function formatSignalKDateTime(timestampMs) {
+    if (!Number.isFinite(timestampMs) || timestampMs <= 0) return '--';
+    return new Date(timestampMs).toLocaleString();
+}
+
+function formatSignalKCoordinate(value) {
+    return Number.isFinite(value) ? value.toFixed(5) : '--';
+}
+
+function formatSignalKSpeed(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)} kn` : '--';
+}
+
+function formatSignalKDegrees(value) {
+    return Number.isFinite(value) ? `${Math.round(normalizeCourseDegrees(value))}°` : '--';
+}
+
+function formatSignalKSignedDegrees(value) {
+    return Number.isFinite(value) ? `${Math.round(value)}°` : '--';
+}
+
+function formatSignalKPressure(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)} hPa` : '--';
+}
+
+function formatSignalKDistance(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)} NM` : '--';
+}
+
+function formatSignalKPercent(value) {
+    return Number.isFinite(value) ? `${Math.round(value)}%` : '--';
+}
+
+function formatSignalKAbsoluteHumidity(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)} g/m3` : '--';
+}
+
+function estimateRelativeHumidityPctFromAbsolute(absHumidityGm3, airTempC) {
+    if (!Number.isFinite(absHumidityGm3) || !Number.isFinite(airTempC)) return null;
+
+    // Saturation vapor pressure (hPa), Magnus formula.
+    const saturationVaporPressureHpa = 6.112 * Math.exp((17.67 * airTempC) / (airTempC + 243.5));
+    if (!Number.isFinite(saturationVaporPressureHpa) || saturationVaporPressureHpa <= 0) return null;
+
+    // Convert absolute humidity (g/m3) to relative humidity (%).
+    const rhPct = (absHumidityGm3 * (273.15 + airTempC)) / (2.1674 * saturationVaporPressureHpa);
+    if (!Number.isFinite(rhPct)) return null;
+    return Math.max(0, Math.min(100, rhPct));
+}
+
+function inferRelativeHumidityPct(snapshot = {}) {
+    const absHumidity = Number(snapshot?.absHumidityGm3);
+
+    // Some plugins publish 0..1 here although path says absoluteHumidity.
+    // In that case, treat it as a relative humidity ratio.
+    if (Number.isFinite(absHumidity) && absHumidity >= 0 && absHumidity <= 1.2) {
+        return Math.max(0, Math.min(100, absHumidity * 100));
+    }
+
+    const estimatedRhPct = estimateRelativeHumidityPctFromAbsolute(absHumidity, snapshot?.airTempC);
+    if (Number.isFinite(estimatedRhPct)) {
+        return estimatedRhPct;
+    }
+
+    return null;
+}
+
+function formatSignalKHumidity(snapshot = {}) {
+    if (Number.isFinite(snapshot?.humidityPct)) {
+        return `${Math.round(snapshot.humidityPct)}%`;
+    }
+    const inferredRhPct = inferRelativeHumidityPct(snapshot);
+    if (Number.isFinite(inferredRhPct)) {
+        return `${Math.round(inferredRhPct)}%`;
+    }
+    if (Number.isFinite(snapshot?.absHumidityGm3)) {
+        return `${snapshot.absHumidityGm3.toFixed(1)} g/m3`;
+    }
+    return '--';
+}
+
+function formatSignalKRainRate(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)} mm/h` : '--';
+}
+
+function formatSignalKPathLabel(path) {
+    const raw = String(path || '').trim();
+    if (!raw) return '--';
+    return raw.replace(/^environment\./, '');
+}
+
+function getSignalKWeatherSummary(snapshot = {}) {
+    const parts = [];
+    if (Number.isFinite(snapshot?.airTempC)) {
+        parts.push(`${t('air', 'aire', 'air')}: ${snapshot.airTempC.toFixed(1)}°C`);
+    }
+    if (Number.isFinite(snapshot?.absHumidityGm3)) {
+        parts.push(`${t('humidité abs', 'humedad abs', 'abs humidity')}: ${snapshot.absHumidityGm3.toFixed(1)} g/m3`);
+    }
+    if (Number.isFinite(snapshot?.humidityPct)) {
+        parts.push(`${t('humidité', 'humedad', 'humidity')}: ${Math.round(snapshot.humidityPct)}%`);
+    }
+    if (Number.isFinite(snapshot?.cloudCoverPct)) {
+        parts.push(`${t('nuages', 'nubes', 'clouds')}: ${Math.round(snapshot.cloudCoverPct)}%`);
+    }
+    if (Number.isFinite(snapshot?.rainRateMmH)) {
+        parts.push(`${t('pluie', 'lluvia', 'rain')}: ${snapshot.rainRateMmH.toFixed(1)} mm/h`);
+    }
+    if (Number.isFinite(snapshot?.baroHpa)) {
+        parts.push(`${t('pression', 'presion', 'pressure')}: ${snapshot.baroHpa.toFixed(1)} hPa`);
+    }
+    if (!parts.length) return '';
+    return `${t('Météo SignalK', 'Meteo SignalK', 'SignalK weather')}: ${parts.join(' · ')}`;
+}
+
+function maybeAppendSignalKWeatherEvent(previousSnapshot, currentSnapshot) {
+    const summary = getSignalKWeatherSummary(currentSnapshot);
+    if (!summary) return;
+
+    const now = Date.now();
+    const changed = summary !== signalkLastWeatherSummary;
+    const stale = (now - signalkLastWeatherEventAtMs) > (5 * 60 * 1000);
+    if (!changed && !stale) return;
+
+    const previousSummary = getSignalKWeatherSummary(previousSnapshot);
+    if (!changed && summary === previousSummary) return;
+
+    signalkLastWeatherSummary = summary;
+    signalkLastWeatherEventAtMs = now;
+    appendSignalKMonitorEvent(summary);
+}
+
+function formatSignalKEngineState(value) {
+    if (value === true) return 'ON';
+    if (value === false) return 'OFF';
+    return '--';
+}
+
+function syncSignalKHostInputs(originInput = null) {
+    ['signalkHostInput', 'maintenanceSignalKHostInput'].forEach(id => {
+        const input = document.getElementById(id);
+        if (!input || input === originInput) return;
+        if (document.activeElement === input) return;
+        input.value = signalkConfig.host;
+    });
+}
+
+function appendSignalKMonitorEvent(message, level = 'info') {
+    const text = String(message || '').trim();
+    if (!text) return;
+
+    signalkMonitorEvents.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        timestampMs: Date.now(),
+        message: text,
+        level: String(level || 'info')
+    });
+    if (signalkMonitorEvents.length > 24) {
+        signalkMonitorEvents = signalkMonitorEvents.slice(signalkMonitorEvents.length - 24);
+    }
+    renderSignalKMonitorPanel();
+}
+
+function updateSignalKStatusBadge(status, options = {}) {
+    const { logEvent = false } = options;
+    const safeStatus = ['disconnected', 'connecting', 'connected', 'error'].includes(status) ? status : 'disconnected';
+    const previousStatus = signalkLatestStatus;
+    signalkLatestStatus = safeStatus;
+    if (previousStatus !== safeStatus) {
+        signalkLastStatusAtMs = Date.now();
+    }
+
+    const pairs = [
+        {
+            badge: document.getElementById('signalkStatusBadge'),
+            text: document.getElementById('signalkStatusText')
+        },
+        {
+            badge: document.getElementById('maintenanceSignalKStatusBadge'),
+            text: document.getElementById('maintenanceSignalKStatusText')
+        }
+    ];
+    const label = getSignalKStatusLabel(safeStatus);
+
+    pairs.forEach(({ badge, text }) => {
+        if (badge) {
+            badge.className = `signalk-badge signalk-badge--${safeStatus}`;
+        }
+        if (text) {
+            text.textContent = label;
+        }
+    });
+
+    if (logEvent && previousStatus !== safeStatus) {
+        appendSignalKMonitorEvent(`SignalK · ${label}`, safeStatus === 'error' ? 'error' : safeStatus);
+    }
+
+    renderSignalKMonitorPanel();
+}
+
+function renderSignalKMonitorPanel() {
+    syncSignalKHostInputs();
+
+    const modeValue = document.getElementById('maintenanceSignalKModeValue');
+    if (modeValue) {
+        modeValue.textContent = signalkConfig.mode === 'signalk'
+            ? t('SignalK', 'SignalK', 'SignalK')
+            : t('Auto iPad', 'Auto iPad', 'Auto iPad');
+    }
+
+    const lastUpdateValue = document.getElementById('maintenanceSignalKLastUpdateValue');
+    if (lastUpdateValue) {
+        lastUpdateValue.textContent = formatSignalKDateTime(signalkLastUpdateAtMs);
+    }
+
+    const lastStatusValue = document.getElementById('maintenanceSignalKLastStatusValue');
+    if (lastStatusValue) {
+        lastStatusValue.textContent = formatSignalKDateTime(signalkLastStatusAtMs);
+    }
+
+    const statusDetailValue = document.getElementById('maintenanceSignalKStatusDetailValue');
+    if (statusDetailValue) {
+        const parts = [getSignalKStatusLabel(signalkLatestStatus)];
+        if (signalkConfig.host) parts.push(signalkConfig.host);
+        statusDetailValue.textContent = parts.join(' · ');
+    }
+
+    const updateCountValue = document.getElementById('maintenanceSignalKUpdateCountValue');
+    if (updateCountValue) updateCountValue.textContent = String(signalkUpdateCount);
+
+    const positionCountValue = document.getElementById('maintenanceSignalKPositionCountValue');
+    if (positionCountValue) positionCountValue.textContent = String(signalkPositionUpdateCount);
+
+    const windCountValue = document.getElementById('maintenanceSignalKWindCountValue');
+    if (windCountValue) windCountValue.textContent = String(signalkWindUpdateCount);
+
+    const engineCountValue = document.getElementById('maintenanceSignalKEngineCountValue');
+    if (engineCountValue) engineCountValue.textContent = String(signalkEngineUpdateCount);
+
+    const snapshot = signalkLatestSnapshot || {};
+
+    const weatherCountValue = document.getElementById('maintenanceSignalKWeatherCountValue');
+    if (weatherCountValue) weatherCountValue.textContent = String(signalkWeatherUpdateCount);
+
+    const fieldMap = {
+        maintenanceSignalKLatValue: formatSignalKCoordinate(snapshot.lat),
+        maintenanceSignalKLngValue: formatSignalKCoordinate(snapshot.lng),
+        maintenanceSignalKSpeedValue: formatSignalKSpeed(snapshot.speedKn),
+        maintenanceSignalKCourseValue: formatSignalKDegrees(snapshot.courseDeg),
+        maintenanceSignalKHeadingValue: formatSignalKDegrees(snapshot.headingDeg),
+        maintenanceSignalKHeelValue: formatSignalKSignedDegrees(snapshot.heelDeg),
+        maintenanceSignalKTwsValue: formatSignalKSpeed(snapshot.twsKn),
+        maintenanceSignalKTwaValue: formatSignalKSignedDegrees(snapshot.twaDeg),
+        maintenanceSignalKTwdValue: formatSignalKDegrees(snapshot.twdDeg),
+        maintenanceSignalKBaroValue: formatSignalKPressure(snapshot.baroHpa),
+        maintenanceSignalKAirTempValue: Number.isFinite(snapshot.airTempC) ? `${snapshot.airTempC.toFixed(1)}°C` : '--',
+        maintenanceSignalKHumidityValue: formatSignalKHumidity(snapshot),
+        maintenanceSignalKAbsHumidityValue: formatSignalKAbsoluteHumidity(snapshot.absHumidityGm3),
+        maintenanceSignalKCloudCoverValue: formatSignalKPercent(snapshot.cloudCoverPct),
+        maintenanceSignalKRainRateValue: formatSignalKRainRate(snapshot.rainRateMmH),
+        maintenanceSignalKLogValue: formatSignalKDistance(snapshot.logNm),
+        maintenanceSignalKEngineValue: formatSignalKEngineState(snapshot.engineRunning),
+        maintenanceSignalKRpmValue: Number.isFinite(snapshot.engineRpm) ? `${Math.round(snapshot.engineRpm)} rpm` : '--'
+    };
+
+    Object.entries(fieldMap).forEach(([id, value]) => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = value;
+    });
+
+    const eventsNode = document.getElementById('maintenanceSignalKEvents');
+    if (eventsNode) {
+        if (!signalkMonitorEvents.length) {
+            eventsNode.innerHTML = `<div class="signalk-monitor-event signalk-monitor-event--muted">${t('Aucun événement SignalK pour le moment.', 'Aún no hay eventos SignalK.', 'No SignalK events yet.')}</div>`;
+        } else {
+            eventsNode.innerHTML = signalkMonitorEvents
+                .slice()
+                .reverse()
+                .map(entry => {
+                    const level = String(entry.level || 'info');
+                    const time = formatSignalKDateTime(entry.timestampMs);
+                    const safeMessage = escapeHtml(entry.message || '');
+                    return `<div class="signalk-monitor-event signalk-monitor-event--${level}"><span class="signalk-monitor-event__time">${escapeHtml(time)}</span><span>${safeMessage}</span></div>`;
+                })
+                .join('');
+        }
+    }
+}
+
+function setSignalKManagedInputValue(inputId, value, formatter = null) {
+    const input = document.getElementById(inputId);
+    if (!input || input.dataset.userEdited) return;
+    if (!Number.isFinite(value)) return;
+
+    const nextValue = typeof formatter === 'function'
+        ? formatter(value)
+        : String(value);
+
+    input.value = String(nextValue);
+}
+
+function resetSignalKManagedInputUserEdits() {
+    ['watchHeadingInput', 'watchWindDirInput', 'watchWindSpeedInput', 'watchBarometerInput', 'watchLogNmInput'].forEach(id => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        delete input.dataset.userEdited;
+    });
+}
+
+function applySignalKUpdate(data) {
+    const previousSnapshot = signalkLatestSnapshot || {};
+    const fix = navGpsLatestFix;
+    const now = Date.now();
+    const headingValue = Number.isFinite(data.headingDeg)
+        ? data.headingDeg
+        : (Number.isFinite(data.courseDeg) ? data.courseDeg : null);
+    const windDirectionValue = Number.isFinite(data.twdDeg)
+        ? data.twdDeg
+        : (Number.isFinite(data.twaDeg) && Number.isFinite(headingValue)
+            ? normalizeCourseDegrees(headingValue + data.twaDeg)
+            : null);
+
+    signalkLatestSnapshot = {
+        ...signalkLatestSnapshot,
+        ...data,
+        headingDeg: Number.isFinite(headingValue) ? headingValue : signalkLatestSnapshot.headingDeg,
+        twdDeg: Number.isFinite(windDirectionValue) ? windDirectionValue : signalkLatestSnapshot.twdDeg
+    };
+    signalkLastUpdateAtMs = now;
+    signalkUpdateCount += 1;
+
+    const weatherPathRaw = String(data.weatherPathLast || '').trim();
+    const weatherPathClean = weatherPathRaw && weatherPathRaw.toLowerCase() !== 'null'
+        ? weatherPathRaw
+        : '';
+    if (weatherPathClean) {
+        signalkLastWeatherPath = weatherPathClean;
+    }
+
+    if (Number.isFinite(data.lat) && Number.isFinite(data.lng)) signalkPositionUpdateCount += 1;
+    if (Number.isFinite(data.twsKn) || Number.isFinite(data.twaDeg) || Number.isFinite(data.twdDeg)) signalkWindUpdateCount += 1;
+    if (typeof data.engineRunning === 'boolean' || Number.isFinite(data.engineRpm)) signalkEngineUpdateCount += 1;
+    const nextWeatherTick = Number(data.weatherFrameTick);
+    const prevWeatherTick = Number(previousSnapshot.weatherFrameTick);
+    if (
+        (Number.isFinite(nextWeatherTick) && (!Number.isFinite(prevWeatherTick) || nextWeatherTick > prevWeatherTick))
+        || Boolean(weatherPathClean)
+    ) {
+        signalkWeatherUpdateCount += 1;
+    }
+
+    if (!Number.isFinite(previousSnapshot.lat) && Number.isFinite(data.lat) && Number.isFinite(data.lng)) {
+        appendSignalKMonitorEvent(t('SignalK · première position reçue', 'SignalK · primera posición recibida', 'SignalK · first position received'));
+    }
+    if (typeof data.engineRunning === 'boolean' && data.engineRunning !== previousSnapshot.engineRunning) {
+        appendSignalKMonitorEvent(
+            data.engineRunning
+                ? t('SignalK · moteur détecté ON', 'SignalK · motor detectado ON', 'SignalK · engine detected ON')
+                : t('SignalK · moteur détecté OFF', 'SignalK · motor detectado OFF', 'SignalK · engine detected OFF')
+        );
+    }
+
+    if (
+        Number.isFinite(data.airTempC)
+        || Number.isFinite(data.humidityPct)
+        || Number.isFinite(data.cloudCoverPct)
+        || Number.isFinite(data.rainRateMmH)
+        || Number.isFinite(data.baroHpa)
+    ) {
+        maybeAppendSignalKWeatherEvent(previousSnapshot, signalkLatestSnapshot);
+    }
+
+    if (Number.isFinite(data.lat) && Number.isFinite(data.lng)) {
+        const speedKn = Number.isFinite(data.speedKn) ? data.speedKn : null;
+        const nextFix = { lat: data.lat, lng: data.lng, speedKn, fixTimeMs: now };
+        const derived = computeDerivedNavMetricsFromPoints(fix, nextFix);
+        navLatestSpeedKn = Number.isFinite(speedKn) ? speedKn
+            : (Number.isFinite(derived.speedKn) ? derived.speedKn : navLatestSpeedKn);
+        navLatestCourseDeg = Number.isFinite(data.courseDeg) ? data.courseDeg
+            : (Number.isFinite(derived.courseDeg) ? derived.courseDeg : navLatestCourseDeg);
+        navGpsLatestFix = nextFix;
+        updateNavCurrentPositionMarker(navGpsLatestFix);
+        evaluateAnchorDragAlarmWithFix(navGpsLatestFix);
+        if (!navHasCenteredOnFirstFix && map) {
+            map.setView([data.lat, data.lng], Math.max(map.getZoom(), 13));
+            navHasCenteredOnFirstFix = true;
+        }
+        if (signalkLoggingActive) {
+            if (!navGpsSessionHasSample) captureNavGpsSample('signalk');
+            const pts = getCurrentNavGpsSessionSamples().length;
+            setNavLogStatus(t(
+                `SignalK · fix reçu · ${pts} point(s)`,
+                `SignalK · fix recibido · ${pts} punto(s)`
+            ));
+        }
+    }
+
+    if (Number.isFinite(headingValue)) {
+        setSignalKManagedInputValue('watchHeadingInput', normalizeCourseDegrees(headingValue), value => Math.round(value));
+    }
+
+    if (Number.isFinite(data.heelDeg)) {
+        navLatestHeelDeg = data.heelDeg;
+    }
+
+    if (Number.isFinite(data.twsKn)) {
+        signalkLatestWindSpeedKn = data.twsKn;
+        setSignalKManagedInputValue('watchWindSpeedInput', data.twsKn, value => value.toFixed(1));
+    }
+    if (Number.isFinite(windDirectionValue)) {
+        signalkLatestWindDir = windDirectionValue;
+        setSignalKManagedInputValue('watchWindDirInput', windDirectionValue, value => Math.round(normalizeCourseDegrees(value)));
+    }
+
+    if (Number.isFinite(data.baroHpa)) {
+        setSignalKManagedInputValue('watchBarometerInput', data.baroHpa, value => value.toFixed(1));
+    }
+    if (Number.isFinite(data.logNm)) {
+        setSignalKManagedInputValue('watchLogNmInput', data.logNm, value => value.toFixed(1));
+    }
+
+    if (typeof data.engineRunning === 'boolean') {
+        engineSensorDetectedRunning = data.engineRunning;
+        if (!data.engineRunning && !Number.isFinite(data.engineRpm)) {
+            signalkLatestEngineRpm = null;
+            updateEngineAudioRegimeUi();
+        }
+        renderEngineSensorUi();
+    }
+    if (Number.isFinite(data.engineRpm)) {
+        signalkLatestEngineRpm = data.engineRpm;
+        renderEngineSensorUi();
+        updateEngineAudioRegimeUi();
+    }
+
+    renderSignalKMonitorPanel();
+    updateNavLiveDashboard();
+}
+
+function connectSignalKClient(host) {
+    if (!host) return;
+    if (!signalkClient) {
+        signalkClient = new SignalKClient();
+    }
+    signalkClient.onStatusChange = status => {
+        updateSignalKStatusBadge(status, { logEvent: true });
+        if (status === 'error') {
+            setNavLogStatus(t(
+                'SignalK: connexion perdue — vérifiez le serveur RPi.',
+                'SignalK: conexión perdida — verifique el servidor RPi.'
+            ), true);
+        }
+    };
+    signalkClient.onUpdate = applySignalKUpdate;
+    updateSignalKStatusBadge('connecting');
+    signalkClient.connect(host);
+}
+
+function startSignalKNavigationLogging() {
+    const host = signalkConfig.host.trim();
+    if (!host) {
+        setNavLogStatus(t(
+            'SignalK: adresse du serveur manquante (paramètre SignalK).',
+            'SignalK: dirección de servidor faltante (parámetro SignalK).'
+        ), true);
+        return;
+    }
+
+    navGpsLatestFix = null;
+    navHasCenteredOnFirstFix = false;
+    navGpsSessionStartMs = Date.now();
+    navGpsSessionStartEntryIndex = navLogEntries.length;
+    navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
+    navGpsSessionHasSample = false;
+    signalkLoggingActive = true;
+    resetSignalKManagedInputUserEdits();
+
+    if (navGpsSampleTimerId !== null) {
+        window.clearInterval(navGpsSampleTimerId);
+        navGpsSampleTimerId = null;
+    }
+    navGpsSampleTimerId = window.setInterval(() => {
+        const captured = captureNavGpsSample('signalk');
+        if (captured) {
+            const pts = getCurrentNavGpsSessionSamples().length;
+            setNavLogStatus(t(
+                `SignalK · point capturé · ${pts} point(s)`,
+                `SignalK · punto capturado · ${pts} punto(s)`
+            ));
+        }
+    }, NAV_GPS_SAMPLE_INTERVAL_MS);
+
+    appendSignalKMonitorEvent(t(`SignalK · démarrage session ${host}`, `SignalK · inicio sesión ${host}`, `SignalK · start session ${host}`));
+    connectSignalKClient(host);
+    syncNavLogGpsCompactUi();
+    renderSignalKMonitorPanel();
+    setNavLogStatus(t(`SignalK · connexion vers ${host}...`, `SignalK · conectando a ${host}...`));
+}
+
+function stopSignalKNavigationLogging() {
+    signalkLoggingActive = false;
+    signalkLatestEngineRpm = null;
+    signalkWeatherUpdateCount = 0;
+    signalkLastWeatherSummary = '';
+    signalkLastWeatherEventAtMs = 0;
+    signalkLastWeatherPath = '';
+    if (signalkClient) {
+        signalkClient.disconnect();
+    }
+    updateSignalKStatusBadge('disconnected');
+    if (navGpsSampleTimerId !== null) {
+        window.clearInterval(navGpsSampleTimerId);
+        navGpsSampleTimerId = null;
+    }
+    renderEngineSensorUi();
+    updateEngineAudioRegimeUi();
+    renderSignalKMonitorPanel();
+}
+
+function bindSignalKPanelControls({ modeAutoBtn, modeSkBtn, hostInput, connectBtn, disconnectBtn }) {
+    if (modeAutoBtn) {
+        modeAutoBtn.addEventListener('click', () => {
+            signalkConfig.mode = 'auto';
+            saveSignalKConfig();
+            _applySignalKModeButtons();
+            stopSignalKNavigationLogging();
+            updateSignalKStatusBadge('disconnected');
+            setNavLogStatus(t('Mode autonome activé (GPS + capteurs iPad).', 'Modo autónomo activado (GPS + sensores iPad).'));
+        });
+    }
+
+    if (modeSkBtn) {
+        modeSkBtn.addEventListener('click', () => {
+            signalkConfig.mode = 'signalk';
+            saveSignalKConfig();
+            _applySignalKModeButtons();
+            resetSignalKManagedInputUserEdits();
+            setNavLogStatus(t('Mode SignalK activé. Clique "Démarrer log GPS" pour connecter.', 'Modo SignalK activado. Toca "Iniciar log GPS" para conectar.'));
+        });
+    }
+
+    if (hostInput) {
+        hostInput.addEventListener('input', () => {
+            signalkConfig.host = hostInput.value.trim();
+            saveSignalKConfig();
+            syncSignalKHostInputs(hostInput);
+            renderSignalKMonitorPanel();
+        });
+    }
+
+    if (connectBtn) {
+        connectBtn.addEventListener('click', () => {
+            signalkConfig.host = String(hostInput?.value || '').trim();
+            saveSignalKConfig();
+            syncSignalKHostInputs(hostInput);
+            if (!signalkConfig.host) {
+                setNavLogStatus(t('SignalK: entrez l\'adresse du serveur.', 'SignalK: ingrese la dirección del servidor.'), true);
+                return;
+            }
+            resetSignalKManagedInputUserEdits();
+            appendSignalKMonitorEvent(t(`SignalK · test connexion ${signalkConfig.host}`, `SignalK · prueba conexión ${signalkConfig.host}`, `SignalK · connection test ${signalkConfig.host}`));
+            connectSignalKClient(signalkConfig.host);
+        });
+    }
+
+    if (disconnectBtn) {
+        disconnectBtn.addEventListener('click', () => {
+            appendSignalKMonitorEvent(t('SignalK · déconnexion manuelle', 'SignalK · desconexión manual', 'SignalK · manual disconnect'));
+            stopSignalKNavigationLogging();
+        });
+    }
+}
+
+function initSignalKUi() {
+    loadSignalKConfig();
+
+    const panels = [
+        {
+            modeAutoBtn: document.getElementById('signalkModeAutoBtn'),
+            modeSkBtn: document.getElementById('signalkModeSkBtn'),
+            hostInput: document.getElementById('signalkHostInput'),
+            connectBtn: document.getElementById('signalkConnectBtn'),
+            disconnectBtn: null
+        },
+        {
+            modeAutoBtn: document.getElementById('maintenanceSignalKModeAutoBtn'),
+            modeSkBtn: document.getElementById('maintenanceSignalKModeSkBtn'),
+            hostInput: document.getElementById('maintenanceSignalKHostInput'),
+            connectBtn: document.getElementById('maintenanceSignalKConnectBtn'),
+            disconnectBtn: document.getElementById('maintenanceSignalKDisconnectBtn')
+        }
+    ];
+
+    panels.forEach(({ hostInput }) => {
+        if (hostInput) hostInput.value = signalkConfig.host;
+    });
+
+    panels.forEach(bindSignalKPanelControls);
+
+    ['watchHeadingInput', 'watchWindSpeedInput', 'watchWindDirInput', 'watchBarometerInput', 'watchLogNmInput'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', () => { el.dataset.userEdited = '1'; });
+    });
+
+    _applySignalKModeButtons();
+    updateSignalKStatusBadge('disconnected');
+    renderSignalKMonitorPanel();
+}
+
+function _applySignalKModeButtons() {
+    const isAuto = signalkConfig.mode === 'auto';
+    const buttonPairs = [
+        {
+            autoBtn: document.getElementById('signalkModeAutoBtn'),
+            skBtn: document.getElementById('signalkModeSkBtn')
+        },
+        {
+            autoBtn: document.getElementById('maintenanceSignalKModeAutoBtn'),
+            skBtn: document.getElementById('maintenanceSignalKModeSkBtn')
+        }
+    ];
+
+    buttonPairs.forEach(({ autoBtn, skBtn }) => {
+        if (autoBtn) autoBtn.classList.toggle('signalk-mode-btn--active', isAuto);
+        if (skBtn) skBtn.classList.toggle('signalk-mode-btn--active', !isAuto);
+    });
+
+    const skPanel = document.getElementById('signalkSkPanel');
+    if (skPanel) skPanel.style.display = isAuto ? 'none' : '';
+
+    const motionBtn = document.getElementById('requestMotionPermissionBtn');
+    if (motionBtn) motionBtn.style.display = isAuto ? '' : 'none';
+
+    renderSignalKMonitorPanel();
+}
+
 function startNavigationLogging() {
+    if (signalkConfig.mode === 'signalk') {
+        startSignalKNavigationLogging();
+        return;
+    }
+
     if (!navigator.geolocation) {
         setNavLogStatus(t('GPS non disponible sur cet appareil.', 'GPS no disponible en este dispositivo.'), true);
         return;
@@ -16999,6 +17727,10 @@ function startNavigationLogging() {
 
 function stopNavigationLogging(options = {}) {
     const { createAutoSessionSummary = true } = options;
+
+    if (signalkConfig.mode === 'signalk') {
+        stopSignalKNavigationLogging();
+    }
 
     if (navWatchId !== null && navigator.geolocation) {
         navigator.geolocation.clearWatch(navWatchId);
@@ -18193,6 +18925,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (requestMotionPermissionBtn) {
         requestMotionPermissionBtn.addEventListener('click', requestMotionPermissionIfNeeded);
     }
+
+    initSignalKUi();
 
     const anchorDragSetBtn = document.getElementById('anchorDragSetBtn');
     if (anchorDragSetBtn) {

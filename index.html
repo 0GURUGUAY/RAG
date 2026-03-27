@@ -274,6 +274,40 @@
         </div>
         <div id="navLogStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Journal navigation: en attente</div>
 
+        <!-- ======= SIGNALK CONFIG CARD ======= -->
+        <div class="cloud-config-card" style="margin-top:10px;">
+            <div class="cloud-config-title">Source de données navigation</div>
+            <div class="button-row" style="margin-top:8px; gap:6px;">
+                <button id="signalkModeAutoBtn" type="button" class="signalk-mode-btn signalk-mode-btn--active" style="flex:1;">
+                    📱 Autonome (iPad)
+                </button>
+                <button id="signalkModeSkBtn" type="button" class="signalk-mode-btn" style="flex:1;">
+                    ⚓ SignalK (RPi)
+                </button>
+            </div>
+            <div id="signalkSkPanel" style="display:none; margin-top:10px;">
+                <div class="routing-control-grid">
+                    <div class="routing-control-item">
+                        <label for="signalkHostInput" style="font-size:12px;">Serveur SignalK (IP ou hostname) :</label>
+                        <input type="text" id="signalkHostInput" placeholder="ex: 192.168.1.50 ou ceibo-pi.local"
+                               style="width:100%; padding:8px; margin-top:5px; box-sizing:border-box; font-size:13px;">
+                    </div>
+                </div>
+                <div class="button-row" style="margin-top:8px;">
+                    <button id="signalkConnectBtn" type="button" style="flex:1;">🔌 Tester la connexion</button>
+                </div>
+                <div style="margin-top:8px; display:flex; align-items:center; gap:8px; font-size:12px;">
+                    <span id="signalkStatusBadge" class="signalk-badge signalk-badge--disconnected"></span>
+                    <span id="signalkStatusText">⚫ Déconnecté</span>
+                </div>
+                <div style="margin-top:8px; font-size:11px; opacity:0.75; line-height:1.5;">
+                    En mode SignalK, le log GPS est alimenté par le flux Raymarine via le RPi3.<br>
+                    Si le RPi n'est pas disponible, repasse en mode <strong>Autonome</strong>.
+                </div>
+            </div>
+        </div>
+        <!-- ======= END SIGNALK CONFIG CARD ======= -->
+
         <div class="cloud-config-card" style="margin-top:10px;">
             <div class="cloud-config-title" id="anchorDragTitle">Alarme mouillage (rippage ancre)</div>
             <div class="routing-control-grid" style="margin-top:8px;">
@@ -552,6 +586,7 @@
             <button id="maintenanceExpensesSubtabBtn" type="button" class="maintenance-subtab-btn">Dépenses & factures</button>
             <button id="maintenanceSuppliersSubtabBtn" type="button" class="maintenance-subtab-btn">Fournisseurs</button>
             <button id="maintenanceEngineSubtabBtn" type="button" class="maintenance-subtab-btn">Moteur</button>
+            <button id="maintenanceSignalKSubtabBtn" type="button" class="maintenance-subtab-btn">SIGNALK</button>
         </div>
 
         <div id="maintenanceTasksPanel" class="maintenance-subpanel active">
@@ -711,6 +746,7 @@
                     <div><strong id="engineSensorScoreLabel">Score:</strong> <span id="engineSensorScoreValue">0</span></div>
                     <div><strong id="engineSensorVibrationLabel">Vibration:</strong> <span id="engineSensorVibrationValue">0.000</span></div>
                     <div><strong id="engineSensorSpeedLabel">Vitesse:</strong> <span id="engineSensorSpeedValue">-- kn</span></div>
+                    <div><strong id="engineSensorRpmLabel">RPM:</strong> <span id="engineSensorRpmValue">-- rpm</span></div>
                 </div>
                 <div class="button-row" style="margin-top:8px;">
                     <button id="engineSensorStartBtn" type="button" style="flex:1;">Activer détection</button>
@@ -748,6 +784,73 @@
 
             <label id="engineLogListLabel" style="display:block; margin-top:12px; font-size:12px;">Historique moteur:</label>
             <div id="engineLogList"></div>
+        </div>
+
+        <div id="maintenanceSignalKPanel" class="maintenance-subpanel">
+            <div class="engine-sensor-card signalk-monitor-card">
+                <div id="maintenanceSignalKTitle" class="engine-sensor-card__title">SignalK · configuration et monitoring</div>
+                <div id="maintenanceSignalKHint" class="cloud-status">Flux live Raymarine/SignalK. Utilise cette page pour tester la connexion, voir les dernières données reçues et diagnostiquer le stream.</div>
+
+                <div class="signalk-monitor-toolbar">
+                    <button id="maintenanceSignalKModeAutoBtn" type="button" class="signalk-mode-btn signalk-mode-btn--active">Auto iPad</button>
+                    <button id="maintenanceSignalKModeSkBtn" type="button" class="signalk-mode-btn">SignalK</button>
+                </div>
+
+                <div class="signalk-monitor-config">
+                    <div class="maintenance-control-item signalk-monitor-config__host">
+                        <label id="maintenanceSignalKHostLabel" for="maintenanceSignalKHostInput">Serveur SignalK (IP ou hostname):</label>
+                        <input type="text" id="maintenanceSignalKHostInput" placeholder="ex: 192.168.1.50 ou ceibo-pi.local" style="width:100%; padding:8px; box-sizing:border-box;">
+                    </div>
+                    <div class="button-row signalk-monitor-config__actions">
+                        <button id="maintenanceSignalKConnectBtn" type="button" style="flex:1;">Tester / reconnecter</button>
+                        <button id="maintenanceSignalKDisconnectBtn" type="button" style="flex:1;">Déconnecter</button>
+                    </div>
+                </div>
+
+                <div class="signalk-monitor-status">
+                    <div class="signalk-monitor-status__main">
+                        <span id="maintenanceSignalKStatusBadge" class="signalk-badge signalk-badge--disconnected"></span>
+                        <span id="maintenanceSignalKStatusText">Déconnecté</span>
+                    </div>
+                    <div class="signalk-monitor-status__meta">
+                        <div><strong>Mode:</strong> <span id="maintenanceSignalKModeValue">Auto iPad</span></div>
+                        <div><strong>Dernière donnée:</strong> <span id="maintenanceSignalKLastUpdateValue">--</span></div>
+                        <div><strong>Dernier changement état:</strong> <span id="maintenanceSignalKLastStatusValue">--</span></div>
+                        <div><strong>Détail:</strong> <span id="maintenanceSignalKStatusDetailValue">Déconnecté</span></div>
+                    </div>
+                </div>
+
+                <div class="signalk-monitor-grid">
+                    <div><strong>Trames utiles:</strong> <span id="maintenanceSignalKUpdateCountValue">0</span></div>
+                    <div><strong>Météo:</strong> <span id="maintenanceSignalKWeatherCountValue">0</span></div>
+                    <div><strong>Temp air:</strong> <span id="maintenanceSignalKAirTempValue">--</span></div>
+                    <div><strong>Humidité:</strong> <span id="maintenanceSignalKHumidityValue">--</span></div>
+                    <div><strong>Humidité abs:</strong> <span id="maintenanceSignalKAbsHumidityValue">--</span></div>
+                    <div><strong>Nuages:</strong> <span id="maintenanceSignalKCloudCoverValue">--</span></div>
+                    <div><strong>Pluie:</strong> <span id="maintenanceSignalKRainRateValue">--</span></div>
+                    <div><strong>Positions:</strong> <span id="maintenanceSignalKPositionCountValue">0</span></div>
+                    <div><strong>Vent:</strong> <span id="maintenanceSignalKWindCountValue">0</span></div>
+                    <div><strong>Moteur:</strong> <span id="maintenanceSignalKEngineCountValue">0</span></div>
+                    <div><strong>Latitude:</strong> <span id="maintenanceSignalKLatValue">--</span></div>
+                    <div><strong>Longitude:</strong> <span id="maintenanceSignalKLngValue">--</span></div>
+                    <div><strong>Vitesse:</strong> <span id="maintenanceSignalKSpeedValue">--</span></div>
+                    <div><strong>COG:</strong> <span id="maintenanceSignalKCourseValue">--</span></div>
+                    <div><strong>Heading:</strong> <span id="maintenanceSignalKHeadingValue">--</span></div>
+                    <div><strong>Gîte:</strong> <span id="maintenanceSignalKHeelValue">--</span></div>
+                    <div><strong>TWS:</strong> <span id="maintenanceSignalKTwsValue">--</span></div>
+                    <div><strong>TWA:</strong> <span id="maintenanceSignalKTwaValue">--</span></div>
+                    <div><strong>TWD:</strong> <span id="maintenanceSignalKTwdValue">--</span></div>
+                    <div><strong>Baro:</strong> <span id="maintenanceSignalKBaroValue">--</span></div>
+                    <div><strong>Loch:</strong> <span id="maintenanceSignalKLogValue">--</span></div>
+                    <div><strong>Moteur:</strong> <span id="maintenanceSignalKEngineValue">--</span></div>
+                    <div><strong>RPM:</strong> <span id="maintenanceSignalKRpmValue">--</span></div>
+                </div>
+
+                <label id="maintenanceSignalKEventsLabel" style="display:block; margin-top:12px; font-size:12px;">Événements récents:</label>
+                <div id="maintenanceSignalKEvents" class="signalk-monitor-events">
+                    <div class="signalk-monitor-event signalk-monitor-event--muted">Aucun événement SignalK pour le moment.</div>
+                </div>
+            </div>
         </div>
     </div>
 
