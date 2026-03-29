@@ -27,6 +27,8 @@ const SK_PATHS = [
     'navigation.position',
     'navigation.speedOverGround',
     'navigation.courseOverGroundTrue',
+    'navigation.headingTrue',
+    'navigation.headingMagnetic',
     'navigation.attitude',
     'navigation.log',
     'environment.wind.speedTrue',
@@ -44,6 +46,9 @@ const SK_PATHS = [
     'environment.outside.absoluteHumidity',
     'environment.outside.cloudCover',
     'environment.outside.precipitation',
+    'inside.engineroom.temperature',
+    'environment.inside.28-011457a5a0aa.temperature',
+    'inside.baterie.temperature',
     'propulsion.main.state',
     'propulsion.main.revolutions',
     // common plugin variants (including openweather)
@@ -75,6 +80,8 @@ function buildSubscribeMessages() {
     const baseSubscribe = SK_PATHS.map(path => ({ path, period: 1000, policy: 'ideal' }));
     const weatherWildcardSubscribe = [
         { path: 'environment.*', period: 2000, policy: 'instant' },
+        { path: 'environment.inside.*', period: 2000, policy: 'instant' },
+        { path: 'inside.*', period: 2000, policy: 'instant' },
         { path: 'environment.outside.*', period: 2000, policy: 'instant' },
         { path: 'environment.weather.*', period: 2000, policy: 'instant' },
         { path: 'environment.openweather.*', period: 2000, policy: 'instant' },
@@ -137,6 +144,29 @@ function extractNumericValue(value) {
 function isWeatherLikePath(path) {
     const p = String(path || '').toLowerCase();
     return /(weather|meteo|temp|humid|cloud|rain|precip|pressure|openweather)/.test(p);
+}
+
+function isInsideProbeTemperaturePath(path) {
+    const p = String(path || '').toLowerCase();
+    return (p.startsWith('environment.inside.') || p.startsWith('inside.'))
+        && p.endsWith('.temperature');
+}
+
+function isBatteryTemperaturePath(path) {
+    const p = String(path || '').toLowerCase();
+    return p === 'inside.baterie.temperature' || p === 'environment.inside.baterie.temperature';
+}
+
+function isEngineProbeTemperaturePath(path) {
+    const p = String(path || '').toLowerCase();
+    return [
+        'inside.engineroom.temperature',
+        'environment.inside.temperature',
+        'environment.inside.engineroom.temperature',
+        'environment.inside.engineRoom.temperature',
+        'environment.inside.cabin.temperature',
+        'environment.inside.28-011457a5a0aa.temperature'
+    ].includes(p);
 }
 
 // ---- CLASS ----
@@ -322,6 +352,16 @@ export class SignalKClient {
                 if (Number.isFinite(value)) v.courseDeg = (value * 180 / Math.PI + 360) % 360;
                 break;
 
+            case 'navigation.headingTrue':
+            case 'navigation.headingMagnetic':
+                // SignalK heading is usually radians, but some plugins emit degrees.
+                if (Number.isFinite(value)) {
+                    v.headingDeg = value <= (2 * Math.PI + 0.01)
+                        ? ((value * 180 / Math.PI + 360) % 360)
+                        : ((value % 360) + 360) % 360;
+                }
+                break;
+
             case 'navigation.attitude':
                 // roll = heel in radians (positive = starboard heel = negative gamma on iPad convention)
                 if (value && Number.isFinite(value.roll)) {
@@ -387,6 +427,31 @@ export class SignalKClient {
                 }
                 break;
 
+            case 'environment.inside.temperature':
+            case 'environment.inside.engineroom.temperature':
+            case 'environment.inside.engineRoom.temperature':
+            case 'environment.inside.cabin.temperature':
+            case 'environment.inside.28-011457a5a0aa.temperature':
+            case 'inside.engineroom.temperature':
+                {
+                    const n = extractNumericValue(value);
+                    if (Number.isFinite(n)) {
+                        v.probeTempC = n > 150 ? (n - 273.15) : n;
+                        v.probeTempPath = path;
+                    }
+                }
+                break;
+
+            case 'inside.baterie.temperature':
+                {
+                    const n = extractNumericValue(value);
+                    if (Number.isFinite(n)) {
+                        v.batteryTempC = n > 150 ? (n - 273.15) : n;
+                        v.batteryTempPath = path;
+                    }
+                }
+                break;
+
             case 'environment.outside.humidity':
             case 'environment.weather.humidity':
             case 'environment.outside.relativeHumidity':
@@ -396,6 +461,7 @@ export class SignalKClient {
                     const n = extractNumericValue(value);
                     if (Number.isFinite(n)) {
                         v.humidityPct = n <= 1 ? (n * 100) : n;
+                        v.humidityPath = path;
                         v.weatherFrameTick = Date.now();
                     }
                 }
@@ -407,7 +473,15 @@ export class SignalKClient {
                 {
                     const n = extractNumericValue(value);
                     if (Number.isFinite(n)) {
-                        v.absHumidityGm3 = n;
+                        // Some plugins mispublish relative humidity on the absoluteHumidity path.
+                        // Values above ~40 g/m3 are physically implausible aboard and are treated as %RH.
+                        if (n <= 1 || n > 40) {
+                            v.humidityPct = n <= 1 ? (n * 100) : Math.max(0, Math.min(100, n));
+                            v.humidityPath = path;
+                            v.absHumidityGm3 = null;
+                        } else {
+                            v.absHumidityGm3 = n;
+                        }
                         v.weatherFrameTick = Date.now();
                     }
                 }
@@ -419,6 +493,7 @@ export class SignalKClient {
                     const n = extractNumericValue(value);
                     if (Number.isFinite(n)) {
                         v.cloudCoverPct = n <= 1 ? (n * 100) : n;
+                        v.cloudCoverPath = path;
                         v.weatherFrameTick = Date.now();
                     }
                 }
@@ -470,16 +545,30 @@ export class SignalKClient {
         const n = extractNumericValue(value);
         if (!Number.isFinite(n)) return;
 
+        if (isBatteryTemperaturePath(p)) {
+            this._lastValues.batteryTempC = n > 150 ? (n - 273.15) : n;
+            this._lastValues.batteryTempPath = String(path || '').trim();
+            return;
+        }
+
+        if (isInsideProbeTemperaturePath(p) && isEngineProbeTemperaturePath(p)) {
+            this._lastValues.probeTempC = n > 150 ? (n - 273.15) : n;
+            this._lastValues.probeTempPath = String(path || '').trim();
+            return;
+        }
+
         if (p.includes('temperature')) {
             this._lastValues.airTempC = n > 150 ? (n - 273.15) : n;
             return;
         }
         if (p.includes('humidity')) {
             this._lastValues.humidityPct = n <= 1 ? (n * 100) : n;
+            this._lastValues.humidityPath = String(path || '').trim();
             return;
         }
         if (p.includes('cloud') && p.includes('cover')) {
             this._lastValues.cloudCoverPct = n <= 1 ? (n * 100) : n;
+            this._lastValues.cloudCoverPath = String(path || '').trim();
             return;
         }
         if (p.includes('precipitation') || p.includes('rain')) {

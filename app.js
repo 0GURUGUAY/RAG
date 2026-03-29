@@ -3,7 +3,7 @@ import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojso
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260315-36';
+const APP_BUILD_VERSION = '20260329-41';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -112,6 +112,7 @@ const POLAR_AUTO_PROFILE_ID = '__auto__';
 const POLAR_IMPORTED_DUFOUR56_STORAGE_KEY = 'ceiboPolarImportedDufour56V1';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
+const NAV_LOG_LAYOUT_STORAGE_KEY = 'ceiboNavLogLayoutV1';
 const ARRIVAL_ANALYSIS_STORAGE_KEY = 'ceiboArrivalAnalysesV1';
 const CLOUD_ROUTES_TABLE = 'routes';
 const CLOUD_ROUTE_POINTS_TABLE = 'route_points';
@@ -149,6 +150,10 @@ const AIS_PROJECTION_MIN_SPEED_KN = 0.7;
 const AIS_PROJECTION_HORIZON_MIN = 22;
 const AIS_PROJECTION_MAX_NM = 7;
 const NAV_GPS_SAMPLE_INTERVAL_MS = 60 * 1000;
+const NAV_AUTO_LOG_START_DISTANCE_M = 100;
+const SIGNALK_UI_REFRESH_INTERVAL_MS = 2000;
+const NAV_POINT_WEATHER_REFRESH_INTERVAL_MS = 90 * 1000;
+const NAV_POINT_WEATHER_REFRESH_DISTANCE_NM = 0.1;
 const ANCHOR_DRAG_CONFIRMATION_MS = 90 * 1000;
 const ANCHOR_DRAG_ALERT_COOLDOWN_MS = 2 * 60 * 1000;
 const ANCHOR_DRAG_MIN_MOVING_SPEED_KN = 0.3;
@@ -159,6 +164,17 @@ const ENGINE_SENSOR_OFF_HOLD_MS = 12000;
 const ENGINE_SENSOR_TICK_INTERVAL_MS = 1000;
 const GOOGLE_PHOTOS_CLIENT_ID_STORAGE_KEY = 'ceiboGooglePhotosClientIdV1';
 const SIGNALK_CONFIG_STORAGE_KEY = 'ceiboSignalKConfigV1';
+const DASHBOARD_THRESHOLD_CONFIG_STORAGE_KEY = 'ceiboDashboardThresholdConfigV1';
+const DASHBOARD_THRESHOLD_DEFAULTS = Object.freeze({
+    signalkProbeTemp: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 85, alertHigh: 95 }),
+    signalkBatteryTemp: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 35, alertHigh: 45 }),
+    signalkHumidity: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 70, alertHigh: 85 }),
+    signalkBaro: Object.freeze({ warnLow: 990, alertLow: 980, warnHigh: null, alertHigh: null }),
+    signalkRpm: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 2800, alertHigh: 3200 }),
+    navSpeed: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 8, alertHigh: 10 }),
+    navHeel: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 20, alertHigh: 30 }),
+    navSwell: Object.freeze({ warnLow: null, alertLow: null, warnHigh: 2.2, alertHigh: 3.4 })
+});
 let savedRoutesCache = [];
 let cloudClient = null;
 let cloudConfig = null;
@@ -188,17 +204,28 @@ let cloudDataSourceLabel = 'initialisation';
 let cloudLastStatusMessage = '';
 let navLogEntries = [];
 let navWatchId = null;
+let navPassiveWatchId = null;
 let navLatestHeelDeg = null;
 let navLatestSpeedKn = null;
 let navLatestCourseDeg = null;
 let navMotionListenerBound = false;
 let navGpsSampleTimerId = null;
 let navGpsLatestFix = null;
+let navLatestAirTempC = null;
+let navLatestSeaTempC = null;
+let navLatestWeatherPressureHpa = null;
+let navLatestWeatherUpdatedAt = '';
+let navWeatherRefreshInFlight = false;
+let navLastWeatherRefreshAtMs = 0;
+let navLastWeatherRefreshLat = null;
+let navLastWeatherRefreshLng = null;
 let navGpsSessionStartMs = 0;
 let navGpsSessionStartEntryIndex = 0;
 let navGpsSessionStartSampleIndex = 0;
 let navGpsSessionHasSample = false;
 let navGpsSessionSamples = [];
+let navAutoLogArmingFix = null;
+let navAutoLogStartPending = false;
 let navGpsTraceLayerGroup = null;
 let navCurrentPositionMarker = null;
 let anchorDragCircleLayer = null;
@@ -222,6 +249,7 @@ let engineLogEntries = [];
 let engineSoundSnapshots = [];
 let engineAudioRegimeMode = 'auto';
 let editingEngineLogEntryId = null;
+let engineLogDraftStartProbeTempC = null;
 let engineSensorDetectionActive = false;
 let engineSensorMotionListenerBound = false;
 let engineSensorTickTimerId = null;
@@ -233,15 +261,41 @@ let engineSensorOffCandidateSinceMs = 0;
 let engineSensorDetectedRunning = false;
 let engineSensorRunningStartMs = 0;
 let engineSensorRunningHoursBaseline = null;
+let engineSensorRunningStartProbeTempC = null;
 let engineSensorLastSpeedKn = null;
 let engineSensorGeoWatchId = null;
 // ---- SignalK ----
 let signalkClient = null;
-let signalkConfig = { mode: 'auto', host: '' }; // mode: 'auto' | 'signalk'
+let signalkConfig = { mode: 'auto', host: '', autoLogEnabled: true }; // mode: 'auto' | 'signalk'
 let signalkLoggingActive = false; // true while SignalK streaming replaces browser GPS
+let signalkStreamingHost = '';
 let signalkLatestWindDir = null; // TWD degrees true (used to auto-fill wind form)
 let signalkLatestWindSpeedKn = null;
+let signalkLatestTwaDeg = null;
+let signalkLatestBaroHpa = null;
+let signalkLatestAirTempC = null;
+let signalkLatestProbeTempC = null;
+let signalkLatestBatteryTempC = null;
+let signalkLatestHumidityPct = null;
+let signalkLatestAbsHumidityGm3 = null;
+let signalkLatestCloudCoverPct = null;
+let signalkLatestRainRateMmH = null;
 let signalkLatestEngineRpm = null;
+let signalkLatestEngineRunning = null;
+let signalkLatestLogNm = null;
+let maintenanceSignalKLatestFrame = null;
+let pendingSignalKUiData = null;
+let signalKUiRefreshTimerId = null;
+let lastSignalKUiRefreshAtMs = 0;
+let maintenanceSignalKStats = {
+    updates: 0,
+    weather: 0,
+    positions: 0,
+    wind: 0,
+    engine: 0,
+    lastWeatherTick: 0
+};
+let dashboardThresholdConfig = null;
 let logWorkspaceMode = 'none';
 let lastAiRouteCandidates = [];
 let aiTrafficEntries = [];
@@ -275,6 +329,7 @@ let navLogCloudHydrationInFlight = false;
 let navLogCloudHydratedOnce = false;
 let navChecklistState = { departure: [], arrival: [] };
 let activeNavChecklistMode = 'departure';
+let navLogLayoutState = { showMap: true, showLog: true, showChecklist: true };
 let navSwellProfile = 'balanced';
 let mapWebOverlayElement = null;
 let mapWebOverlayFrame = null;
@@ -579,7 +634,6 @@ function applyLanguageToUi() {
     setElementPlaceholder('#watchHeadingInput', t('Ex: 235', 'Ej: 235'));
     setElementPlaceholder('#watchWindDirInput', t('Ex: 260', 'Ej: 260'));
     setElementPlaceholder('#watchWindSpeedInput', t('Ex: 16.5', 'Ej: 16.5'));
-    setElementPlaceholder('#watchSailConfigInput', t('Ex: GV 1 ris + génois', 'Ej: Mayor 1 rizo + génova'));
     setElementPlaceholder('#watchBarometerInput', t('Ex: 1014.8', 'Ej: 1014.8'));
     setElementPlaceholder('#watchLogNmInput', t('Ex: 842.3', 'Ej: 842.3'));
     setElementPlaceholder('#watchEventsInput', t('Changement de voile, prise de ris, trafic, sécurité, etc.', 'Cambio de vela, rizo, tráfico, seguridad, etc.'));
@@ -611,7 +665,7 @@ function applyLanguageToUi() {
     setElementText('#documentDockPanelTitle', t('Documents enregistrés:', 'Documentos guardados:'));
     setElementText('#documentRagStatus', t('RAG: infrastructure locale prête.', 'RAG: infraestructura local lista.'));
     setElementText('#documentBuildRagBtn', t('Analyser / indexer les fichiers', 'Analizar / indexar archivos'));
-    setElementText('#documentGeminiConfigSummary', t('Configuration Gemini', 'Configuracion Gemini'));
+    setElementText('#documentGeminiConfigSummary', t('Configuration Gemini', 'Configuración Gemini'));
     setElementText('#documentLlmModeLabel', t('Mode IA:', 'Modo IA:'));
     setElementText('#documentLlmProviderLabel', t('Fournisseur externe:', 'Proveedor externo:'));
     setElementText('#documentLlmResponseStyleLabel', t('Style de réponse:', 'Estilo de respuesta:', 'Response style:'));
@@ -708,7 +762,7 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsQuotaLabel', t('Quota utilisé (500 Mo)', 'Cuota usada (500 MB)'));
 
     setElementText('#startNavLogBtn', t('Démarrer log GPS', 'Iniciar log GPS'));
-    setElementText('#locateNowBtn', t('Ma position', 'Mi posicion'));
+    setElementText('#locateNowBtn', t('Ma position', 'Mi posición'));
     setElementText('#stopNavLogBtn', t('Arrêter log GPS', 'Detener log GPS'));
     setElementText('#aiTrafficTitle', t('Trafic modèle en cours', 'Tráfico del modelo en curso', 'Model traffic in progress'));
     setElementText('#aiTrafficCloseBtn', t('Fermer', 'Cerrar', 'Close'));
@@ -731,6 +785,7 @@ function applyLanguageToUi() {
     setElementText('#deleteNavLogBtn', t('Supprimer ce log', 'Eliminar este log', 'Delete this log'));
     setElementText('#cancelNavLogEditBtn', t('Annuler', 'Cancelar'));
     setElementText('#logWorkspaceTitle', t('Saisie journal', 'Edición diario'));
+    setElementText('#logWorkspaceCloseBtn', t('Fermer', 'Cerrar', 'Close'));
     setElementText('#logWorkspacePlaceholder', t('Clique sur Ajouter pour ouvrir le formulaire', 'Haz clic en Añadir para abrir el formulario'));
     setElementText('#navLogStatus', t('Journal navigation: en attente', 'Diario navegación: en espera'));
     setElementText('#navLogTraceHint', t('Astuce: clique une ligne du journal pour rouvrir sa trace sur la carte.', 'Consejo: toca una línea del diario para reabrir su traza en el mapa.'));
@@ -750,17 +805,36 @@ function applyLanguageToUi() {
     setElementText('#watchSeaStateInput option[value="agitée"]', t('Agitée', 'Agitada'));
     setElementText('#watchSeaStateInput option[value="forte"]', t('Forte', 'Fuerte'));
     setElementText('#navLogListLabel', t('Entrées navigation:', 'Entradas navegación:'));
+    setElementText('#navLogDisplayMenuBtn', t('Menu', 'Menu', 'Menu'));
+    setElementText('#navLogDisplayMapBtn', t('Carte', 'Mapa', 'Map'));
+    setElementText('#navLogDisplayLogBtn', t('Log', 'Diario', 'Log'));
+    setElementText('#navLogDisplayChecklistBtn', t('Checklist', 'Checklist', 'Checklist'));
     setElementText('#navChecklistDepartureBtn', t('Avant depart', 'Antes de salida'));
-    setElementText('#navChecklistArrivalBtn', t("A l'arrivee", 'A la llegada'));
-    setElementText('#navChecklistAddBtn', t('Ajouter', 'Anadir'));
+    setElementText('#navChecklistArrivalBtn', t("À l'arrivée", 'A la llegada'));
+    setElementText('#navChecklistAddBtn', t('Ajouter', 'Añadir'));
     setElementText('#navChecklistResetBtn', t('Reinitialiser checklist', 'Reiniciar checklist'));
     setElementText('#navChecklistApplyTemplateBtn', t('Appliquer', 'Aplicar'));
-    setElementPlaceholder('#navChecklistNewItemInput', t('Ajouter une action checklist', 'Agregar una accion checklist'));
+    setElementPlaceholder('#navChecklistNewItemInput', t('Ajouter une action checklist', 'Agregar una acción checklist'));
     setElementText('.log-checklist-template-row label[for="navChecklistTemplateSelect"]', t('Template:', 'Plantilla:'));
     setElementText('#navChecklistTemplateSelect option[value="standard"]', t('Standard', 'Estándar'));
     setElementText('#navChecklistTemplateSelect option[value="night"]', t('Navigation de nuit', 'Navegación nocturna'));
     setElementText('#navChecklistTemplateSelect option[value="bad_weather"]', t('Mauvais temps', 'Mal tiempo'));
     setElementText('#navChecklistTemplateSelect option[value="harbor"]', t('Port / manoeuvre', 'Puerto / maniobra'));
+    setElementText('#navLiveWeatherSectionLabel', t('Météo SignalK', 'Meteo SignalK', 'SignalK weather'));
+    setElementText('#maintenanceSignalKTitle', t('SignalK · configuration centralisée', 'SignalK · configuracion centralizada', 'SignalK central configuration'));
+    setElementText('#maintenanceSignalKHint', t('Le monitoring live est désormais centralisé dans Journal nav. Cette page sert à la connexion, aux seuils et au diagnostic.', 'El monitoreo live ahora está centralizado en Diario nav. Esta página sirve para la conexión, umbrales y diagnóstico.', 'Live monitoring is now centralized in Nav log. This page is for connection, thresholds, and diagnostics.'));
+    setElementText('#maintenanceSignalKNavLogLinkTitle', t('Monitoring live unique', 'Monitoreo live unico', 'Single live monitoring'));
+    setElementText('#maintenanceSignalKNavLogLinkHint', t('Utilise Journal nav comme écran principal SignalK + navigation. Tu peux ensuite masquer menu, carte, log ou checklist selon l’écran disponible.', 'Usa Diario nav como pantalla principal SignalK + navegacion. Luego puedes ocultar menu, mapa, diario o checklist segun la pantalla disponible.', 'Use Nav log as the main SignalK + navigation screen. You can then hide menu, map, log, or checklist depending on the available screen.'));
+    setElementText('#maintenanceSignalKOpenNavLogBtn', t('Ouvrir Journal nav', 'Abrir Diario nav', 'Open Nav log'));
+    setElementText('#navLiveTwsLabel', t('Vent réel (TWS)', 'Viento real (TWS)', 'True wind (TWS)'));
+    setElementText('#navLiveTwdLabel', t('Direction vent (TWD)', 'Dirección viento (TWD)', 'Wind direction (TWD)'));
+    setElementText('#navLiveBaroLabel', t('Baromètre', 'Barómetro', 'Barometer'));
+    setElementText('#navLiveAirTempLabel', t('Temp air', 'Temp aire', 'Air temp'));
+    setElementText('#navLiveProbeTempLabel', t('Temp moteur', 'Temp motor', 'Engine temp'));
+    setElementText('#navLiveHumidityLabel', t('Humidité', 'Humedad', 'Humidity'));
+    setElementText('#navLiveDewPointLabel', t('Point de rosée', 'Punto de rocío', 'Dew point'));
+    setElementText('#navLiveCloudLabel', t('Nuages', 'Nubes', 'Clouds'));
+    setElementText('#navLiveRainLabel', t('Pluie', 'Lluvia', 'Rain'));
     setElementText('.log-live-controls-row label[for="navSwellProfileSelect"]', t('Profil houle:', 'Perfil oleaje:'));
     setElementText('#navSwellProfileSelect option[value="conservative"]', t('Conservateur', 'Conservador'));
     setElementText('#navSwellProfileSelect option[value="balanced"]', t('Equilibre', 'Equilibrado'));
@@ -772,6 +846,8 @@ function applyLanguageToUi() {
     setElementText('#cancelEngineLogEditBtn', t('Annuler modification', 'Cancelar edición'));
     setElementText('label[for="engineHoursInput"]', t('Compteur moteur (h):', 'Contador motor (h):'));
     setElementText('label[for="fuelAddedInput"]', t('Carburant ajouté (L):', 'Combustible añadido (L):'));
+    setElementText('label[for="engineTempStartInput"]', t('Température départ moteur:', 'Temperatura inicio motor:', 'Engine start temperature:'));
+    setElementText('label[for="engineTempEndInput"]', t('Température fin moteur:', 'Temperatura fin motor:', 'Engine end temperature:'));
     setElementText('label[for="engineLogNoteInput"]', t('Note:', 'Nota:'));
     setElementText('#engineLogListLabel', t('Historique moteur:', 'Historial motor:'));
     setElementText('#engineSensorTitle', t('Détection moteur iPad (beta)', 'Detección motor iPad (beta)', 'iPad engine detection (beta)'));
@@ -810,7 +886,7 @@ function applyLanguageToUi() {
     setElementText('#weatherImportGribBtn', t('Importer GRIB/JSON', 'Importar GRIB/JSON', 'Import GRIB/JSON'));
     setElementText('#weatherConvertGribBtn', t('Commande conversion', 'Comando conversion', 'Conversion Command'));
     setElementText('#weatherClearGribBtn', t('Effacer GRIB', 'Borrar GRIB', 'Clear GRIB'));
-    setElementText('#weatherGribStatus', t('GRIB: aucun fichier chargé.', 'GRIB: ningun archivo cargado.', 'GRIB: no file loaded.'));
+    setElementText('#weatherGribStatus', t('GRIB: aucun fichier chargé.', 'GRIB: ningún archivo cargado.', 'GRIB: no file loaded.'));
     setElementText('#weatherGribHint', t('Astuce: sélectionne GRIB + JSON converti (même nom) en une fois pour chargement auto.', 'Consejo: selecciona GRIB + JSON convertido (mismo nombre) en una sola acción para carga automática.', 'Tip: select GRIB + converted JSON (same name) together for automatic loading.'));
 
     setElementText('#analyzeArrivalBtn', t('Conseiller mouillage à l\'arrivée', 'Sugerir fondeo a la llegada'));
@@ -827,7 +903,7 @@ function applyLanguageToUi() {
     setElementText('#waypointImportGooglePhotosBtn', t('Google Photos', 'Google Photos'));
     setElementText('#googlePhotosModalTitle', t('Importer depuis Google Photos', 'Importar desde Google Photos'));
     setElementText('#googlePhotosCloseBtn', t('Fermer', 'Cerrar'));
-    setElementText('#googlePhotosLoadMoreBtn', t('Charger plus', 'Cargar mas'));
+    setElementText('#googlePhotosLoadMoreBtn', t('Charger plus', 'Cargar más'));
     setElementText('#waypointPhotoStatus', t("Coordonnées: en attente d'une photo", 'Coordenadas: esperando una foto'));
     setElementText('#waypointGoogleMapLink', t('Ouvrir dans Google Maps', 'Abrir en Google Maps'));
     setElementText('label[for="waypointPlaceNameInput"]', t('Nom du lieu:', 'Nombre del lugar:'));
@@ -846,6 +922,7 @@ function applyLanguageToUi() {
     setElementText('#maintenanceExpensesSubtabBtn', t('Dépenses & factures', 'Gastos y facturas'));
     setElementText('#maintenanceSuppliersSubtabBtn', t('Fournisseurs', 'Proveedores'));
     setElementText('#maintenanceEngineSubtabBtn', t('Moteur', 'Motor'));
+    setElementText('#maintenanceSignalKSubtabBtn', 'SignalK');
     setElementText('label[for="maintenanceSchemaInput"]', t('Importer schéma (image):', 'Importar esquema (imagen):'));
     setElementText('#maintenanceToggleSchemaManagerBtn', t('Gérer les schémas', 'Gestionar esquemas'));
     setElementText('#maintenanceAddSchemaBtn', t('Ajouter schéma', 'Añadir esquema'));
@@ -970,11 +1047,134 @@ function updateSidebarToggleButtonUi() {
     toggleBtn.setAttribute('aria-pressed', isSidebarCollapsed ? 'true' : 'false');
 }
 
+function sanitizeNavLogLayoutState(rawState) {
+    const defaults = { showMap: true, showLog: true, showChecklist: true };
+    if (!rawState || typeof rawState !== 'object') return defaults;
+    return {
+        showMap: rawState.showMap !== false,
+        showLog: rawState.showLog !== false,
+        showChecklist: rawState.showChecklist !== false
+    };
+}
+
+function loadNavLogLayoutState() {
+    try {
+        const raw = localStorage.getItem(NAV_LOG_LAYOUT_STORAGE_KEY);
+        navLogLayoutState = raw
+            ? sanitizeNavLogLayoutState(JSON.parse(raw))
+            : sanitizeNavLogLayoutState(null);
+    } catch (_) {
+        navLogLayoutState = sanitizeNavLogLayoutState(null);
+    }
+}
+
+function saveNavLogLayoutState() {
+    try {
+        localStorage.setItem(NAV_LOG_LAYOUT_STORAGE_KEY, JSON.stringify(navLogLayoutState));
+    } catch (_) { /* ignore */ }
+}
+
+function updateNavLogLayoutToolbarUi() {
+    const isNavLog = activeTabName === 'navlog';
+    document.body.classList.toggle('navlog-layout-controls-active', isNavLog);
+
+    const states = {
+        navLogDisplayMenuBtn: !isSidebarCollapsed,
+        navLogDisplayMapBtn: navLogLayoutState.showMap,
+        navLogDisplayLogBtn: navLogLayoutState.showLog,
+        navLogDisplayChecklistBtn: navLogLayoutState.showChecklist
+    };
+
+    Object.entries(states).forEach(([id, isActive]) => {
+        const button = document.getElementById(id);
+        if (!button) return;
+        button.classList.toggle('navlog-display-toolbar__btn--active', Boolean(isActive));
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+}
+
+function applyNavLogLayoutState() {
+    const isNavLog = activeTabName === 'navlog';
+    const mapContainer = document.getElementById('mapWorkspace');
+    const logWorkspacePanel = document.getElementById('logWorkspacePanel');
+    const logWorkspaceMain = document.querySelector('#logWorkspacePanel .log-workspace-main');
+    const logWorkspaceLive = document.querySelector('#logWorkspacePanel .log-workspace-live');
+    const logWorkspaceChecklist = document.querySelector('#logWorkspacePanel .log-workspace-checklist');
+    const title = document.getElementById('logWorkspaceTitle');
+    const placeholder = document.getElementById('logWorkspacePlaceholder');
+    const navLiveCard = document.getElementById('navLiveTableCard');
+    const checklistCard = document.getElementById('navChecklistCard');
+
+    if (!isNavLog) {
+        if (mapContainer) mapContainer.style.display = '';
+        if (logWorkspacePanel) {
+            logWorkspacePanel.classList.remove('log-workspace-panel--checklist-only', 'log-workspace-panel--log-only');
+        }
+        if (logWorkspaceMain) logWorkspaceMain.style.display = '';
+        if (logWorkspaceLive) logWorkspaceLive.style.display = '';
+        if (logWorkspaceChecklist) logWorkspaceChecklist.style.display = '';
+        if (title) title.style.display = '';
+        if (placeholder) placeholder.style.display = '';
+        if (navLiveCard) navLiveCard.style.display = '';
+        if (checklistCard) checklistCard.style.display = '';
+        updateNavLogLayoutToolbarUi();
+        return;
+    }
+
+    const showMap = navLogLayoutState.showMap;
+    const showLog = navLogLayoutState.showLog;
+    const showChecklist = navLogLayoutState.showChecklist;
+    const showWorkspace = showLog || showChecklist;
+    const shouldSplitLiveAndChecklist = showLog && showChecklist && logWorkspaceMode === 'none';
+
+    if (mapContainer) {
+        mapContainer.style.display = showMap ? '' : 'none';
+    }
+    if (logWorkspacePanel) {
+        logWorkspacePanel.style.display = showWorkspace ? 'block' : 'none';
+        logWorkspacePanel.classList.toggle('log-workspace-panel--checklist-only', !showLog && showChecklist);
+        logWorkspacePanel.classList.toggle('log-workspace-panel--log-only', showLog && !showChecklist);
+        logWorkspacePanel.classList.toggle('log-workspace-panel--live-focus', !showMap && showLog && !showChecklist);
+        logWorkspacePanel.classList.toggle('log-workspace-panel--live-checklist-split', shouldSplitLiveAndChecklist);
+    }
+    if (logWorkspaceMain) logWorkspaceMain.style.display = showLog && !shouldSplitLiveAndChecklist ? 'flex' : 'none';
+    if (logWorkspaceLive) logWorkspaceLive.style.display = showLog ? '' : 'none';
+    if (logWorkspaceChecklist) logWorkspaceChecklist.style.display = showChecklist ? '' : 'none';
+    if (title) title.style.display = showLog && !shouldSplitLiveAndChecklist ? 'flex' : 'none';
+    if (placeholder) placeholder.style.display = showLog && !shouldSplitLiveAndChecklist && logWorkspaceMode === 'none' ? 'flex' : 'none';
+    if (navLiveCard) navLiveCard.style.display = showLog ? 'block' : 'none';
+    if (checklistCard) checklistCard.style.display = showChecklist ? 'block' : 'none';
+
+    updateNavLogLayoutToolbarUi();
+
+    window.setTimeout(() => {
+        if (map) map.invalidateSize();
+    }, 90);
+}
+
+function setNavLogLayoutSection(sectionKey, isVisible, { persist = true } = {}) {
+    if (!['showMap', 'showLog', 'showChecklist'].includes(sectionKey)) return;
+    const nextState = {
+        ...navLogLayoutState,
+        [sectionKey]: Boolean(isVisible)
+    };
+    navLogLayoutState = nextState;
+
+    if (!nextState.showMap && !nextState.showLog && !nextState.showChecklist) {
+        setSidebarCollapsed(false);
+    }
+
+    if (persist) saveNavLogLayoutState();
+    renderLogWorkspacePanel();
+    applyNavLogLayoutState();
+}
+
 function setSidebarCollapsed(collapsed, options = {}) {
     const { persist = true } = options;
     isSidebarCollapsed = Boolean(collapsed);
     document.body.classList.toggle('sidebar-collapsed', isSidebarCollapsed);
     updateSidebarToggleButtonUi();
+    updateNavLogLayoutToolbarUi();
 
     if (persist) {
         localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, isSidebarCollapsed ? '1' : '0');
@@ -1013,6 +1213,203 @@ function initializeSidebarToggle() {
             setSidebarCollapsed(!isSidebarCollapsed);
         }
     });
+}
+
+function isNavigationLoggingActive() {
+    return navWatchId !== null || signalkLoggingActive;
+}
+
+function isSignalKAutoLogEnabled() {
+    return signalkConfig.autoLogEnabled !== false;
+}
+
+function getSignalKAutoLogHintText() {
+    if (isSignalKAutoLogEnabled()) {
+        return t(
+            `Auto-log actif: démarrage automatique après ${NAV_AUTO_LOG_START_DISTANCE_M} m. Le bouton Démarrer reste disponible.`,
+            `Auto-log activo: arranque automático tras ${NAV_AUTO_LOG_START_DISTANCE_M} m. El botón Iniciar sigue disponible.`
+        );
+    }
+    return t(
+        'Auto-log désactivé: les widgets restent live, mais le journal ne démarre plus tout seul.',
+        'Auto-log desactivado: los widgets siguen en vivo, pero el diario ya no arranca solo.'
+    );
+}
+
+function getAutoLogArmedStatusMessage(sourceMode = signalkConfig.mode) {
+    if (!isSignalKAutoLogEnabled()) {
+        return t(
+            'Auto-log désactivé · démarrage manuel disponible.',
+            'Auto-log desactivado · arranque manual disponible.'
+        );
+    }
+    if (sourceMode === 'signalk') {
+        return t(
+            `SignalK connecté · auto-log armé (> ${NAV_AUTO_LOG_START_DISTANCE_M} m).`,
+            `SignalK conectado · auto-log armado (> ${NAV_AUTO_LOG_START_DISTANCE_M} m).`
+        );
+    }
+    return t(
+        `Auto-log armé · le journal démarrera dès que le GPS dépassera ${NAV_AUTO_LOG_START_DISTANCE_M} m.`,
+        `Auto-log armado · el diario arrancará en cuanto el GPS supere ${NAV_AUTO_LOG_START_DISTANCE_M} m.`
+    );
+}
+
+function syncSignalKAutoLogControls() {
+    const checked = isSignalKAutoLogEnabled();
+    [
+        document.getElementById('signalkAutoLogToggle'),
+        document.getElementById('maintenanceSignalKAutoLogToggle')
+    ].filter(Boolean).forEach(input => {
+        input.checked = checked;
+    });
+
+    const hintText = getSignalKAutoLogHintText();
+    [
+        document.getElementById('signalkAutoLogHint'),
+        document.getElementById('maintenanceSignalKAutoLogHint')
+    ].filter(Boolean).forEach(node => {
+        node.textContent = hintText;
+        node.dataset.enabled = checked ? '1' : '0';
+    });
+}
+
+function cloneNavFixForAutoLog(fix) {
+    if (!Number.isFinite(fix?.lat) || !Number.isFinite(fix?.lng)) return null;
+    const speedKn = Number(fix?.speedKn);
+    const fixTimeMs = Number(fix?.fixTimeMs);
+    return {
+        lat: Number(fix.lat),
+        lng: Number(fix.lng),
+        speedKn: Number.isFinite(speedKn) ? speedKn : null,
+        fixTimeMs: Number.isFinite(fixTimeMs) ? fixTimeMs : Date.now()
+    };
+}
+
+function resetNavAutoLogArming(fix = null) {
+    navAutoLogArmingFix = cloneNavFixForAutoLog(fix);
+    navAutoLogStartPending = false;
+}
+
+function maybeAutoStartNavigationLogging(currentFix, sourceLabel = 'gps') {
+    const safeFix = cloneNavFixForAutoLog(currentFix);
+    if (!isSignalKAutoLogEnabled()) return;
+    if (!safeFix || isNavigationLoggingActive() || navAutoLogStartPending) return;
+
+    if (!navAutoLogArmingFix) {
+        resetNavAutoLogArming(safeFix);
+        return;
+    }
+
+    const distanceMeters = distanceNm(
+        navAutoLogArmingFix.lat,
+        navAutoLogArmingFix.lng,
+        safeFix.lat,
+        safeFix.lng
+    ) * 1852;
+
+    if (!Number.isFinite(distanceMeters)) {
+        resetNavAutoLogArming(safeFix);
+        return;
+    }
+
+    if (distanceMeters < NAV_AUTO_LOG_START_DISTANCE_M) return;
+
+    navAutoLogStartPending = true;
+    setNavLogStatus(t(
+        `Auto-log: déplacement ${Math.round(distanceMeters)} m détecté via ${sourceLabel} · démarrage du journal...`,
+        `Auto-log: desplazamiento ${Math.round(distanceMeters)} m detectado vía ${sourceLabel} · iniciando diario...`
+    ));
+
+    try {
+        startNavigationLogging({ source: 'auto-log' });
+    } finally {
+        if (!isNavigationLoggingActive()) {
+            resetNavAutoLogArming(safeFix);
+        } else {
+            navAutoLogStartPending = false;
+        }
+    }
+}
+
+function handlePassiveNavigationFix(position) {
+    const latitude = Number(position?.coords?.latitude);
+    const longitude = Number(position?.coords?.longitude);
+    const rawSpeedMs = position?.coords?.speed;
+    const speedMs = typeof rawSpeedMs === 'number' && Number.isFinite(rawSpeedMs)
+        ? rawSpeedMs
+        : null;
+    const nativeSpeedKn = Number.isFinite(speedMs) ? speedMs * 1.943844 : null;
+    const fixTimeMs = Number.isFinite(Number(position?.timestamp))
+        ? Number(position.timestamp)
+        : Date.now();
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    const nextFix = {
+        lat: latitude,
+        lng: longitude,
+        speedKn: nativeSpeedKn,
+        fixTimeMs
+    };
+    const derivedMetrics = computeDerivedNavMetricsFromPoints(navGpsLatestFix, nextFix);
+    const resolvedSpeedKn = Number.isFinite(nativeSpeedKn) ? nativeSpeedKn : derivedMetrics.speedKn;
+    const resolvedCourseDeg = Number.isFinite(derivedMetrics.courseDeg) ? derivedMetrics.courseDeg : navLatestCourseDeg;
+
+    navLatestSpeedKn = Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null;
+    navLatestCourseDeg = Number.isFinite(resolvedCourseDeg) ? resolvedCourseDeg : navLatestCourseDeg;
+    navGpsLatestFix = {
+        lat: latitude,
+        lng: longitude,
+        speedKn: Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null,
+        fixTimeMs
+    };
+
+    updateNavCurrentPositionMarker(navGpsLatestFix);
+    evaluateAnchorDragAlarmWithFix(navGpsLatestFix);
+    if (!navHasCenteredOnFirstFix && map) {
+        map.setView([latitude, longitude], Math.max(map.getZoom(), 13));
+        navHasCenteredOnFirstFix = true;
+    }
+
+    updateNavLiveDashboard();
+    maybeAutoStartNavigationLogging(navGpsLatestFix, 'GPS');
+}
+
+function startPassiveNavigationWatch() {
+    if (signalkConfig.mode !== 'auto') return;
+    if (!navigator.geolocation || !isGeolocationSecureContext()) return;
+    if (navWatchId !== null || signalkLoggingActive || navPassiveWatchId !== null) return;
+
+    if (!navAutoLogArmingFix && navGpsLatestFix) {
+        resetNavAutoLogArming(navGpsLatestFix);
+    }
+
+    navPassiveWatchId = navigator.geolocation.watchPosition(
+        position => {
+            handlePassiveNavigationFix(position);
+        },
+        error => {
+            if (activeTabName === 'navlog') {
+                setNavLogStatus(getGeolocationErrorMessage(error), true);
+            }
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 3000,
+            timeout: 10000
+        }
+    );
+
+    if (activeTabName === 'navlog' && !isNavigationLoggingActive()) {
+        setNavLogStatus(getAutoLogArmedStatusMessage('auto'));
+    }
+}
+
+function stopPassiveNavigationWatch() {
+    if (navPassiveWatchId === null || !navigator.geolocation) return;
+    navigator.geolocation.clearWatch(navPassiveWatchId);
+    navPassiveWatchId = null;
 }
 
 function syncNavLogGpsCompactUi() {
@@ -1857,6 +2254,7 @@ function setPolarProfileStatus(message, isError = false) {
 function populatePolarProfileSelects() {
     const routingSelect = document.getElementById('routingPolarProfileSelect');
     const managerSelect = document.getElementById('polarProfileManagerSelect');
+    const navSailConfigSelect = document.getElementById('watchSailConfigInput');
     const profilesOptionsHtml = polarProfiles.map(profile => (
         `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`
     )).join('');
@@ -1870,6 +2268,11 @@ function populatePolarProfileSelects() {
     if (managerSelect) {
         managerSelect.innerHTML = profilesOptionsHtml;
         managerSelect.value = selectedPolarProfileEditorId || (activePolarProfileId !== POLAR_AUTO_PROFILE_ID ? activePolarProfileId : '');
+    }
+
+    if (navSailConfigSelect) {
+        const currentValue = String(navSailConfigSelect.value || '').trim();
+        refreshNavSailConfigSelect(currentValue);
     }
 }
 
@@ -1913,8 +2316,64 @@ function loadPolarProfileEditor(profileId = selectedPolarProfileEditorId || acti
     renderPolarGridEditor(profile.polarData);
 }
 
+function getSelectedPolarProfileForNavLog() {
+    return polarProfiles.find(profile => profile.id === selectedPolarProfileEditorId)
+        || getActivePolarProfile()
+        || polarProfiles[0]
+        || null;
+}
+
+function refreshNavSailConfigSelect(selectedValue = '') {
+    const watchSailConfigInput = document.getElementById('watchSailConfigInput');
+    if (!watchSailConfigInput) return;
+
+    const requestedValue = String(selectedValue || '').trim();
+    const defaultValue = String(getSelectedPolarProfileForNavLog()?.name || '').trim();
+    const profileNames = Array.from(new Set(
+        polarProfiles
+            .map(profile => String(profile?.name || '').trim())
+            .filter(Boolean)
+    ));
+    const finalValue = requestedValue || defaultValue;
+
+    const optionValues = finalValue && !profileNames.includes(finalValue)
+        ? [finalValue, ...profileNames]
+        : profileNames;
+
+    watchSailConfigInput.innerHTML = optionValues.map(name => (
+        `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
+    )).join('');
+
+    if (finalValue && optionValues.includes(finalValue)) {
+        watchSailConfigInput.value = finalValue;
+    } else if (defaultValue && optionValues.includes(defaultValue)) {
+        watchSailConfigInput.value = defaultValue;
+    } else if (optionValues.length) {
+        watchSailConfigInput.value = optionValues[0];
+    } else {
+        watchSailConfigInput.value = '';
+    }
+}
+
+function syncNavSailConfigWithActivePolar(previousProfileName = '') {
+    const watchSailConfigInput = document.getElementById('watchSailConfigInput');
+    if (!watchSailConfigInput || editingNavLogEntryId) return;
+
+    const activeProfileName = String(getSelectedPolarProfileForNavLog()?.name || '').trim();
+    const currentValue = String(watchSailConfigInput.value || '').trim();
+    const lastSyncedProfileName = String(watchSailConfigInput.dataset.polarProfileName || '').trim();
+    const previousName = String(previousProfileName || '').trim();
+    const shouldUpdate = !currentValue || currentValue === previousName || currentValue === lastSyncedProfileName;
+
+    if (!shouldUpdate) return;
+
+    refreshNavSailConfigSelect(activeProfileName);
+    watchSailConfigInput.dataset.polarProfileName = activeProfileName;
+}
+
 function setActivePolarProfile(profileId, options = {}) {
     const { persist = true, syncEditor = false } = options;
+    const previousProfileName = String(getSelectedPolarProfileForNavLog()?.name || '').trim();
     if (profileId === POLAR_AUTO_PROFILE_ID) {
         activePolarProfileId = POLAR_AUTO_PROFILE_ID;
     } else {
@@ -1932,6 +2391,9 @@ function setActivePolarProfile(profileId, options = {}) {
         populatePolarProfileSelects();
     }
     updateRoutingPolarProfileUi();
+    syncNavSailConfigWithActivePolar(previousProfileName);
+    updateNavPolarCaptureHint();
+    updateNavLiveDashboard();
 }
 
 function createPolarProfileDraftFrom(profile = null) {
@@ -2543,7 +3005,7 @@ function buildConvertedGribJsonLayer(payload) {
                         })
                     });
                     arrow.bindPopup(
-                        `${t('Vent', 'Viento', 'Wind')}: ${speed.toFixed(1)} m/s<br>${t('Direction', 'Direccion', 'Direction')}: ${directionFrom.toFixed(0)}°`
+                        `${t('Vent', 'Viento', 'Wind')}: ${speed.toFixed(1)} m/s<br>${t('Direction', 'Dirección', 'Direction')}: ${directionFrom.toFixed(0)}°`
                     );
                     group.addLayer(arrow);
                 }
@@ -4349,7 +4811,7 @@ function buildWaypointMapSearchSectionHtml(searchQuery) {
                 <div class="arrival-list__meta">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
                 <div class="button-row">
                     <button type="button" class="js-waypoint-map-search-go" data-id="${escapeHtml(String(item.id))}" style="flex:1;">${t('Voir sur carte', 'Ver en mapa', 'Show on map')}</button>
-                    <button type="button" class="js-waypoint-map-search-add" data-id="${escapeHtml(String(item.id))}" style="flex:1;">${t('Ajouter comme WP', 'Anadir como WP', 'Add as WP')}</button>
+                    <button type="button" class="js-waypoint-map-search-add" data-id="${escapeHtml(String(item.id))}" style="flex:1;">${t('Ajouter comme WP', 'Añadir como WP', 'Add as WP')}</button>
                 </div>
             </div>`;
         }).join('');
@@ -5731,7 +6193,7 @@ async function analyzeArrivalZone() {
         return;
     }
 
-    beginAiTrafficSession(t('Analyse zone arrivée', 'Analisis zona llegada'));
+    beginAiTrafficSession(t('Analyse zone arrivée', 'Análisis zona llegada'));
 
     const button = document.getElementById('analyzeArrivalBtn');
     const summary = document.getElementById('arrivalSummary');
@@ -5788,7 +6250,7 @@ async function analyzeArrivalZone() {
                 `Mejor fondeo: ${recommendations[0].name} (${recommendations[0].distanceNm.toFixed(2)} nm)`
             ));
         } else {
-            pushAiTrafficLog(t('Aucun mouillage adapté trouvé', 'No se encontro fondeo adecuado'));
+            pushAiTrafficLog(t('Aucun mouillage adapté trouvé', 'No se encontró fondeo adecuado'));
         }
 
         storeArrivalAnalysisSnapshot({
@@ -5798,21 +6260,21 @@ async function analyzeArrivalZone() {
             restaurants,
             shops
         });
-        endAiTrafficSession(t('Analyse arrivée terminée', 'Analisis llegada terminado'));
+        endAiTrafficSession(t('Analyse arrivée terminée', 'Análisis llegada terminado'));
     } catch (_error) {
-        pushAiTrafficLog(t('Erreur pendant l\'analyse arrivée', 'Error durante el analisis de llegada'));
+        pushAiTrafficLog(t('Erreur pendant l\'analyse arrivée', 'Error durante el análisis de llegada'));
         const destination = routePoints[routePoints.length - 1];
         const arrivalTime = getArrivalReferenceDateTime();
         const cachedEntry = findBestArrivalAnalysisMatch(destination, arrivalTime);
         if (cachedEntry) {
             renderArrivalAnalysisEntry(cachedEntry, { fromCache: true });
             pushAiTrafficLog(t('Analyse live indisponible: cache ARRIVEE rechargé', 'Análisis live no disponible: caché LLEGADA recargado'));
-            endAiTrafficSession(t('Analyse arrivée rechargée depuis le cache', 'Analisis llegada recargado desde caché'));
+            endAiTrafficSession(t('Analyse arrivée rechargée depuis le cache', 'Análisis llegada recargado desde caché'));
             return;
         }
         if (summary) summary.textContent = t('Analyse mouillage: erreur de récupération des données.', 'Análisis fondeo: error al recuperar datos.');
         setArrivalCacheStatus(t('Échec de l\'analyse et aucun cache compatible disponible.', 'Falló el análisis y no hay caché compatible disponible.', 'Analysis failed and no compatible cache is available.'), true);
-        endAiTrafficSession(t('Analyse arrivée terminée en erreur', 'Analisis llegada terminado con error'));
+        endAiTrafficSession(t('Analyse arrivée terminée en erreur', 'Análisis llegada terminado con error'));
     } finally {
         if (button) {
             button.disabled = false;
@@ -6729,6 +7191,245 @@ async function exportVoyagePdfReport() {
     }
 }
 
+function getActiveRouteNameForLogExport() {
+    const nameInput = document.getElementById('routeNameInput');
+    const inputName = String(nameInput?.value || '').trim();
+    if (inputName) return inputName;
+
+    const saved = getSavedRoutes();
+    const loadedName = hasLoadedRouteSelection()
+        ? String(saved[currentLoadedRouteIndex]?.name || '').trim()
+        : '';
+    return loadedName || t('Route CEIBO', 'Ruta CEIBO', 'CEIBO route');
+}
+
+function toNavLogSummaryRows(entry, traceEntries) {
+    const safeEntry = entry || {};
+    const pointCount = Array.isArray(traceEntries) ? traceEntries.length : 0;
+
+    return [
+        [t('Date début', 'Fecha inicio'), formatDateTimeFr(safeEntry.watchTimeIso || safeEntry.timestamp)],
+        [t('Date fin', 'Fecha fin'), safeEntry.watchEndTimeIso ? formatDateTimeFr(safeEntry.watchEndTimeIso) : 'N/A'],
+        [t('Équipage / quart', 'Tripulación / guardia'), String(safeEntry.watchCrew || 'N/A')],
+        [t('Source', 'Origen'), String(safeEntry.source || 'N/A')],
+        [t('Position log', 'Posición log'), Number.isFinite(safeEntry.lat) && Number.isFinite(safeEntry.lng) ? `${Number(safeEntry.lat).toFixed(5)}, ${Number(safeEntry.lng).toFixed(5)}` : 'N/A'],
+        [t('Cap', 'Rumbo'), Number.isFinite(safeEntry.headingDeg) ? `${Math.round(normalizeCourseDegrees(safeEntry.headingDeg))}°` : 'N/A'],
+        [t('Vent', 'Viento'), Number.isFinite(safeEntry.windSpeedKn) ? `${safeEntry.windSpeedKn.toFixed(1)} kn` : 'N/A'],
+        [t('Direction vent', 'Dirección viento'), Number.isFinite(safeEntry.windDirectionDeg) ? `${Math.round(normalizeCourseDegrees(safeEntry.windDirectionDeg))}°` : 'N/A'],
+        [t('État de mer', 'Estado de mar'), String(safeEntry.seaState || 'N/A')],
+        [t('Voilure', 'Velamen'), String(safeEntry.sailConfig || 'N/A')],
+        [t('Baromètre', 'Barómetro'), Number.isFinite(safeEntry.barometerHpa) ? `${safeEntry.barometerHpa.toFixed(0)} hPa` : 'N/A'],
+        [t('Loch total', 'Corredera total'), Number.isFinite(safeEntry.logDistanceNm) ? `${safeEntry.logDistanceNm.toFixed(1)} NM` : 'N/A'],
+        [t('Temp air (dernier point)', 'Temp aire (último punto)'), Number.isFinite(navLatestAirTempC) ? `${navLatestAirTempC.toFixed(1)}°C` : 'N/A'],
+        [t('Points trace', 'Puntos traza'), String(pointCount)],
+        [t('Événements', 'Eventos'), String(safeEntry.events || 'N/A')]
+    ];
+}
+
+function toNavLogTraceRows(traceEntries) {
+    return (Array.isArray(traceEntries) ? traceEntries : []).map((point, index) => {
+        const heading = Number(point?.headingDeg);
+        const windDir = Number(point?.windDirectionDeg);
+        const windSpd = Number(point?.windSpeedKn);
+        const speed = Number(point?.speedKn);
+        const heel = Number(point?.heelDeg);
+        const pressure = Number(point?.barometerHpa);
+        const airTemp = Number(point?.temperatureC);
+        const seaTemp = Number(point?.seaSurfaceTemperatureC);
+
+        return {
+            index: index + 1,
+            time: formatDateTimeFr(point?.timestamp),
+            lat: Number.isFinite(point?.lat) ? Number(point.lat).toFixed(5) : 'N/A',
+            lng: Number.isFinite(point?.lng) ? Number(point.lng).toFixed(5) : 'N/A',
+            speed: Number.isFinite(speed) ? `${speed.toFixed(1)} kn` : 'N/A',
+            heel: Number.isFinite(heel) ? `${heel.toFixed(1)}°` : 'N/A',
+            heading: Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))}°` : 'N/A',
+            wind: Number.isFinite(windSpd) ? `${windSpd.toFixed(1)} kn` : 'N/A',
+            windDir: Number.isFinite(windDir) ? `${Math.round(normalizeCourseDegrees(windDir))}°` : 'N/A',
+            pressure: Number.isFinite(pressure) ? `${pressure.toFixed(0)} hPa` : 'N/A',
+            airTemp: Number.isFinite(airTemp) ? `${airTemp.toFixed(1)}°C` : 'N/A',
+            seaTemp: Number.isFinite(seaTemp) ? `${seaTemp.toFixed(1)}°C` : 'N/A',
+            source: String(point?.source || 'N/A')
+        };
+    });
+}
+
+function drawNavLogPdfTableRow(doc, y, cells, widths, options = {}) {
+    const lineHeight = options.lineHeight || 6;
+    const fontSize = options.fontSize || 8.5;
+    const padding = options.padding || 1.5;
+    const startX = options.startX || 10;
+    const isHeader = !!options.isHeader;
+
+    doc.setFontSize(fontSize);
+    doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
+
+    let maxLines = 1;
+    const wrappedCells = cells.map((cell, index) => {
+        const text = String(cell ?? '');
+        const availableWidth = Math.max(8, widths[index] - padding * 2);
+        const wrapped = doc.splitTextToSize(text, availableWidth);
+        maxLines = Math.max(maxLines, wrapped.length || 1);
+        return wrapped;
+    });
+
+    const rowHeight = maxLines * lineHeight + padding * 2;
+    let x = startX;
+
+    if (isHeader) {
+        doc.setFillColor(231, 242, 255);
+        doc.rect(startX, y, widths.reduce((sum, value) => sum + value, 0), rowHeight, 'F');
+    }
+
+    wrappedCells.forEach((wrapped, index) => {
+        doc.rect(x, y, widths[index], rowHeight);
+        doc.text(wrapped, x + padding, y + padding + lineHeight - 1);
+        x += widths[index];
+    });
+
+    return y + rowHeight;
+}
+
+async function exportNavLogEntryPdf(entryId) {
+    const targetId = String(entryId || editingNavLogEntryId || '').trim();
+    if (!targetId) {
+        alert(t('Sélectionne un log avant export PDF.', 'Selecciona un log antes de exportar PDF.', 'Select a log before PDF export.'));
+        return;
+    }
+
+    const entry = navLogEntries.find(item => String(item?.id || '') === targetId);
+    if (!entry) {
+        alert(t('Log introuvable pour export PDF.', 'Log no encontrado para exportar PDF.', 'Log entry not found for PDF export.'));
+        return;
+    }
+
+    if (!window?.jspdf?.jsPDF) {
+        alert(t('jsPDF non disponible dans le navigateur.', 'jsPDF no disponible en el navegador.', 'jsPDF is not available in this browser.'));
+        return;
+    }
+
+    const button = document.getElementById('exportNavLogPdfBtn');
+    if (button) {
+        button.disabled = true;
+        button.textContent = t('Génération PDF...', 'Generación PDF...', 'Generating PDF...');
+    }
+
+    try {
+        const traceEntries = getNavTraceEntriesForEntry(entry);
+        const traceRows = toNavLogTraceRows(traceEntries);
+        const summaryRows = toNavLogSummaryRows(entry, traceEntries);
+        const routeName = getActiveRouteNameForLogExport();
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const left = 10;
+        const right = pageWidth - 10;
+        let y = 14;
+
+        doc.setFillColor(14, 33, 52);
+        doc.rect(0, 0, pageWidth, 32, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        doc.text(t('Journal Navigation', 'Diario de Navegación', 'Navigation Log'), left, 14);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${t('Route', 'Ruta', 'Route')}: ${routeName}`, left, 21);
+        doc.text(`${t('Log', 'Log', 'Log')}: ${formatDateTimeFr(entry.watchTimeIso || entry.timestamp)}`, left, 27);
+        doc.setTextColor(15, 48, 72);
+        y = 38;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.text(t('Résumé', 'Resumen', 'Summary'), left, y);
+        y += 4;
+
+        const summaryWidths = [52, right - left - 52];
+        y += 2;
+        summaryRows.forEach(row => {
+            if (y > pageHeight - 16) {
+                doc.addPage();
+                y = 14;
+            }
+            y = drawNavLogPdfTableRow(doc, y, row, summaryWidths, { startX: left, lineHeight: 5.5, fontSize: 9 });
+        });
+
+        y += 6;
+        if (y > pageHeight - 24) {
+            doc.addPage();
+            y = 14;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.text(t('Points de trace', 'Puntos de traza', 'Trace points'), left, y);
+        y += 4;
+
+        const headers = [
+            '#',
+            t('Heure', 'Hora', 'Time'),
+            'Lat',
+            'Lng',
+            t('Vit', 'Vel', 'Spd'),
+            t('Gîte', 'Escora', 'Heel'),
+            t('Cap', 'Rumbo', 'Head'),
+            t('Vent', 'Viento', 'Wind'),
+            t('Dir vent', 'Dir viento', 'Wind dir'),
+            t('Press', 'Pres', 'Pres'),
+            t('T air', 'T aire', 'Air T'),
+            t('T mer', 'T mar', 'Sea T')
+        ];
+        const widths = [8, 25, 15, 15, 14, 12, 12, 14, 16, 14, 12, 12];
+
+        y += 2;
+        y = drawNavLogPdfTableRow(doc, y, headers, widths, { startX: left, lineHeight: 5, fontSize: 7.8, isHeader: true });
+
+        if (!traceRows.length) {
+            y = drawNavLogPdfTableRow(doc, y, [
+                '-',
+                t('Aucun point de trace disponible', 'No hay puntos de traza disponibles', 'No trace points available'),
+                '', '', '', '', '', '', '', '', '', ''
+            ], widths, { startX: left, lineHeight: 5, fontSize: 7.8 });
+        } else {
+            traceRows.forEach(row => {
+                if (y > pageHeight - 12) {
+                    doc.addPage();
+                    y = 14;
+                    y = drawNavLogPdfTableRow(doc, y, headers, widths, { startX: left, lineHeight: 5, fontSize: 7.8, isHeader: true });
+                }
+                y = drawNavLogPdfTableRow(doc, y, [
+                    String(row.index),
+                    row.time,
+                    row.lat,
+                    row.lng,
+                    row.speed,
+                    row.heel,
+                    row.heading,
+                    row.wind,
+                    row.windDir,
+                    row.pressure,
+                    row.airTemp,
+                    row.seaTemp
+                ], widths, { startX: left, lineHeight: 5, fontSize: 7.6 });
+            });
+        }
+
+        const safeRoute = routeName.replace(/[^a-z0-9\-_]/gi, '_').slice(0, 40) || 'route';
+        const safeDate = String((entry.watchTimeIso || entry.timestamp || new Date().toISOString())).slice(0, 10);
+        doc.save(`log_${safeRoute}_${safeDate}.pdf`);
+    } catch (_error) {
+        alert(t('Impossible de générer le PDF du log.', 'No se puede generar el PDF del log.', 'Unable to generate log PDF.'));
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = t('Exporter PDF', 'Exportar PDF', 'Export PDF');
+        }
+    }
+}
+
 function getSeaComfortLevel(weather) {
     const waveHeight = weather?.waveHeight;
     const windSpeed = weather?.windSpeed;
@@ -7249,6 +7950,11 @@ function formatDateTimeFr(dateInput) {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+function formatTemperatureC(value, fallback = '--') {
+    const tempC = Number(value);
+    return Number.isFinite(tempC) ? `${tempC.toFixed(1)}°C` : fallback;
 }
 
 function loadArrayFromStorage(storageKey) {
@@ -10860,22 +11566,22 @@ function buildMaintenanceInvoiceAiAnalysis({ supplierName, invoiceDate, lines, s
 
     const risks = matchedRules.map(rule => rule.risk);
     if (!risks.length) {
-        risks.push(t('Aucun risque spécifique détecté. Vérifier quand même après la prochaine sortie.', 'No se detectan riesgos especificos. Verificar igualmente tras la proxima salida.'));
+        risks.push(t('Aucun risque spécifique détecté. Vérifier quand même après la prochaine sortie.', 'No se detectan riesgos específicos. Verificar igualmente tras la próxima salida.'));
     }
 
     const summary = t(
         `Analyse facture ${supplierName ? `(${supplierName})` : ''}: ${safeLines.length} ligne(s), montant ${Number.isFinite(totalAmount) ? totalAmount.toFixed(2) : '0.00'} ${String(currency || 'EUR').toUpperCase()}.`,
-        `Analisis factura ${supplierName ? `(${supplierName})` : ''}: ${safeLines.length} linea(s), importe ${Number.isFinite(totalAmount) ? totalAmount.toFixed(2) : '0.00'} ${String(currency || 'EUR').toUpperCase()}.`
+        `Análisis factura ${supplierName ? `(${supplierName})` : ''}: ${safeLines.length} línea(s), importe ${Number.isFinite(totalAmount) ? totalAmount.toFixed(2) : '0.00'} ${String(currency || 'EUR').toUpperCase()}.`
     );
 
     const taskLines = tasks.length
         ? tasks.map(task => `- [${String(task.priority || 'medium').toUpperCase()}] ${task.title} (${t('échéance', 'vencimiento')}: ${task.dueDate})`).join('\n')
-        : `- ${t('Pas de tâche automatique proposée.', 'No se proponen tareas automaticas.')}`;
+        : `- ${t('Pas de tâche automatique proposée.', 'No se proponen tareas automáticas.')}`;
 
     const reportText = [
         summary,
         '',
-        t('Avis IA (aide à la décision, non diagnostic certifié):', 'Opinion IA (ayuda a la decision, no diagnostico certificado):'),
+        t('Avis IA (aide à la décision, non diagnostic certifié):', 'Opinión IA (ayuda a la decisión, no diagnóstico certificado):'),
         ...risks.map(item => `- ${item}`),
         '',
         t('Tâches suggérées:', 'Tareas sugeridas:'),
@@ -11192,19 +11898,21 @@ function setActiveMaintenanceAnnotation(annotationId) {
 }
 
 function setActiveMaintenanceSubtab(tabKey) {
-    activeMaintenanceSubtab = ['tasks', 'expenses', 'suppliers', 'engine'].includes(tabKey) ? tabKey : 'tasks';
+    activeMaintenanceSubtab = ['tasks', 'expenses', 'suppliers', 'engine', 'signalk'].includes(tabKey) ? tabKey : 'tasks';
 
     const tabBtnMap = {
         tasks: document.getElementById('maintenanceTasksSubtabBtn'),
         expenses: document.getElementById('maintenanceExpensesSubtabBtn'),
         suppliers: document.getElementById('maintenanceSuppliersSubtabBtn'),
-        engine: document.getElementById('maintenanceEngineSubtabBtn')
+        engine: document.getElementById('maintenanceEngineSubtabBtn'),
+        signalk: document.getElementById('maintenanceSignalKSubtabBtn')
     };
     const panelMap = {
         tasks: document.getElementById('maintenanceTasksPanel'),
         expenses: document.getElementById('maintenanceExpensesPanel'),
         suppliers: document.getElementById('maintenanceSuppliersPanel'),
-        engine: document.getElementById('engineTab')
+        engine: document.getElementById('engineTab'),
+        signalk: document.getElementById('maintenanceSignalKPanel')
     };
 
     Object.entries(tabBtnMap).forEach(([key, node]) => {
@@ -11531,6 +12239,7 @@ function initializeMaintenanceFeature() {
     const expensesSubtabBtn = document.getElementById('maintenanceExpensesSubtabBtn');
     const suppliersSubtabBtn = document.getElementById('maintenanceSuppliersSubtabBtn');
     const engineSubtabBtn = document.getElementById('maintenanceEngineSubtabBtn');
+    const signalkSubtabBtn = document.getElementById('maintenanceSignalKSubtabBtn');
     const expenseListTabBtn = document.getElementById('maintenanceExpenseListTabBtn');
     const expenseAddTabBtn = document.getElementById('maintenanceExpenseAddTabBtn');
     const schemaNameInput = document.getElementById('maintenanceSchemaNameInput');
@@ -11559,6 +12268,19 @@ function initializeMaintenanceFeature() {
     const invoicePreviewPlaceholder = document.getElementById('maintenanceInvoicePreviewPlaceholder');
     const invoicePreviewTitle = document.getElementById('maintenanceInvoicePreviewTitle');
     const maintenanceExpenseDetailPanel = document.getElementById('maintenanceExpenseDetailPanel');
+
+    // Wire maintenance subtabs first so tab navigation remains available even
+    // if some optional maintenance widgets fail to initialize.
+    const bindMaintenanceSubtab = (button, key) => {
+        if (!button || button.dataset.subtabBound === '1') return;
+        button.dataset.subtabBound = '1';
+        button.addEventListener('click', () => setActiveMaintenanceSubtab(key));
+    };
+    bindMaintenanceSubtab(tasksSubtabBtn, 'tasks');
+    bindMaintenanceSubtab(expensesSubtabBtn, 'expenses');
+    bindMaintenanceSubtab(suppliersSubtabBtn, 'suppliers');
+    bindMaintenanceSubtab(engineSubtabBtn, 'engine');
+    bindMaintenanceSubtab(signalkSubtabBtn, 'signalk');
 
     // Force a stable layout for task creation controls (3 fields on top, legend full width below).
     // This guards against stale CSS cache or external overrides shrinking the legend textarea.
@@ -11755,12 +12477,6 @@ function initializeMaintenanceFeature() {
     renderMaintenanceExpenses();
     renderMaintenanceSuppliers();
 
-    tasksSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('tasks'));
-    expensesSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('expenses'));
-    suppliersSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('suppliers'));
-    if (engineSubtabBtn) {
-        engineSubtabBtn.addEventListener('click', () => setActiveMaintenanceSubtab('engine'));
-    }
     if (expenseListTabBtn) {
         expenseListTabBtn.addEventListener('click', () => setActiveMaintenanceExpensesView('list'));
     }
@@ -11982,7 +12698,7 @@ function initializeMaintenanceFeature() {
                 return;
             }
 
-            invoiceScanStatus.textContent = t('IA facture: analyse en cours...', 'IA factura: analisis en curso...');
+            invoiceScanStatus.textContent = t('IA facture: analyse en cours...', 'IA factura: análisis en curso...');
             analyzeInvoiceAiBtn.disabled = true;
             try {
                 const totalAmount = toFiniteAmount(expenseTotalInput.value);
@@ -12017,19 +12733,19 @@ function initializeMaintenanceFeature() {
                             : '';
                         invoiceScanStatus.textContent = t(
                             `IA facture: quota Gemini atteint, fallback heuristique utilisé.${retryHint}`,
-                            `IA factura: cuota Gemini alcanzada, se usa fallback heuristico.${retryHint}`
+                            `IA factura: cuota Gemini alcanzada, se usa fallback heurístico.${retryHint}`
                         );
                     }
                 }
 
                 if (!analysis) {
-                    throw new Error(t('Analyse IA vide.', 'Analisis IA vacio.'));
+                    throw new Error(t('Analyse IA vide.', 'Análisis IA vacío.'));
                 }
 
                 if (usedFallback && !invoiceScanStatus.textContent.includes('fallback')) {
                     invoiceScanStatus.textContent = t(
                         'IA facture: analyse générée en mode secours (heuristique).',
-                        'IA factura: analisis generado en modo de respaldo (heuristico).'
+                        'IA factura: análisis generado en modo de respaldo (heurístico).'
                     );
                 }
 
@@ -14229,6 +14945,8 @@ function sanitizeEngineLogEntry(entry, fallbackIndex = 0) {
         timestamp,
         hours,
         fuelAddedL: Math.max(0, toFiniteOrNull(readValue('fuelAddedL', 'fuel_added_l')) ?? 0),
+        probeTempStartC: toFiniteOrNull(readValue('probeTempStartC', 'probe_temp_start_c')),
+        probeTempEndC: toFiniteOrNull(readValue('probeTempEndC', 'probe_temp_end_c')),
         note: String(readValue('note') || '').trim(),
         creatorEmail: normalizeEmailForCompare(readValue('creatorEmail', 'creator_email') || ''),
         creatorName: String(readValue('creatorName', 'creator_name') || '').trim()
@@ -14713,6 +15431,8 @@ async function pushEngineLogEntriesToCloudTable() {
             timestamp: entry.timestamp || nowIso,
             hours: entry.hours,
             fuel_added_l: Number.isFinite(entry.fuelAddedL) ? entry.fuelAddedL : 0,
+            probe_temp_start_c: Number.isFinite(entry.probeTempStartC) ? entry.probeTempStartC : null,
+            probe_temp_end_c: Number.isFinite(entry.probeTempEndC) ? entry.probeTempEndC : null,
             note: entry.note || '',
             created_at: entry.timestamp || nowIso,
             updated_at: nowIso
@@ -14734,6 +15454,8 @@ async function pushEngineLogEntriesToCloudTable() {
                 timestamp: entry.timestamp || nowIso,
                 hours: entry.hours,
                 fuel_added_l: Number.isFinite(entry.fuelAddedL) ? entry.fuelAddedL : 0,
+                probe_temp_start_c: Number.isFinite(entry.probeTempStartC) ? entry.probeTempStartC : null,
+                probe_temp_end_c: Number.isFinite(entry.probeTempEndC) ? entry.probeTempEndC : null,
                 note: entry.note || '',
                 updated_at: nowIso
             })
@@ -15048,8 +15770,30 @@ async function pullNavLogEntriesFromCloudTable() {
 }
 
 function saveNavLogEntries() {
-    saveArrayToStorage(NAV_LOG_STORAGE_KEY, navLogEntries);
-    scheduleCloudLogbookPush({ includeNav: true, includeEngine: false });
+    navLogEntries = sanitizeNavLogEntriesList(navLogEntries);
+    let localSaved = true;
+    try {
+        saveArrayToStorage(NAV_LOG_STORAGE_KEY, navLogEntries);
+    } catch (error) {
+        localSaved = false;
+        const details = String(error?.message || error || 'erreur inconnue');
+        setNavLogStatus(t(
+            `Sauvegarde locale du journal impossible: ${details}`,
+            `Guardado local del diario imposible: ${details}`
+        ), true);
+    }
+
+    try {
+        scheduleCloudLogbookPush({ includeNav: true, includeEngine: false });
+    } catch (error) {
+        const details = String(error?.message || error || 'erreur inconnue');
+        setCloudStatus(t(
+            `Synchro cloud du journal impossible: ${details}`,
+            `Sincronización nube del diario imposible: ${details}`
+        ), true);
+    }
+
+    return localSaved;
 }
 
 function sanitizeNavGpsTraceSamplesList(list) {
@@ -15063,6 +15807,18 @@ function sanitizeNavGpsTraceSamplesList(list) {
 
             const speedKn = Number(item?.speedKn);
             const heelDeg = Number(item?.heelDeg);
+            const headingDeg = Number(item?.headingDeg);
+            const windDirectionDeg = Number(item?.windDirectionDeg);
+            const windSpeedKn = Number(item?.windSpeedKn);
+            const barometerHpa = Number(item?.barometerHpa);
+            const temperatureC = Number(item?.temperatureC ?? item?.temperature);
+            const seaSurfaceTemperatureC = Number(item?.seaSurfaceTemperatureC ?? item?.seaSurfaceTemperature);
+            const waveHeightM = Number(item?.waveHeightM);
+            const wavePeriodS = Number(item?.wavePeriodS);
+            const precipitationMm = Number(item?.precipitationMm);
+            const windGustKn = Number(item?.windGustKn);
+            const oceanCurrentKn = Number(item?.oceanCurrentKn);
+            const oceanCurrentDeg = Number(item?.oceanCurrentDeg);
             const timestamp = String(item?.timestamp || '').trim() || new Date().toISOString();
             const source = String(item?.source || 'gps-watch').trim() || 'gps-watch';
 
@@ -15073,6 +15829,21 @@ function sanitizeNavGpsTraceSamplesList(list) {
                 lng,
                 speedKn: Number.isFinite(speedKn) ? speedKn : null,
                 heelDeg: Number.isFinite(heelDeg) ? heelDeg : null,
+                headingDeg: Number.isFinite(headingDeg) ? normalizeCourseDegrees(headingDeg) : null,
+                windDirectionDeg: Number.isFinite(windDirectionDeg) ? normalizeCourseDegrees(windDirectionDeg) : null,
+                windSpeedKn: Number.isFinite(windSpeedKn) ? windSpeedKn : null,
+                seaState: String(item?.seaState || '').trim(),
+                sailConfig: String(item?.sailConfig || '').trim(),
+                barometerHpa: Number.isFinite(barometerHpa) ? barometerHpa : null,
+                temperatureC: Number.isFinite(temperatureC) ? temperatureC : null,
+                seaSurfaceTemperatureC: Number.isFinite(seaSurfaceTemperatureC) ? seaSurfaceTemperatureC : null,
+                waveHeightM: Number.isFinite(waveHeightM) ? waveHeightM : null,
+                wavePeriodS: Number.isFinite(wavePeriodS) ? wavePeriodS : null,
+                precipitationMm: Number.isFinite(precipitationMm) ? precipitationMm : null,
+                windGustKn: Number.isFinite(windGustKn) ? windGustKn : null,
+                oceanCurrentKn: Number.isFinite(oceanCurrentKn) ? oceanCurrentKn : null,
+                oceanCurrentDeg: Number.isFinite(oceanCurrentDeg) ? oceanCurrentDeg : null,
+                weatherUpdatedAt: String(item?.weatherUpdatedAt || '').trim(),
                 source
             };
         })
@@ -15092,7 +15863,7 @@ function getCurrentNavGpsSessionSamples() {
     const startIndex = Math.max(0, Number(navGpsSessionStartSampleIndex) || 0);
     return (Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples : [])
         .slice(startIndex)
-        .filter(item => item?.source === 'gps-watch' && Number.isFinite(item?.lat) && Number.isFinite(item?.lng));
+    .filter(item => item?.source !== 'manual' && Number.isFinite(item?.lat) && Number.isFinite(item?.lng));
 }
 
 function formatNowTimeLabel() {
@@ -15224,10 +15995,10 @@ function getNavChecklistTemplateItems(mode, templateKey = 'standard') {
         departure: {
             standard: [
                 t('Meteo et route confirmees', 'Meteo y ruta confirmadas'),
-                t('Niveaux moteur / carburant verifies', 'Niveles motor / combustible verificados'),
-                t('Securite equipe (gilets, VHF, pharmacie)', 'Seguridad tripulacion (chalecos, VHF, botiquin)'),
-                t('Mouillage/amarres prepares pour depart', 'Fondeo/amarres preparados para salida'),
-                t('Briefing equipage effectue', 'Briefing tripulacion realizado')
+                t('Niveaux moteur / carburant verifies', 'Niveles de motor y combustible verificados'),
+                t('Securite equipe (gilets, VHF, pharmacie)', 'Seguridad de tripulación (chalecos, VHF, botiquín)'),
+                t('Mouillage/amarres prepares pour depart', 'Fondeo y amarras preparados para salida'),
+                t('Briefing equipage effectue', 'Briefing de tripulación realizado')
             ],
             night: [
                 t('Feux de navigation verifies', 'Luces de navegación verificadas'),
@@ -15254,9 +16025,9 @@ function getNavChecklistTemplateItems(mode, templateKey = 'standard') {
         arrival: {
             standard: [
                 t('Mouillage ou place confirme(e)', 'Fondeo o plaza confirmada'),
-                t('Manoeuvre arrivee preparee (aussiere, pare-battage)', 'Maniobra llegada preparada (cabos, defensas)'),
+                t('Manoeuvre arrivee preparee (aussiere, pare-battage)', 'Maniobra de llegada preparada (cabos, defensas)'),
                 t('Moteur coupe et controles de securite', 'Motor parado y controles de seguridad'),
-                t('Log navigation complete', 'Bitacora navegacion completada'),
+                t('Log navigation complete', 'Bitácora de navegación completada'),
                 t('Bateau securise pour la nuit', 'Barco asegurado para la noche')
             ],
             night: [
@@ -15275,7 +16046,7 @@ function getNavChecklistTemplateItems(mode, templateKey = 'standard') {
             ],
             harbor: [
                 t('Contact capitainerie effectue', 'Contacto capitanía realizado'),
-                t('Pare-battages positionnes cote quai', 'Defensas posicionadas lado muelle'),
+                t('Pare-battages positionnes cote quai', 'Defensas posicionadas junto al muelle'),
                 t('Amarres avant/arriere en place', 'Cabos proa/popa en posición'),
                 t('Branchement quai (eau/elec) securise', 'Conexión muelle (agua/luz) asegurada'),
                 t('Passerelle et acces nuit controles', 'Pasarela y acceso nocturno controlados')
@@ -15472,14 +16243,240 @@ function loadNavSwellProfile() {
 
 function setNavSwellProfile(value, { persist = true } = {}) {
     navSwellProfile = normalizeNavSwellProfile(value);
-    const select = document.getElementById('navSwellProfileSelect');
-    if (select && select.value !== navSwellProfile) {
-        select.value = navSwellProfile;
-    }
     if (persist) {
         localStorage.setItem(NAV_SWELL_PROFILE_STORAGE_KEY, navSwellProfile);
     }
     updateNavLiveDashboard();
+}
+
+function cloneDashboardThresholdDefaults() {
+    return Object.fromEntries(
+        Object.entries(DASHBOARD_THRESHOLD_DEFAULTS).map(([metricKey, defaults]) => [metricKey, { ...defaults }])
+    );
+}
+
+function parseDashboardThresholdValue(value, fallback = null) {
+    if (value === null || value === undefined || value === '') return fallback;
+    const parsed = Number.parseFloat(String(value));
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function sanitizeDashboardThresholdMetric(metricKey, rawMetric) {
+    const defaults = DASHBOARD_THRESHOLD_DEFAULTS[metricKey] || {};
+    const source = rawMetric && typeof rawMetric === 'object' ? rawMetric : {};
+    const nextMetric = {
+        warnLow: parseDashboardThresholdValue(source.warnLow, defaults.warnLow ?? null),
+        alertLow: parseDashboardThresholdValue(source.alertLow, defaults.alertLow ?? null),
+        warnHigh: parseDashboardThresholdValue(source.warnHigh, defaults.warnHigh ?? null),
+        alertHigh: parseDashboardThresholdValue(source.alertHigh, defaults.alertHigh ?? null)
+    };
+
+    if (Number.isFinite(nextMetric.warnLow) && Number.isFinite(nextMetric.alertLow)) {
+        const orderedLow = [nextMetric.warnLow, nextMetric.alertLow].sort((left, right) => left - right);
+        [nextMetric.alertLow, nextMetric.warnLow] = orderedLow;
+    }
+    if (Number.isFinite(nextMetric.warnHigh) && Number.isFinite(nextMetric.alertHigh)) {
+        const orderedHigh = [nextMetric.warnHigh, nextMetric.alertHigh].sort((left, right) => left - right);
+        [nextMetric.warnHigh, nextMetric.alertHigh] = orderedHigh;
+    }
+
+    return nextMetric;
+}
+
+function sanitizeDashboardThresholdConfig(rawConfig) {
+    const defaults = cloneDashboardThresholdDefaults();
+    if (!rawConfig || typeof rawConfig !== 'object') {
+        return defaults;
+    }
+
+    for (const metricKey of Object.keys(defaults)) {
+        defaults[metricKey] = sanitizeDashboardThresholdMetric(metricKey, rawConfig[metricKey]);
+    }
+    return defaults;
+}
+
+function loadDashboardThresholdConfig() {
+    try {
+        const raw = localStorage.getItem(DASHBOARD_THRESHOLD_CONFIG_STORAGE_KEY);
+        dashboardThresholdConfig = raw
+            ? sanitizeDashboardThresholdConfig(JSON.parse(raw))
+            : cloneDashboardThresholdDefaults();
+    } catch (_) {
+        dashboardThresholdConfig = cloneDashboardThresholdDefaults();
+    }
+}
+
+function saveDashboardThresholdConfig() {
+    if (!dashboardThresholdConfig) return;
+    try {
+        localStorage.setItem(DASHBOARD_THRESHOLD_CONFIG_STORAGE_KEY, JSON.stringify(dashboardThresholdConfig));
+    } catch (_) { /* ignore */ }
+}
+
+function getDashboardThreshold(metricKey) {
+    if (!dashboardThresholdConfig) {
+        dashboardThresholdConfig = cloneDashboardThresholdDefaults();
+    }
+    return dashboardThresholdConfig[metricKey] || DASHBOARD_THRESHOLD_DEFAULTS[metricKey] || null;
+}
+
+function computeDashboardGaugeState(value, thresholdKey) {
+    const thresholds = getDashboardThreshold(thresholdKey);
+    if (!Number.isFinite(value) || !thresholds) return 'normal';
+
+    if (Number.isFinite(thresholds.alertLow) && value <= thresholds.alertLow) return 'alert';
+    if (Number.isFinite(thresholds.alertHigh) && value >= thresholds.alertHigh) return 'alert';
+    if (Number.isFinite(thresholds.warnLow) && value <= thresholds.warnLow) return 'warn';
+    if (Number.isFinite(thresholds.warnHigh) && value >= thresholds.warnHigh) return 'warn';
+    return 'normal';
+}
+
+function formatDashboardThresholdInputValue(value) {
+    return Number.isFinite(value) ? String(value) : '';
+}
+
+function setDashboardThresholdStatus(message, isError = false) {
+    const node = document.getElementById('dashboardThresholdStatus');
+    if (!node) return;
+    node.textContent = String(message || '');
+    node.classList.toggle('dashboard-threshold-status--error', Boolean(isError));
+}
+
+function renderDashboardThresholdConfigUi() {
+    if (!dashboardThresholdConfig) return;
+
+    document.querySelectorAll('[data-threshold-metric][data-threshold-field]').forEach(input => {
+        const metricKey = input.dataset.thresholdMetric;
+        const field = input.dataset.thresholdField;
+        if (!metricKey || !field) return;
+        const metricConfig = getDashboardThreshold(metricKey);
+        input.value = formatDashboardThresholdInputValue(metricConfig?.[field]);
+    });
+}
+
+function refreshDashboardThresholdConsumers() {
+    renderMaintenanceSignalKDashboard();
+    updateNavLiveDashboard();
+}
+
+function initDashboardThresholdUi() {
+    loadDashboardThresholdConfig();
+    renderDashboardThresholdConfigUi();
+    setDashboardThresholdStatus(t(
+        'Seuils dashboard sauvegardés localement sur cet appareil.',
+        'Umbrales del dashboard guardados localmente en este dispositivo.'
+    ));
+
+    document.querySelectorAll('[data-threshold-metric][data-threshold-field]').forEach(input => {
+        if (input.dataset.thresholdBound === '1') return;
+        input.dataset.thresholdBound = '1';
+        input.addEventListener('input', () => {
+            const metricKey = input.dataset.thresholdMetric;
+            const field = input.dataset.thresholdField;
+            if (!metricKey || !field) return;
+
+            const nextMetric = {
+                ...getDashboardThreshold(metricKey),
+                [field]: input.value === '' ? null : Number.parseFloat(input.value)
+            };
+            dashboardThresholdConfig = sanitizeDashboardThresholdConfig({
+                ...dashboardThresholdConfig,
+                [metricKey]: nextMetric
+            });
+            saveDashboardThresholdConfig();
+            renderDashboardThresholdConfigUi();
+            refreshDashboardThresholdConsumers();
+            setDashboardThresholdStatus(t(
+                'Seuils mis à jour.',
+                'Umbrales actualizados.'
+            ));
+        });
+    });
+
+    const resetButton = document.getElementById('dashboardThresholdResetBtn');
+    if (resetButton && resetButton.dataset.thresholdBound !== '1') {
+        resetButton.dataset.thresholdBound = '1';
+        resetButton.addEventListener('click', () => {
+            dashboardThresholdConfig = cloneDashboardThresholdDefaults();
+            saveDashboardThresholdConfig();
+            renderDashboardThresholdConfigUi();
+            refreshDashboardThresholdConsumers();
+            setDashboardThresholdStatus(t(
+                'Seuils réinitialisés aux valeurs par défaut.',
+                'Umbrales restablecidos a los valores por defecto.'
+            ));
+        });
+    }
+}
+
+function updateNavPolarCaptureHint() {
+    const hintEl = document.getElementById('navCapturePolarHint');
+    if (!hintEl) return;
+
+    const activeProfile = getSelectedPolarProfileForNavLog();
+    const profileName = String(activeProfile?.name || '').trim();
+    hintEl.textContent = profileName
+        ? t(
+            `Voilure active: ${profileName} — capturer quand l'allure est stable.`,
+            `Velamen activo: ${profileName} — capturar cuando la ceñida sea estable.`
+        )
+        : t(
+            'Utiliser le champ Voilure puis capturer quand l\'allure est stable.',
+            'Usar el campo Velamen y capturar cuando la ceñida sea estable.'
+        );
+}
+
+function captureNavPolarPoint() {
+    const profile = getSelectedPolarProfileForNavLog();
+    if (!profile) {
+        setNavLogStatus(t('Aucun profil polaire actif.', 'Ningún perfil polar activo.'), true);
+        updateNavPolarCaptureHint();
+        return;
+    }
+
+    const sailConfig = String(document.getElementById('watchSailConfigInput')?.value || '').trim();
+    const tws = Number.isFinite(signalkLatestWindSpeedKn) ? signalkLatestWindSpeedKn : null;
+    const twa = Number.isFinite(signalkLatestTwaDeg) ? normalizeTwaDegrees(signalkLatestTwaDeg) : null;
+    const speed = Number.isFinite(navLatestSpeedKn) ? navLatestSpeedKn : null;
+
+    if (!Number.isFinite(tws) || tws <= 0) {
+        setNavLogStatus(t('TWS manquant — connecter SignalK.', 'TWS faltante — conectar SignalK.'), true);
+        updateNavPolarCaptureHint();
+        return;
+    }
+    if (!Number.isFinite(twa) || twa <= 0) {
+        setNavLogStatus(t('TWA manquant — connecter SignalK.', 'TWA faltante — conectar SignalK.'), true);
+        updateNavPolarCaptureHint();
+        return;
+    }
+    if (!Number.isFinite(speed) || speed <= 0) {
+        setNavLogStatus(t('Vitesse manquante — GPS ou SignalK requis.', 'Velocidad faltante — GPS o SignalK requerido.'), true);
+        updateNavPolarCaptureHint();
+        return;
+    }
+
+    // Round TWS to nearest even kn (standard polar slices), TWA to nearest 5°
+    const twsKey = String(Math.round(tws / 2) * 2 || 2);
+    const twaKey = String(Math.max(5, Math.round(twa / 5) * 5));
+    const speedRounded = Math.round(speed * 100) / 100;
+
+    if (!profile.polarData || typeof profile.polarData !== 'object') {
+        profile.polarData = {};
+    }
+    if (!profile.polarData[twsKey] || typeof profile.polarData[twsKey] !== 'object') {
+        profile.polarData[twsKey] = {};
+    }
+    profile.polarData[twsKey][twaKey] = speedRounded;
+    profile.updatedAt = new Date().toISOString();
+
+    savePolarProfiles();
+
+    const sailInfo = sailConfig ? ` · ${sailConfig}` : '';
+    setNavLogStatus(t(
+        `✓ Capturé: ${profile.name}${sailInfo} · TWS ${twsKey} kn / TWA ${twaKey}° → ${speedRounded.toFixed(1)} kn`,
+        `✓ Capturado: ${profile.name}${sailInfo} · TWS ${twsKey} kn / TWA ${twaKey}° → ${speedRounded.toFixed(1)} kn`
+    ));
+    updateNavPolarCaptureHint();
 }
 
 function getSwellProfileConfig() {
@@ -15541,14 +16538,90 @@ function estimateSwellFromNavContext({ windSpeedKn, heelDeg, seaState }) {
     return { value, level };
 }
 
+function estimateRelativeHumidityPctFromAbsolute(absHumidityGm3, airTempC) {
+    const abs = Number(absHumidityGm3);
+    const temp = Number(airTempC);
+    if (!Number.isFinite(abs) || !Number.isFinite(temp)) return null;
+
+    // Saturation absolute humidity approximation (g/m3) from temperature (C).
+    const saturation = (6.112 * Math.exp((17.67 * temp) / (temp + 243.5)) * 2.1674) / (273.15 + temp);
+    if (!Number.isFinite(saturation) || saturation <= 0) return null;
+
+    return Math.max(0, Math.min(100, (abs / saturation) * 100));
+}
+
+function estimateDewPointC(airTempC, relativeHumidityPct, absHumidityGm3 = null) {
+    const temp = Number(airTempC);
+    let humidity = Number(relativeHumidityPct);
+
+    if (!Number.isFinite(humidity)) {
+        humidity = estimateRelativeHumidityPctFromAbsolute(absHumidityGm3, temp);
+    }
+    if (!Number.isFinite(temp) || !Number.isFinite(humidity)) return null;
+
+    const rh = Math.max(0.1, Math.min(100, humidity));
+    const a = 17.62;
+    const b = 243.12;
+    const gamma = Math.log(rh / 100) + ((a * temp) / (b + temp));
+    const dewPoint = (b * gamma) / (a - gamma);
+    return Number.isFinite(dewPoint) ? dewPoint : null;
+}
+
+function setNavLiveDashboardGauge(widgetKey, value, min, max, thresholdKey = null) {
+    const widget = document.querySelector(`[data-nav-widget="${widgetKey}"]`);
+    if (!widget) return;
+
+    let fillPct = 0;
+    if (Number.isFinite(value) && Number.isFinite(min) && Number.isFinite(max) && max > min) {
+        fillPct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+    }
+    widget.style.setProperty('--sk-fill', `${fillPct}%`);
+
+    widget.dataset.state = computeDashboardGaugeState(value, thresholdKey);
+}
+
+function setNavLiveDashboardBalance(balanceKey, value, min, max) {
+    const balance = document.querySelector(`[data-nav-balance="${balanceKey}"]`);
+    if (!balance) return;
+    let positionPct = 50;
+    if (Number.isFinite(value) && Number.isFinite(min) && Number.isFinite(max) && max > min) {
+        positionPct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+    }
+    balance.style.setProperty('--sk-balance', `${positionPct}%`);
+}
+
+function setNavLiveDashboardNeedle(needleKey, degrees) {
+    const needle = document.querySelector(`[data-nav-needle="${needleKey}"]`);
+    if (!needle) return;
+    const safeDegrees = Number.isFinite(degrees) ? degrees : 0;
+    needle.style.transform = `translateX(-50%) rotate(${safeDegrees}deg)`;
+}
+
 function updateNavLiveDashboard() {
     const speedNode = document.getElementById('navLiveSpeedValue');
     const heelNode = document.getElementById('navLiveHeelValue');
+    const heelBalanceNode = document.getElementById('navLiveHeelBalanceValue');
+    const batteryTempNode = document.getElementById('navLiveBatteryTempValue');
     const headingNode = document.getElementById('navLiveHeadingValue');
+    const courseNode = document.getElementById('navLiveCourseValue');
+    const logNode = document.getElementById('navLiveLogValue');
+    const twaNode = document.getElementById('navLiveTwaValue');
+    const twsNode = document.getElementById('navLiveTwsValue');
+    const twdNode = document.getElementById('navLiveTwdValue');
+    const baroNode = document.getElementById('navLiveBaroValue');
+    const airTempNode = document.getElementById('navLiveAirTempValue');
+    const probeTempNode = document.getElementById('navLiveProbeTempValue');
+    const humidityNode = document.getElementById('navLiveHumidityValue');
+    const dewPointNode = document.getElementById('navLiveDewPointValue');
+    const cloudNode = document.getElementById('navLiveCloudValue');
+    const rainNode = document.getElementById('navLiveRainValue');
+    const engineNode = document.getElementById('navLiveEngineValue');
+    const engineFramesNode = document.getElementById('navLiveEngineFramesValue');
+    const rpmNode = document.getElementById('navLiveRpmValue');
+    const pointOfSailNode = document.getElementById('navLivePointOfSailValue');
     const swellNode = document.getElementById('navLiveSwellValue');
-    const swellHintNode = document.getElementById('navLiveSwellHint');
     const liveCardNode = document.getElementById('navLiveTableCard');
-    if (!speedNode || !heelNode || !headingNode || !swellNode || !swellHintNode) return;
+    if (!speedNode || !heelNode || !headingNode || !swellNode) return;
 
     const latestEntry = Array.isArray(navLogEntries) && navLogEntries.length
         ? navLogEntries[navLogEntries.length - 1]
@@ -15607,32 +16680,203 @@ function updateNavLiveDashboard() {
     const liveWindInput = Number.parseFloat(String(windSpeedInput?.value || ''));
     const wind = Number.isFinite(liveWindInput)
         ? liveWindInput
-        : (Number.isFinite(contextEntry?.windSpeedKn) ? contextEntry.windSpeedKn : null);
+        : (Number.isFinite(signalkLatestWindSpeedKn)
+            ? signalkLatestWindSpeedKn
+            : (Number.isFinite(latestTraceEntry?.windSpeedKn)
+                ? latestTraceEntry.windSpeedKn
+                : (Number.isFinite(contextEntry?.windSpeedKn) ? contextEntry.windSpeedKn : null)));
+
+    const twd = Number.isFinite(signalkLatestWindDir)
+        ? normalizeCourseDegrees(signalkLatestWindDir)
+        : (Number.isFinite(latestTraceEntry?.windDirectionDeg)
+            ? normalizeCourseDegrees(latestTraceEntry.windDirectionDeg)
+            : (Number.isFinite(contextEntry?.windDirectionDeg)
+                ? normalizeCourseDegrees(contextEntry.windDirectionDeg)
+                : null));
+
+    const twaFromHeading = Number.isFinite(heading) && Number.isFinite(twd)
+        ? Math.abs(computeTWA(heading, twd))
+        : null;
+    const signedTwaFromHeading = Number.isFinite(heading) && Number.isFinite(twd)
+        ? computeTWA(heading, twd)
+        : null;
+    const twa = Number.isFinite(signalkLatestTwaDeg)
+        ? normalizeTwaDegrees(signalkLatestTwaDeg)
+        : (Number.isFinite(latestTraceEntry?.twaDeg)
+            ? normalizeTwaDegrees(latestTraceEntry.twaDeg)
+            : (Number.isFinite(twaFromHeading) ? normalizeTwaDegrees(twaFromHeading) : null));
+    const signedTwa = Number.isFinite(signalkLatestTwaDeg)
+        ? normalizeSignedRelativeDegrees(signalkLatestTwaDeg)
+        : (Number.isFinite(latestTraceEntry?.twaDeg)
+            ? normalizeSignedRelativeDegrees(latestTraceEntry.twaDeg)
+            : (Number.isFinite(signedTwaFromHeading) ? signedTwaFromHeading : null));
+
+    const liveBaroInput = Number.parseFloat(String(document.getElementById('watchBarometerInput')?.value || ''));
+    const liveLogInput = Number.parseFloat(String(document.getElementById('watchLogNmInput')?.value || ''));
+    const baro = Number.isFinite(liveBaroInput)
+        ? liveBaroInput
+        : (Number.isFinite(signalkLatestBaroHpa)
+            ? signalkLatestBaroHpa
+            : (Number.isFinite(latestTraceEntry?.barometerHpa)
+                ? latestTraceEntry.barometerHpa
+                : (Number.isFinite(contextEntry?.barometerHpa)
+                    ? contextEntry.barometerHpa
+                    : (Number.isFinite(navLatestWeatherPressureHpa) ? navLatestWeatherPressureHpa : null))));
+
+    const logNm = Number.isFinite(liveLogInput)
+        ? liveLogInput
+        : (Number.isFinite(signalkLatestLogNm)
+            ? signalkLatestLogNm
+            : (Number.isFinite(maintenanceSignalKLatestFrame?.logNm)
+                ? Number(maintenanceSignalKLatestFrame.logNm)
+                : (Number.isFinite(contextEntry?.logDistanceNm) ? contextEntry.logDistanceNm : null)));
+
+    const airTemp = Number.isFinite(signalkLatestAirTempC)
+        ? signalkLatestAirTempC
+        : (Number.isFinite(latestTraceEntry?.temperatureC)
+            ? latestTraceEntry.temperatureC
+            : (Number.isFinite(contextEntry?.temperatureC)
+                ? contextEntry.temperatureC
+                : (Number.isFinite(navLatestAirTempC) ? navLatestAirTempC : null)));
+
+    const probeTemp = Number.isFinite(signalkLatestProbeTempC)
+        ? signalkLatestProbeTempC
+        : null;
+
+    const batteryTemp = Number.isFinite(signalkLatestBatteryTempC)
+        ? signalkLatestBatteryTempC
+        : (Number.isFinite(maintenanceSignalKLatestFrame?.batteryTempC)
+            ? Number(maintenanceSignalKLatestFrame.batteryTempC)
+            : null);
+
+    const computedHumidity = estimateRelativeHumidityPctFromAbsolute(signalkLatestAbsHumidityGm3, airTemp);
+
+    const humidity = Number.isFinite(signalkLatestHumidityPct)
+        ? signalkLatestHumidityPct
+        : (Number.isFinite(latestTraceEntry?.humidityPct)
+            ? latestTraceEntry.humidityPct
+            : (Number.isFinite(contextEntry?.humidityPct)
+                ? contextEntry.humidityPct
+                : (Number.isFinite(computedHumidity) ? computedHumidity : null)));
+
+    const dewPoint = estimateDewPointC(airTemp, humidity, signalkLatestAbsHumidityGm3);
+
+    const cloudCover = Number.isFinite(signalkLatestCloudCoverPct)
+        ? signalkLatestCloudCoverPct
+        : (Number.isFinite(latestTraceEntry?.cloudCoverPct)
+            ? latestTraceEntry.cloudCoverPct
+            : (Number.isFinite(contextEntry?.cloudCoverPct) ? contextEntry.cloudCoverPct : null));
+
+    const rainRate = Number.isFinite(signalkLatestRainRateMmH)
+        ? signalkLatestRainRateMmH
+        : (Number.isFinite(latestTraceEntry?.rainRateMmH)
+            ? latestTraceEntry.rainRateMmH
+            : (Number.isFinite(contextEntry?.rainRateMmH) ? contextEntry.rainRateMmH : null));
+
+    const engineRunning = typeof signalkLatestEngineRunning === 'boolean'
+        ? signalkLatestEngineRunning
+        : (typeof maintenanceSignalKLatestFrame?.engineRunning === 'boolean'
+            ? maintenanceSignalKLatestFrame.engineRunning
+            : null);
+
+    const engineRpm = Number.isFinite(signalkLatestEngineRpm)
+        ? signalkLatestEngineRpm
+        : (Number.isFinite(maintenanceSignalKLatestFrame?.engineRpm)
+            ? Number(maintenanceSignalKLatestFrame.engineRpm)
+            : null);
+
+    const lat = Number.isFinite(navGpsLatestFix?.lat)
+        ? navGpsLatestFix.lat
+        : (Number.isFinite(latestTraceEntry?.lat)
+            ? latestTraceEntry.lat
+            : (Number.isFinite(contextEntry?.lat) ? contextEntry.lat : null));
+
+    const lng = Number.isFinite(navGpsLatestFix?.lng)
+        ? navGpsLatestFix.lng
+        : (Number.isFinite(latestTraceEntry?.lng)
+            ? latestTraceEntry.lng
+            : (Number.isFinite(contextEntry?.lng) ? contextEntry.lng : null));
 
     const seaState = String(seaStateInput?.value || contextEntry?.seaState || '');
     const swell = estimateSwellFromNavContext({ windSpeedKn: wind, heelDeg: heel, seaState });
 
+    const pointOfSailLabel = (() => {
+        const absTwa = Math.abs(Number(twa));
+        if (!Number.isFinite(absTwa)) return '--';
+        if (absTwa < 35) return t('Près serré', 'Ceñida cerrada');
+        if (absTwa < 60) return t('Près', 'Ceñida');
+        if (absTwa < 85) return t('Bon plein', 'A un descuartelar');
+        if (absTwa < 115) return t('Travers', 'Través');
+        if (absTwa < 145) return t('Largue', 'Largo');
+        if (absTwa < 170) return t('Grand largue', 'Aleta');
+        return t('Vent arrière', 'Popa');
+    })();
+
     speedNode.textContent = Number.isFinite(speed) ? `${speed.toFixed(1)} kn` : '-- kn';
-    heelNode.textContent = Number.isFinite(heel) ? `${heel.toFixed(1)} deg` : '-- deg';
-    headingNode.textContent = Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))} deg` : '-- deg';
+    heelNode.textContent = Number.isFinite(heel) ? `${heel.toFixed(1)}°` : '--';
+    if (heelBalanceNode) heelBalanceNode.textContent = Number.isFinite(heel) ? `${heel.toFixed(1)}°` : '--';
+    if (batteryTempNode) batteryTempNode.textContent = Number.isFinite(batteryTemp) ? `${batteryTemp.toFixed(1)}°C` : '--';
+    headingNode.textContent = Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))}°` : '--';
+    if (courseNode) courseNode.textContent = Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))}°` : '--';
+    if (logNode) logNode.textContent = Number.isFinite(logNm) ? `${logNm.toFixed(2)} nm` : '--';
+    if (twaNode) twaNode.textContent = Number.isFinite(twa) ? `${Math.round(twa)}°` : '--';
+    if (twsNode) twsNode.textContent = Number.isFinite(wind) ? `${wind.toFixed(1)} kn` : '--';
+    if (twdNode) twdNode.textContent = Number.isFinite(twd)
+        ? `${Math.round(twd)}° ${degreesToCardinalFr(twd)}`
+        : '--';
+    if (baroNode) baroNode.textContent = Number.isFinite(baro) ? `${baro.toFixed(1)} hPa` : '--';
+    if (airTempNode) airTempNode.textContent = Number.isFinite(airTemp) ? `${airTemp.toFixed(1)}°C` : '--';
+    if (probeTempNode) probeTempNode.textContent = Number.isFinite(probeTemp) ? `${probeTemp.toFixed(1)}°C` : '--';
+    if (humidityNode) humidityNode.textContent = Number.isFinite(humidity) ? `${humidity.toFixed(0)}%` : '--';
+    if (dewPointNode) dewPointNode.textContent = Number.isFinite(dewPoint) ? `${dewPoint.toFixed(1)}°C` : '--';
+    if (cloudNode) cloudNode.textContent = Number.isFinite(cloudCover) ? `${cloudCover.toFixed(0)}%` : '--';
+    if (rainNode) rainNode.textContent = Number.isFinite(rainRate) ? `${rainRate.toFixed(2)} mm/h` : '--';
+    if (engineNode) engineNode.textContent = typeof engineRunning === 'boolean' ? (engineRunning ? 'ON' : 'OFF') : '--';
+    if (engineFramesNode) engineFramesNode.textContent = String(Number(maintenanceSignalKStats?.engine || 0));
+    if (rpmNode) rpmNode.textContent = Number.isFinite(engineRpm) ? `${Math.round(engineRpm)} rpm` : '--';
+    if (pointOfSailNode) {
+        pointOfSailNode.textContent = pointOfSailLabel;
+        pointOfSailNode.dataset.empty = pointOfSailLabel === '--' ? '1' : '0';
+    }
     swellNode.textContent = `${swell.value.toFixed(1)} m`;
 
-    const swellClass = swell.value >= 3.4
+    const swellThresholds = getDashboardThreshold('navSwell');
+    const swellWarnHigh = Number.isFinite(swellThresholds?.warnHigh) ? swellThresholds.warnHigh : 2.2;
+    const swellAlertHigh = Number.isFinite(swellThresholds?.alertHigh) ? swellThresholds.alertHigh : 3.4;
+
+    const swellClass = swell.value >= swellAlertHigh
         ? 'log-live-swell--heavy'
-        : (swell.value >= 2.2 ? 'log-live-swell--rough' : (swell.value >= 1 ? 'log-live-swell--moderate' : 'log-live-swell--calm'));
+        : (swell.value >= swellWarnHigh ? 'log-live-swell--rough' : (swell.value >= 1 ? 'log-live-swell--moderate' : 'log-live-swell--calm'));
     swellNode.classList.remove('log-live-swell--calm', 'log-live-swell--moderate', 'log-live-swell--rough', 'log-live-swell--heavy');
     swellNode.classList.add(swellClass);
     if (liveCardNode) {
-        liveCardNode.classList.toggle('log-live-table-card--heavy', swell.value >= 2.6);
+        liveCardNode.classList.toggle('log-live-table-card--heavy', swell.value >= swellWarnHigh);
+        liveCardNode.classList.toggle('log-live-table-card--weather-alert',
+            (Number.isFinite(rainRate) && rainRate >= 0.4)
+            || (Number.isFinite(wind) && wind >= 25)
+            || swell.value >= swellAlertHigh);
     }
 
-    const profileLabel = navSwellProfile === 'conservative'
-        ? t('Conservateur', 'Conservador')
-        : (navSwellProfile === 'sport' ? t('Sportif', 'Deportivo') : t('Equilibre', 'Equilibrado'));
-    swellHintNode.textContent = t(
-        `Evaluation houle: ${swell.level} · profil ${profileLabel}`,
-        `Evaluacion oleaje: ${swell.level} · perfil ${profileLabel}`
-    );
+    setNavLiveDashboardGauge('speed', speed, 0, 12, 'navSpeed');
+    setNavLiveDashboardGauge('twa', Number.isFinite(twa) ? Math.abs(twa) : null, 0, 180);
+    setNavLiveDashboardGauge('tws', wind, 0, 40);
+    setNavLiveDashboardGauge('cog', Number.isFinite(heading) ? normalizeCourseDegrees(heading) : null, 0, 360);
+    setNavLiveDashboardGauge('heel', Number.isFinite(heel) ? Math.abs(heel) : null, 0, 45, 'navHeel');
+    setNavLiveDashboardGauge('airTemp', airTemp, -10, 45);
+    setNavLiveDashboardGauge('dewPoint', dewPoint, -10, 30);
+    setNavLiveDashboardGauge('swell', swell.value, 0, 5.5, 'navSwell');
+    setNavLiveDashboardGauge('probeTemp', probeTemp, 0, 120, 'signalkProbeTemp');
+    setNavLiveDashboardGauge('batteryTemp', batteryTemp, 0, 60, 'signalkBatteryTemp');
+    setNavLiveDashboardGauge('humidity', humidity, 0, 100, 'signalkHumidity');
+    setNavLiveDashboardGauge('baro', baro, 960, 1040, 'signalkBaro');
+    setNavLiveDashboardGauge('rpm', engineRpm, 0, 3500, 'signalkRpm');
+    setNavLiveDashboardBalance('twa', signedTwa, -180, 180);
+    setNavLiveDashboardBalance('heel', Number.isFinite(heel) ? heel : null, -45, 45);
+    setNavLiveDashboardNeedle('heading', Number.isFinite(heading) ? normalizeCourseDegrees(heading) : 0);
+    setNavLiveDashboardNeedle('wind', Number.isFinite(twd) ? normalizeCourseDegrees(twd) : 0);
+
+    updateNavPolarCaptureHint();
+    renderEngineLogTemperatureFields();
 }
 
 function readFiniteOrientationValue(value) {
@@ -15807,6 +17051,22 @@ function renderNavLogList() {
             });
             row.appendChild(traceHintRow);
 
+            const actionRow = document.createElement('div');
+            actionRow.className = 'button-row';
+            actionRow.style.marginTop = '6px';
+
+            const exportBtn = document.createElement('button');
+            exportBtn.type = 'button';
+            exportBtn.style.flex = '1';
+            exportBtn.textContent = t('PDF log', 'PDF log', 'Log PDF');
+            exportBtn.addEventListener('click', event => {
+                event.stopPropagation();
+                void exportNavLogEntryPdf(String(item?.id || ''));
+            });
+            actionRow.appendChild(exportBtn);
+
+            row.appendChild(actionRow);
+
             container.appendChild(row);
         });
 
@@ -15826,10 +17086,145 @@ function normalizeCourseDegrees(value) {
     return ((degrees % 360) + 360) % 360;
 }
 
+function normalizeTwaDegrees(value) {
+    const degrees = normalizeCourseDegrees(value);
+    if (!Number.isFinite(degrees)) return null;
+    return degrees > 180 ? 360 - degrees : degrees;
+}
+
+function normalizeSignedRelativeDegrees(value) {
+    const degrees = normalizeCourseDegrees(value);
+    if (!Number.isFinite(degrees)) return null;
+    return degrees > 180 ? degrees - 360 : degrees;
+}
+
 function getNavTraceEntryTimestampMs(entry) {
     if (!entry) return NaN;
     const rawValue = entry?.timestamp ?? entry?.watchTimeIso ?? entry?.fixTimeMs ?? null;
     return toTimestampMs(rawValue);
+}
+
+function shouldRefreshNavPointWeather(lat, lng, { force = false } = {}) {
+    if (force) return true;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+    const nowMs = Date.now();
+    if ((nowMs - navLastWeatherRefreshAtMs) >= NAV_POINT_WEATHER_REFRESH_INTERVAL_MS) {
+        return true;
+    }
+
+    if (!Number.isFinite(navLastWeatherRefreshLat) || !Number.isFinite(navLastWeatherRefreshLng)) {
+        return true;
+    }
+
+    const movedNm = distanceNm(navLastWeatherRefreshLat, navLastWeatherRefreshLng, lat, lng);
+    return Number.isFinite(movedNm) && movedNm >= NAV_POINT_WEATHER_REFRESH_DISTANCE_NM;
+}
+
+async function refreshNavPointWeather(lat, lng, { force = false } = {}) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    if (navWeatherRefreshInFlight) return false;
+    if (!shouldRefreshNavPointWeather(lat, lng, { force })) return false;
+
+    navWeatherRefreshInFlight = true;
+    navLastWeatherRefreshAtMs = Date.now();
+    navLastWeatherRefreshLat = lat;
+    navLastWeatherRefreshLng = lng;
+
+    try {
+        const weather = await getCurrentWeatherAtWaypoint(lat, lng);
+        const airTemp = Number(weather?.temperature);
+        const seaTemp = Number(weather?.seaSurfaceTemperature);
+        const pressure = Number(weather?.pressure);
+
+        navLatestAirTempC = Number.isFinite(airTemp) ? airTemp : navLatestAirTempC;
+        navLatestSeaTempC = Number.isFinite(seaTemp) ? seaTemp : navLatestSeaTempC;
+        navLatestWeatherPressureHpa = Number.isFinite(pressure) ? pressure : navLatestWeatherPressureHpa;
+        navLatestWeatherUpdatedAt = String(weather?.updatedAt || new Date().toISOString());
+        return true;
+    } catch (_error) {
+        return false;
+    } finally {
+        navWeatherRefreshInFlight = false;
+    }
+}
+
+function buildNavTracePointPopupHtml(entry, isLoadingWeather = false) {
+    const lat = Number(entry?.lat);
+    const lng = Number(entry?.lng);
+    const speedKn = Number(entry?.speedKn);
+    const heelDeg = Number(entry?.heelDeg);
+    const headingDeg = Number(entry?.headingDeg);
+    const windDirectionDeg = Number(entry?.windDirectionDeg);
+    const windSpeedKn = Number(entry?.windSpeedKn);
+    const windGustKn = Number(entry?.windGustKn);
+    const barometerHpa = Number(entry?.barometerHpa);
+    const airTempC = Number(entry?.temperatureC);
+    const seaTempC = Number(entry?.seaSurfaceTemperatureC);
+    const waveHeightM = Number(entry?.waveHeightM);
+    const wavePeriodS = Number(entry?.wavePeriodS);
+    const precipitationMm = Number(entry?.precipitationMm);
+    const oceanCurrentKn = Number(entry?.oceanCurrentKn);
+    const oceanCurrentDeg = Number(entry?.oceanCurrentDeg);
+
+    const na = '—';
+    const headingLabel = Number.isFinite(headingDeg) ? `${Math.round(normalizeCourseDegrees(headingDeg))}°` : na;
+    const windDirLabel = Number.isFinite(windDirectionDeg)
+        ? `${Math.round(normalizeCourseDegrees(windDirectionDeg))}° ${degreesToCardinalFr(windDirectionDeg)}`
+        : na;
+    const currentDirLabel = Number.isFinite(oceanCurrentDeg)
+        ? `${Math.round(normalizeCourseDegrees(oceanCurrentDeg))}° ${degreesToCardinalFr(oceanCurrentDeg)}`
+        : na;
+
+    const row = (label, value) =>
+        `<tr><td style="color:#5a7070;padding:2px 8px 2px 0;white-space:nowrap;font-size:11px">${label}</td>` +
+        `<td style="font-weight:600;font-size:12px">${value}</td></tr>`;
+
+    const sectionHd = (icon, label) =>
+        `<tr><td colspan="2" style="padding:5px 0 2px;border-bottom:1px solid #dde8e8;color:#0a5c5a;` +
+        `font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700">${icon} ${label}</td></tr>`;
+
+    const waveLabel = Number.isFinite(waveHeightM)
+        ? `${waveHeightM.toFixed(1)} m${Number.isFinite(wavePeriodS) ? ` · ${wavePeriodS.toFixed(0)}s` : ''}`
+        : na;
+    const currentLabel = Number.isFinite(oceanCurrentKn)
+        ? `${oceanCurrentKn.toFixed(1)} kn · ${currentDirLabel}`
+        : na;
+
+    const tableStyle = 'border-collapse:collapse;width:100%;margin-bottom:4px';
+    const loadingRow = isLoadingWeather
+        ? `<tr><td colspan="2" style="color:#888;font-size:11px;padding:3px 0 1px">` +
+          `⏳ ${t('Chargement météo...', 'Cargando meteo...')}</td></tr>`
+        : '';
+
+    const rows =
+        sectionHd('🧭', t('Navigation', 'Navegación')) +
+        row(t('Heure', 'Hora'), escapeHtml(formatDateTimeFr(entry?.timestamp))) +
+        row(t('Position', 'Posición'), Number.isFinite(lat) && Number.isFinite(lng) ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : na) +
+        row(t('Vitesse', 'Velocidad'), Number.isFinite(speedKn) ? `${speedKn.toFixed(1)} kn` : na) +
+        row(t('Cap', 'Rumbo'), headingLabel) +
+        row(t('Inclinaison', 'Inclinación'), Number.isFinite(heelDeg) ? `${heelDeg.toFixed(1)}°` : na) +
+        sectionHd('🌦', t('Météo', 'Meteo')) +
+        row(t('Vent', 'Viento'), Number.isFinite(windSpeedKn) ? `${windSpeedKn.toFixed(1)} kn · ${windDirLabel}` : na) +
+        row(t('Rafales', 'Ráfagas'), Number.isFinite(windGustKn) ? `${windGustKn.toFixed(1)} kn` : na) +
+        row(t('Temp air', 'Temp aire'), Number.isFinite(airTempC) ? `${airTempC.toFixed(1)}°C` : na) +
+        row(t('Temp mer', 'Temp mar'), Number.isFinite(seaTempC) ? `${seaTempC.toFixed(1)}°C` : na) +
+        row(t('Pression', 'Presión'), Number.isFinite(barometerHpa) ? `${barometerHpa.toFixed(0)} hPa` : na) +
+        row(t('Pluie', 'Lluvia'), Number.isFinite(precipitationMm) ? `${precipitationMm.toFixed(1)} mm` : na) +
+        row(t('Houle', 'Oleaje'), waveLabel) +
+        row(t('Courant', 'Corriente'), currentLabel) +
+        loadingRow +
+        sectionHd('⛵', t('État de mer', 'Estado de mar')) +
+        row(t('État de mer', 'Estado de mar'), escapeHtml(String(entry?.seaState || na))) +
+        row(t('Voilure', 'Velamen'), escapeHtml(String(entry?.sailConfig || na))) +
+        row(t('Source', 'Origen'), escapeHtml(String(entry?.source || na)));
+
+    return `<div style="min-width:240px;max-width:290px;font-family:inherit">` +
+        `<div style="font-weight:700;font-size:13px;color:#0a5c5a;margin-bottom:5px;` +
+        `border-bottom:2px solid #0a5c5a;padding-bottom:4px">` +
+        `📍 ${t('Point de trace GPS', 'Punto de traza GPS')}</div>` +
+        `<table style="${tableStyle}">${rows}</table>` +
+        `</div>`;
 }
 
 function computeDerivedNavMetricsFromPoints(previousPoint, currentPoint) {
@@ -15993,7 +17388,8 @@ function updateNavCurrentPositionMarker(fix) {
         `${t('Position GPS actuelle', 'Posicion GPS actual')}<br>` +
         `${t('Heure', 'Hora')}: ${fixTimeLabel}<br>` +
         `${t('Vitesse', 'Velocidad')}: ${speedLabel}<br>` +
-        `${t('Cap', 'Rumbo')}: ${headingLabel}`
+        `${t('Cap', 'Rumbo')}: ${headingLabel}<br>` +
+        `${t('Temp air', 'Temp aire')}: ${Number.isFinite(navLatestAirTempC) ? `${navLatestAirTempC.toFixed(1)}°C` : 'N/A'}`
     );
     navCurrentPositionMarker.bindTooltip(t('Position actuelle', 'Posicion actual'), {
         direction: 'top',
@@ -16046,9 +17442,39 @@ function renderNavGpsTraceOnMap() {
             fillOpacity: 0.9
         });
 
-        const timeLabel = formatDateTimeFr(entry?.timestamp);
-        const heelLabel = Number.isFinite(heel) ? `${heel.toFixed(1)}°` : t('N/A', 'N/A');
-        marker.bindPopup(`${t('Trace GPS', 'Traza GPS')}<br>${timeLabel}<br>${t('Inclinaison', 'Inclinación')}: ${heelLabel}`);
+        const needsWeatherFetch = !Number.isFinite(entry.waveHeightM) || !Number.isFinite(entry.precipitationMm);
+        marker.bindPopup(buildNavTracePointPopupHtml(entry, needsWeatherFetch), { maxWidth: 310, autoPan: false });
+
+        if (needsWeatherFetch) {
+            marker.on('popupopen', async () => {
+                try {
+                    const ts = new Date(entry.timestamp);
+                    const dateStr = ts.toISOString().split('T')[0];
+                    const hourStr = `${String(ts.getUTCHours()).padStart(2, '0')}:00`;
+                    const weather = await getWeatherAtDateHour(entry.lat, entry.lng, dateStr, hourStr);
+                    if (!marker.isPopupOpen()) return;
+                    const enriched = {
+                        ...entry,
+                        windSpeedKn: Number.isFinite(entry.windSpeedKn) ? entry.windSpeedKn : weather?.windSpeed,
+                        windDirectionDeg: Number.isFinite(entry.windDirectionDeg) ? entry.windDirectionDeg : weather?.windDirection,
+                        windGustKn: Number.isFinite(entry.windGustKn) ? entry.windGustKn : weather?.windGust,
+                        temperatureC: Number.isFinite(entry.temperatureC) ? entry.temperatureC : weather?.temperature,
+                        seaSurfaceTemperatureC: Number.isFinite(entry.seaSurfaceTemperatureC) ? entry.seaSurfaceTemperatureC : weather?.seaSurfaceTemperature,
+                        barometerHpa: Number.isFinite(entry.barometerHpa) ? entry.barometerHpa : weather?.pressure,
+                        waveHeightM: Number.isFinite(entry.waveHeightM) ? entry.waveHeightM : weather?.waveHeight,
+                        wavePeriodS: Number.isFinite(entry.wavePeriodS) ? entry.wavePeriodS : weather?.wavePeriod,
+                        precipitationMm: Number.isFinite(entry.precipitationMm) ? entry.precipitationMm : weather?.precipitation,
+                        windGustKn: Number.isFinite(entry.windGustKn) ? entry.windGustKn : weather?.windGust,
+                        oceanCurrentKn: Number.isFinite(entry.oceanCurrentKn) ? entry.oceanCurrentKn : weather?.currentSpeedKnots,
+                        oceanCurrentDeg: Number.isFinite(entry.oceanCurrentDeg) ? entry.oceanCurrentDeg : weather?.oceanCurrentDirection,
+                    };
+                    marker.setPopupContent(buildNavTracePointPopupHtml(enriched, false));
+                } catch (_e) {
+                    if (marker.isPopupOpen()) marker.setPopupContent(buildNavTracePointPopupHtml(entry, false));
+                }
+            });
+        }
+
         layerGroup.addLayer(marker);
     });
 }
@@ -16073,7 +17499,12 @@ function resetNavLogEditorForm() {
     if (watchWindDirInput) watchWindDirInput.value = '';
     if (watchWindSpeedInput) watchWindSpeedInput.value = '';
     if (watchSeaStateInput) watchSeaStateInput.value = 'calme';
-    if (watchSailConfigInput) watchSailConfigInput.value = '';
+    if (watchSailConfigInput) {
+        const activeProfile = getSelectedPolarProfileForNavLog();
+        const activeProfileName = String(activeProfile?.name || '');
+        refreshNavSailConfigSelect(activeProfileName);
+        watchSailConfigInput.dataset.polarProfileName = activeProfileName;
+    }
     if (watchBarometerInput) watchBarometerInput.value = '';
     if (watchLogNmInput) watchLogNmInput.value = '';
     if (watchEventsInput) watchEventsInput.value = '';
@@ -16103,10 +17534,32 @@ function cancelNavLogEdit() {
     navSelectedTraceEntryId = '';
     resetNavLogEditorForm();
     updateNavLogFormMode();
-    if (logWorkspaceMode === 'nav') {
-        logWorkspaceMode = 'none';
-    }
+    logWorkspaceMode = 'nav';
     renderNavLogList();
+    renderLogWorkspacePanel();
+    updateNavLiveDashboard();
+}
+
+function closeLogWorkspacePanel() {
+    editingNavLogEntryId = null;
+    editingEngineLogEntryId = null;
+    engineLogDraftStartProbeTempC = null;
+    navSelectedTraceEntryId = '';
+    logWorkspaceMode = 'none';
+    resetNavLogEditorForm();
+
+    const hoursInput = document.getElementById('engineHoursInput');
+    const fuelInput = document.getElementById('fuelAddedInput');
+    const noteInput = document.getElementById('engineLogNoteInput');
+    if (hoursInput) hoursInput.value = '';
+    if (fuelInput) fuelInput.value = '';
+    if (noteInput) noteInput.value = '';
+
+    updateNavLogFormMode();
+    updateEngineLogFormMode();
+    refreshEngineHoursInputGuard();
+    renderNavLogList();
+    renderEngineLogList();
     renderLogWorkspacePanel();
     updateNavLiveDashboard();
 }
@@ -16115,6 +17568,14 @@ function startEditNavLogEntry(entryId) {
     const targetId = String(entryId || '');
     const entry = navLogEntries.find(item => String(item?.id || '') === targetId);
     if (!entry) return;
+
+    if (activeTabName === 'navlog' && !navLogLayoutState.showLog) {
+        navLogLayoutState = {
+            ...navLogLayoutState,
+            showLog: true
+        };
+        saveNavLogLayoutState();
+    }
 
     const watchTimeInput = document.getElementById('watchTimeInput');
     const watchEndTimeInput = document.getElementById('watchEndTimeInput');
@@ -16141,13 +17602,14 @@ function startEditNavLogEntry(entryId) {
         watchEndTimeInput.value = entryEndDate ? toLocalDateTimeInputValue(entryEndDate) : '';
     }
     watchCrewInput.value = String(entry?.watchCrew || '');
-    watchHeadingInput.value = Number.isFinite(entry?.headingDeg) ? String(entry.headingDeg) : '';
-    watchWindDirInput.value = Number.isFinite(entry?.windDirectionDeg) ? String(entry.windDirectionDeg) : '';
-    watchWindSpeedInput.value = Number.isFinite(entry?.windSpeedKn) ? String(entry.windSpeedKn) : '';
+    watchHeadingInput.value = Number.isFinite(entry?.headingDeg) ? String(Math.round(entry.headingDeg)) : '';
+    watchWindDirInput.value = Number.isFinite(entry?.windDirectionDeg) ? String(Math.round(entry.windDirectionDeg)) : '';
+    watchWindSpeedInput.value = Number.isFinite(entry?.windSpeedKn) ? entry.windSpeedKn.toFixed(1) : '';
     watchSeaStateInput.value = String(entry?.seaState || 'calme');
-    watchSailConfigInput.value = String(entry?.sailConfig || '');
-    watchBarometerInput.value = Number.isFinite(entry?.barometerHpa) ? String(entry.barometerHpa) : '';
-    watchLogNmInput.value = Number.isFinite(entry?.logDistanceNm) ? String(entry.logDistanceNm) : '';
+    refreshNavSailConfigSelect(String(entry?.sailConfig || ''));
+    delete watchSailConfigInput.dataset.polarProfileName;
+    watchBarometerInput.value = Number.isFinite(entry?.barometerHpa) ? entry.barometerHpa.toFixed(1) : '';
+    watchLogNmInput.value = Number.isFinite(entry?.logDistanceNm) ? entry.logDistanceNm.toFixed(1) : '';
     watchEventsInput.value = String(entry?.events || '');
 
     logWorkspaceMode = 'nav';
@@ -16246,6 +17708,60 @@ function captureNavGpsSample(sampleSource = 'gps-watch') {
         return false;
     }
 
+    const watchHeadingInput = document.getElementById('watchHeadingInput');
+    const watchWindDirInput = document.getElementById('watchWindDirInput');
+    const watchWindSpeedInput = document.getElementById('watchWindSpeedInput');
+    const watchSeaStateInput = document.getElementById('watchSeaStateInput');
+    const watchSailConfigInput = document.getElementById('watchSailConfigInput');
+    const watchBarometerInput = document.getElementById('watchBarometerInput');
+
+    const headingFromInput = Number.parseFloat(String(watchHeadingInput?.value || ''));
+    const windDirFromInput = Number.parseFloat(String(watchWindDirInput?.value || ''));
+    const windSpeedFromInput = Number.parseFloat(String(watchWindSpeedInput?.value || ''));
+    const barometerFromInput = Number.parseFloat(String(watchBarometerInput?.value || ''));
+
+    const sampleHeadingDeg = Number.isFinite(navLatestCourseDeg)
+        ? normalizeCourseDegrees(navLatestCourseDeg)
+        : (Number.isFinite(headingFromInput) ? normalizeCourseDegrees(headingFromInput) : null);
+    const sampleWindDirectionDeg = Number.isFinite(signalkLatestWindDir)
+        ? normalizeCourseDegrees(signalkLatestWindDir)
+        : (Number.isFinite(windDirFromInput) ? normalizeCourseDegrees(windDirFromInput) : null);
+    const sampleWindSpeedKn = Number.isFinite(signalkLatestWindSpeedKn)
+        ? signalkLatestWindSpeedKn
+        : (Number.isFinite(windSpeedFromInput) ? windSpeedFromInput : null);
+    const sampleSeaState = String(watchSeaStateInput?.value || '').trim();
+    const sampleSailConfig = String(watchSailConfigInput?.value || '').trim();
+
+    const nowSlot = toDateAndHourUtc(new Date());
+    const cachedWeather = weatherCache.get(
+        getWeatherCacheKeyAtDateHour(navGpsLatestFix.lat, navGpsLatestFix.lng, nowSlot.date, nowSlot.hour)
+    );
+    const cachedAirTemp = Number(cachedWeather?.temperature);
+    const cachedSeaTemp = Number(cachedWeather?.seaSurfaceTemperature);
+    const cachedPressure = Number(cachedWeather?.pressure);
+    const cachedWaveHeight = Number(cachedWeather?.waveHeight);
+    const cachedWavePeriod = Number(cachedWeather?.wavePeriod);
+    const cachedPrecip = Number(cachedWeather?.precipitation);
+    const cachedWindGust = Number(cachedWeather?.windGust);
+    const cachedCurrentKn = Number(cachedWeather?.currentSpeedKnots);
+    const cachedCurrentDeg = Number(cachedWeather?.oceanCurrentDirection);
+
+    if (!Number.isFinite(navLatestAirTempC) && Number.isFinite(cachedAirTemp)) {
+        navLatestAirTempC = cachedAirTemp;
+    }
+    if (!Number.isFinite(navLatestSeaTempC) && Number.isFinite(cachedSeaTemp)) {
+        navLatestSeaTempC = cachedSeaTemp;
+    }
+    if (!Number.isFinite(navLatestWeatherPressureHpa) && Number.isFinite(cachedPressure)) {
+        navLatestWeatherPressureHpa = cachedPressure;
+    }
+
+    const sampleBarometerHpa = Number.isFinite(barometerFromInput)
+        ? barometerFromInput
+        : (Number.isFinite(navLatestWeatherPressureHpa) ? navLatestWeatherPressureHpa : null);
+
+    void refreshNavPointWeather(navGpsLatestFix.lat, navGpsLatestFix.lng);
+
     navGpsSessionSamples.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: new Date().toISOString(),
@@ -16253,6 +17769,21 @@ function captureNavGpsSample(sampleSource = 'gps-watch') {
         lng: navGpsLatestFix.lng,
         speedKn: navGpsLatestFix.speedKn,
         heelDeg: Number.isFinite(navLatestHeelDeg) ? navLatestHeelDeg : null,
+        headingDeg: sampleHeadingDeg,
+        windDirectionDeg: sampleWindDirectionDeg,
+        windSpeedKn: sampleWindSpeedKn,
+        seaState: sampleSeaState,
+        sailConfig: sampleSailConfig,
+        barometerHpa: sampleBarometerHpa,
+        temperatureC: Number.isFinite(navLatestAirTempC) ? navLatestAirTempC : null,
+        seaSurfaceTemperatureC: Number.isFinite(navLatestSeaTempC) ? navLatestSeaTempC : null,
+        waveHeightM: Number.isFinite(cachedWaveHeight) ? cachedWaveHeight : null,
+        wavePeriodS: Number.isFinite(cachedWavePeriod) ? cachedWavePeriod : null,
+        precipitationMm: Number.isFinite(cachedPrecip) ? cachedPrecip : null,
+        windGustKn: Number.isFinite(cachedWindGust) ? cachedWindGust : null,
+        oceanCurrentKn: Number.isFinite(cachedCurrentKn) ? cachedCurrentKn : null,
+        oceanCurrentDeg: Number.isFinite(cachedCurrentDeg) ? cachedCurrentDeg : null,
+        weatherUpdatedAt: navLatestWeatherUpdatedAt,
         source: sampleSource
     });
 
@@ -16287,6 +17818,31 @@ function appendAutoNavSessionSummaryEntry() {
     const averageHeel = heelValues.length ? heelValues.reduce((sum, value) => sum + Math.abs(value), 0) / heelValues.length : null;
     const durationMinutes = navGpsSessionStartMs > 0 ? Math.max(0, (Date.now() - navGpsSessionStartMs) / 60000) : null;
 
+    const watchHeadingInput = document.getElementById('watchHeadingInput');
+    const watchWindDirInput = document.getElementById('watchWindDirInput');
+    const watchWindSpeedInput = document.getElementById('watchWindSpeedInput');
+    const watchSeaStateInput = document.getElementById('watchSeaStateInput');
+    const watchSailConfigInput = document.getElementById('watchSailConfigInput');
+    const watchBarometerInput = document.getElementById('watchBarometerInput');
+
+    const headingFromInput = Number.parseFloat(String(watchHeadingInput?.value || ''));
+    const windDirFromInput = Number.parseFloat(String(watchWindDirInput?.value || ''));
+    const windSpeedFromInput = Number.parseFloat(String(watchWindSpeedInput?.value || ''));
+    const barometerFromInput = Number.parseFloat(String(watchBarometerInput?.value || ''));
+
+    const latestHeadingDeg = Number.isFinite(navLatestCourseDeg)
+        ? normalizeCourseDegrees(navLatestCourseDeg)
+        : (Number.isFinite(headingFromInput) ? normalizeCourseDegrees(headingFromInput) : null);
+    const latestWindDirectionDeg = Number.isFinite(signalkLatestWindDir)
+        ? normalizeCourseDegrees(signalkLatestWindDir)
+        : (Number.isFinite(windDirFromInput) ? normalizeCourseDegrees(windDirFromInput) : null);
+    const latestWindSpeedKn = Number.isFinite(signalkLatestWindSpeedKn)
+        ? signalkLatestWindSpeedKn
+        : (Number.isFinite(windSpeedFromInput) ? windSpeedFromInput : null);
+    const latestBarometerHpa = Number.isFinite(barometerFromInput) ? barometerFromInput : null;
+    const latestSeaState = String(watchSeaStateInput?.value || '').trim();
+    const latestSailConfig = String(watchSailConfigInput?.value || '').trim();
+
     const summaryText = t(
         `Session GPS auto: ${sessionEntries.length} points · durée ${durationMinutes ? durationMinutes.toFixed(1) : '0.0'} min · distance ${distance.toFixed(2)} NM · vitesse moy ${Number.isFinite(averageSpeed) ? averageSpeed.toFixed(1) : 'N/A'} kn · inclinaison moy ${Number.isFinite(averageHeel) ? averageHeel.toFixed(1) : 'N/A'}°`,
         `Sesión GPS auto: ${sessionEntries.length} puntos · duración ${durationMinutes ? durationMinutes.toFixed(1) : '0.0'} min · distancia ${distance.toFixed(2)} NM · velocidad media ${Number.isFinite(averageSpeed) ? averageSpeed.toFixed(1) : 'N/A'} kn · inclinación media ${Number.isFinite(averageHeel) ? averageHeel.toFixed(1) : 'N/A'}°`
@@ -16301,6 +17857,12 @@ function appendAutoNavSessionSummaryEntry() {
         watchTimeIso: navGpsSessionStartMs > 0 ? new Date(navGpsSessionStartMs).toISOString() : new Date().toISOString(),
         watchEndTimeIso: new Date().toISOString(),
         watchCrew: t('AUTO GPS', 'AUTO GPS'),
+        headingDeg: latestHeadingDeg,
+        windDirectionDeg: latestWindDirectionDeg,
+        windSpeedKn: latestWindSpeedKn,
+        seaState: latestSeaState,
+        sailConfig: latestSailConfig,
+        barometerHpa: latestBarometerHpa,
         logDistanceNm: distance,
         events: summaryText,
         traceSamples: sessionEntries
@@ -16323,14 +17885,24 @@ function addManualNavigationLogEntry(event) {
     if (event?.preventDefault) event.preventDefault();
     if (event?.stopPropagation) event.stopPropagation();
 
-    const manualData = getManualNavFormData();
+    let manualData;
+    try {
+        manualData = getManualNavFormData();
+    } catch (error) {
+        const details = String(error?.message || error || 'erreur inconnue');
+        setNavLogStatus(t(
+            `Lecture du formulaire journal impossible: ${details}`,
+            `Lectura del formulario diario imposible: ${details}`
+        ), true);
+        return;
+    }
 
     if (editingNavLogEntryId) {
         let updated = false;
         navLogEntries = navLogEntries.map(entry => {
             if (String(entry?.id || '') !== editingNavLogEntryId) return entry;
             updated = true;
-            return {
+            const normalizedEntry = sanitizeNavLogEntry({
                 ...entry,
                 ...manualData,
                 source: 'manual',
@@ -16338,7 +17910,8 @@ function addManualNavigationLogEntry(event) {
                 heelDeg: Number.isFinite(navLatestHeelDeg) ? navLatestHeelDeg : entry?.heelDeg ?? null,
                 creatorEmail: entry?.creatorEmail || getCreatorPatch().creatorEmail,
                 creatorName: entry?.creatorName || getCreatorPatch().creatorName
-            };
+            });
+            return normalizedEntry || entry;
         });
 
         if (updated) {
@@ -16346,7 +17919,7 @@ function addManualNavigationLogEntry(event) {
             updateNavLogFormMode();
             renderNavLogList();
             setNavLogStatus(t('Entrée journal mise à jour.', 'Entrada de diario actualizada.'));
-            alert(t('Mise à jour du log de navigation confirmée.', 'Actualizacion del log de navegacion confirmada.'));
+            alert(t('Mise à jour du log de navigation confirmée.', 'Actualización del log de navegación confirmada.'));
             // Keep nav editor visible after an update to avoid closing the workspace unexpectedly.
             logWorkspaceMode = 'nav';
             renderLogWorkspacePanel();
@@ -16359,14 +17932,23 @@ function addManualNavigationLogEntry(event) {
         setNavLogStatus(t('Mode édition invalide détecté, création d\'une nouvelle entrée.', 'Modo edición inválido detectado, creación de una nueva entrada.'));
     }
 
-    appendNavLogEntry({
-        lat: null,
-        lng: null,
-        speedKn: navLatestSpeedKn,
-        heelDeg: navLatestHeelDeg,
-        source: 'manual',
-        ...manualData
-    });
+    try {
+        appendNavLogEntry({
+            lat: null,
+            lng: null,
+            speedKn: navLatestSpeedKn,
+            heelDeg: navLatestHeelDeg,
+            source: 'manual',
+            ...manualData
+        });
+    } catch (error) {
+        const details = String(error?.message || error || 'erreur inconnue');
+        setNavLogStatus(t(
+            `Enregistrement du journal impossible: ${details}`,
+            `Registro del diario imposible: ${details}`
+        ), true);
+        return;
+    }
 
     setNavLogStatus(t(`Entrée jour de bord ajoutée · ${navLogEntries.length} entrée(s)`, `Entrada de bitácora añadida · ${navLogEntries.length} entrada(s)`));
 
@@ -16518,6 +18100,7 @@ function finalizeEngineSensorSession() {
     engineSensorDetectedRunning = false;
 
     if (durationMs < 45000) {
+        engineSensorRunningStartProbeTempC = null;
         setEngineSensorStatus(t('Détection moteur: session ignorée (<45s).', 'Detección motor: sesión ignorada (<45s).', 'Engine detection: session ignored (<45s).'));
         renderEngineSensorUi();
         return;
@@ -16531,6 +18114,7 @@ function finalizeEngineSensorSession() {
     }
 
     if (!Number.isFinite(baselineHours)) {
+        engineSensorRunningStartProbeTempC = null;
         setEngineSensorStatus(t(
             'Détection moteur: définis d\'abord un compteur moteur manuel pour activer l\'auto-log.',
             'Detección motor: define primero un contador motor manual para activar el auto-log.',
@@ -16552,6 +18136,8 @@ function finalizeEngineSensorSession() {
         `Auto sensores iPad: motor detectado ~${durationMinutes} min (score max ${Math.round(engineSensorScore * 100)}).`,
         `Auto iPad sensors: engine detected ~${durationMinutes} min (peak score ${Math.round(engineSensorScore * 100)}).`
     );
+    const probeTempStartC = Number.isFinite(engineSensorRunningStartProbeTempC) ? engineSensorRunningStartProbeTempC : null;
+    const probeTempEndC = Number.isFinite(signalkLatestProbeTempC) ? signalkLatestProbeTempC : null;
 
     engineLogEntries.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -16560,6 +18146,8 @@ function finalizeEngineSensorSession() {
         creatorName: getCreatorPatch().creatorName,
         hours: estimatedHours,
         fuelAddedL: 0,
+        probeTempStartC,
+        probeTempEndC,
         note
     });
 
@@ -16575,6 +18163,7 @@ function finalizeEngineSensorSession() {
         `Detección motor: sesión guardada (${durationMinutes} min).`,
         `Engine detection: session saved (${durationMinutes} min).`
     ));
+    engineSensorRunningStartProbeTempC = null;
     renderEngineSensorUi();
 }
 
@@ -16602,6 +18191,7 @@ function evaluateEngineSensorState(nowMs = Date.now()) {
                 engineSensorDetectedRunning = true;
                 engineSensorRunningStartMs = nowMs;
                 engineSensorRunningHoursBaseline = resolveEngineSensorHoursBaseline();
+                engineSensorRunningStartProbeTempC = Number.isFinite(signalkLatestProbeTempC) ? signalkLatestProbeTempC : null;
                 engineSensorOffCandidateSinceMs = 0;
                 setEngineSensorStatus(t('Détection moteur: ON confirmé.', 'Detección motor: ON confirmado.', 'Engine detection: ON confirmed.'));
             }
@@ -16684,6 +18274,7 @@ function startEngineSensorDetection() {
     engineSensorDetectedRunning = false;
     engineSensorRunningStartMs = 0;
     engineSensorRunningHoursBaseline = null;
+    engineSensorRunningStartProbeTempC = null;
     engineSensorLastSpeedKn = null;
 
     ensureEngineMotionListenerBound();
@@ -16726,6 +18317,7 @@ function stopEngineSensorDetection() {
     engineSensorOffCandidateSinceMs = 0;
     engineSensorRunningStartMs = 0;
     engineSensorRunningHoursBaseline = null;
+    engineSensorRunningStartProbeTempC = null;
     engineSensorScore = 0;
     engineSensorSmoothedVibration = 0;
     engineSensorLastSampleMs = 0;
@@ -16867,12 +18459,12 @@ function locateNowOnMap() {
         return;
     }
 
-    setNavLogStatus(t('Recherche de la position en cours...', 'Buscando posicion actual...'));
+    setNavLogStatus(t('Recherche de la position en cours...', 'Buscando posición actual...'));
 
     requestCurrentPositionWithFallback(
         position => {
             if (!applyCurrentPositionFix(position)) return;
-            setNavLogStatus(t('Position actuelle affichee sur la carte.', 'Posicion actual mostrada en el mapa.'));
+            setNavLogStatus(t('Position actuelle affichee sur la carte.', 'Posición actual mostrada en el mapa.'));
         },
         error => {
             setNavLogStatus(getGeolocationErrorMessage(error), true);
@@ -16897,12 +18489,12 @@ function locatePreciselyOnMap() {
         return;
     }
 
-    setNavLogStatus(t('Forcage geolocalisation precise en cours...', 'Forzando geolocalizacion precisa...'));
+    setNavLogStatus(t('Forcage geolocalisation precise en cours...', 'Forzando geolocalización precisa...'));
 
     navigator.geolocation.getCurrentPosition(
         position => {
             if (!applyCurrentPositionFix(position)) return;
-            setNavLogStatus(t('Position precise affichee sur la carte.', 'Posicion precisa mostrada en el mapa.'));
+            setNavLogStatus(t('Position precise affichee sur la carte.', 'Posición precisa mostrada en el mapa.'));
         },
         error => {
             setNavLogStatus(getGeolocationErrorMessage(error), true);
@@ -16931,7 +18523,7 @@ function startNavigationLogging() {
         setNavLogStatus(
             t(
                 'GPS bloque: ouvre l\'app en HTTPS (ou localhost). Sur iPad, la geolocalisation est refusee en HTTP.',
-                'GPS bloqueado: abre la app en HTTPS (o localhost). En iPad, la geolocalizacion se rechaza en HTTP.'
+                'GPS bloqueado: abre la app en HTTPS (o localhost). En iPad, la geolocalización se rechaza en HTTP.'
             ),
             true
         );
@@ -16943,6 +18535,8 @@ function startNavigationLogging() {
         return;
     }
 
+    stopPassiveNavigationWatch();
+    resetNavAutoLogArming(null);
     navGpsLatestFix = null;
     navSelectedTraceEntryId = '';
     navGpsSessionStartMs = Date.now();
@@ -17003,13 +18597,39 @@ function startNavigationLogging() {
                 lng: longitude,
                 speedKn: Number.isFinite(resolvedSpeedKn) ? resolvedSpeedKn : null,
                 fixTimeMs
+            };
+
+            updateNavCurrentPositionMarker(navGpsLatestFix);
+            evaluateAnchorDragAlarmWithFix(navGpsLatestFix);
+            if (!navHasCenteredOnFirstFix && map) {
+                map.setView([latitude, longitude], Math.max(map.getZoom(), 13));
+                navHasCenteredOnFirstFix = true;
             }
-        );
-    }
+
+            if (!navGpsSessionHasSample) {
+                captureNavGpsSample('gps-watch');
+            }
+
+            const sessionPoints = getCurrentNavGpsSessionSamples().length;
+            setNavLogStatus(t(`Log GPS actif · fix reçu · capture chaque minute · ${sessionPoints} point(s)`, `Log GPS activo · fix recibido · captura cada minuto · ${sessionPoints} punto(s)`));
+            updateNavLiveDashboard();
+        },
+        error => {
+            setNavLogStatus(getGeolocationErrorMessage(error), true);
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+        }
+    );
+
+    syncNavLogGpsCompactUi();
+}
 
     // ============================================================
     // SIGNALK INTEGRATION
-    // ============================================================
+
 
     function loadSignalKConfig() {
         try {
@@ -17019,7 +18639,8 @@ function startNavigationLogging() {
                 if (parsed && typeof parsed === 'object') {
                     signalkConfig = {
                         mode: parsed.mode === 'signalk' ? 'signalk' : 'auto',
-                        host: typeof parsed.host === 'string' ? parsed.host : ''
+                        host: typeof parsed.host === 'string' ? parsed.host : '',
+                        autoLogEnabled: parsed.autoLogEnabled !== false
                     };
                 }
             }
@@ -17032,18 +18653,255 @@ function startNavigationLogging() {
         } catch (_) { /* ignore */ }
     }
 
+    function recordMaintenanceSignalKStats(data = null) {
+        if (!data || typeof data !== 'object') return;
+
+        maintenanceSignalKStats.updates += 1;
+
+        if (Number.isFinite(data.lat) && Number.isFinite(data.lng)) {
+            maintenanceSignalKStats.positions += 1;
+        }
+        if (Number.isFinite(data.twsKn) || Number.isFinite(data.twaDeg) || Number.isFinite(data.twdDeg)) {
+            maintenanceSignalKStats.wind += 1;
+        }
+        if (typeof data.engineRunning === 'boolean' || Number.isFinite(data.engineRpm)) {
+            maintenanceSignalKStats.engine += 1;
+        }
+
+        const weatherTick = Number(data.weatherFrameTick);
+        if (Number.isFinite(weatherTick) && weatherTick > maintenanceSignalKStats.lastWeatherTick) {
+            maintenanceSignalKStats.lastWeatherTick = weatherTick;
+            maintenanceSignalKStats.weather += 1;
+        }
+    }
+
+    function flushScheduledSignalKUiRefresh() {
+        signalKUiRefreshTimerId = null;
+        lastSignalKUiRefreshAtMs = Date.now();
+
+        const data = pendingSignalKUiData;
+        pendingSignalKUiData = null;
+
+        updateMaintenanceSignalKMonitor(data);
+        updateNavLiveDashboard();
+    }
+
+    function scheduleSignalKUiRefresh(data = null) {
+        if (data && typeof data === 'object') {
+            pendingSignalKUiData = { ...(pendingSignalKUiData || {}), ...data };
+        }
+
+        if (signalKUiRefreshTimerId !== null) return;
+
+        const elapsedMs = Date.now() - lastSignalKUiRefreshAtMs;
+        const delayMs = elapsedMs >= SIGNALK_UI_REFRESH_INTERVAL_MS
+            ? 0
+            : (SIGNALK_UI_REFRESH_INTERVAL_MS - elapsedMs);
+
+        signalKUiRefreshTimerId = window.setTimeout(flushScheduledSignalKUiRefresh, delayMs);
+    }
+
+    function setSignalKMonitorValue(id, value) {
+        const node = document.getElementById(id);
+        if (!node) return;
+        node.textContent = String(value ?? '--');
+    }
+
+    function setSignalKDashboardGauge(widgetKey, value, min, max, thresholdKey = null) {
+        const widget = document.querySelector(`[data-sk-widget="${widgetKey}"]`);
+        if (!widget) return;
+
+        let fillPct = 0;
+        if (Number.isFinite(value) && Number.isFinite(min) && Number.isFinite(max) && max > min) {
+            fillPct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+        }
+        widget.style.setProperty('--sk-fill', `${fillPct}%`);
+
+        widget.dataset.state = computeDashboardGaugeState(value, thresholdKey);
+    }
+
+    function setSignalKDashboardBalance(balanceKey, value, min, max) {
+        const balance = document.querySelector(`[data-sk-balance="${balanceKey}"]`);
+        if (!balance) return;
+        let positionPct = 50;
+        if (Number.isFinite(value) && Number.isFinite(min) && Number.isFinite(max) && max > min) {
+            positionPct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+        }
+        balance.style.setProperty('--sk-balance', `${positionPct}%`);
+    }
+
+    function setSignalKDashboardNeedle(needleKey, degrees) {
+        const needle = document.querySelector(`[data-sk-needle="${needleKey}"]`);
+        if (!needle) return;
+        const safeDegrees = Number.isFinite(degrees) ? degrees : 0;
+        needle.style.transform = `translateX(-50%) rotate(${safeDegrees}deg)`;
+    }
+
+    function resetMaintenanceSignalKMonitor() {
+        [
+            'maintenanceSignalKProbeTempValue',
+            'maintenanceSignalKBatteryTempValue',
+            'maintenanceSignalKHumidityValue',
+            'maintenanceSignalKDewPointValue',
+            'maintenanceSignalKCloudCoverValue',
+            'maintenanceSignalKRainRateValue',
+            'maintenanceSignalKLatValue',
+            'maintenanceSignalKLngValue',
+            'maintenanceSignalKSpeedValue',
+            'maintenanceSignalKCourseValue',
+            'maintenanceSignalKHeadingValue',
+            'maintenanceSignalKHeelValue',
+            'maintenanceSignalKTwsValue',
+            'maintenanceSignalKTwaValue',
+            'maintenanceSignalKTwdValue',
+            'maintenanceSignalKBaroValue',
+            'maintenanceSignalKLogValue',
+            'maintenanceSignalKEngineValue',
+            'maintenanceSignalKRpmValue',
+            'maintenanceSignalKWeatherDetailMirror'
+        ].forEach(id => setSignalKMonitorValue(id, '--'));
+
+        setSignalKMonitorValue('maintenanceSignalKEngineCountValue', '0');
+        setSignalKMonitorValue('maintenanceSignalKLastUpdateValue', '--');
+
+        setSignalKDashboardGauge('probeTemp', null, 0, 120, 'signalkProbeTemp');
+        setSignalKDashboardGauge('batteryTemp', null, 0, 60, 'signalkBatteryTemp');
+        setSignalKDashboardGauge('humidity', null, 0, 100, 'signalkHumidity');
+        setSignalKDashboardGauge('baro', null, 960, 1040, 'signalkBaro');
+        setSignalKDashboardGauge('rpm', null, 0, 3500, 'signalkRpm');
+        setSignalKDashboardBalance('heel', null, -45, 45);
+        setSignalKDashboardBalance('twa', null, -180, 180);
+        setSignalKDashboardNeedle('heading', 0);
+        setSignalKDashboardNeedle('course', 0);
+        maintenanceSignalKLatestFrame = null;
+    }
+
+    function renderMaintenanceSignalKDashboard(data = null, dewPointC = null) {
+        const dashboard = document.getElementById('maintenanceSignalKDashboard');
+        if (!dashboard) return;
+
+        if (data && typeof data === 'object') {
+            const previousFrame = maintenanceSignalKLatestFrame || {};
+            maintenanceSignalKLatestFrame = {
+                ...previousFrame,
+                ...data,
+                dewPointC: Number.isFinite(dewPointC) ? dewPointC : previousFrame.dewPointC
+            };
+        }
+
+        const frame = maintenanceSignalKLatestFrame;
+        if (!frame) return;
+
+        const headingDisplayDeg = Number.isFinite(frame.headingDeg) ? frame.headingDeg : frame.courseDeg;
+        const heelDeg = Number.isFinite(frame.heelDeg) ? frame.heelDeg : null;
+        const twaDeg = Number.isFinite(frame.twaDeg) ? normalizeSignedRelativeDegrees(frame.twaDeg) : null;
+
+        setSignalKDashboardGauge('probeTemp', frame.probeTempC, 0, 120, 'signalkProbeTemp');
+        setSignalKDashboardGauge('batteryTemp', frame.batteryTempC, 0, 60, 'signalkBatteryTemp');
+        setSignalKDashboardGauge('humidity', frame.humidityPct, 0, 100, 'signalkHumidity');
+        setSignalKDashboardGauge('baro', frame.baroHpa, 960, 1040, 'signalkBaro');
+        setSignalKDashboardGauge('rpm', frame.engineRpm, 0, 3500, 'signalkRpm');
+        setSignalKDashboardBalance('heel', heelDeg, -45, 45);
+        setSignalKDashboardBalance('twa', twaDeg, -180, 180);
+        setSignalKDashboardNeedle('heading', Number.isFinite(headingDisplayDeg) ? normalizeCourseDegrees(headingDisplayDeg) : 0);
+        setSignalKDashboardNeedle('course', Number.isFinite(frame.courseDeg) ? normalizeCourseDegrees(frame.courseDeg) : 0);
+
+        const weatherDetailMirror = document.getElementById('maintenanceSignalKWeatherDetailMirror');
+        if (weatherDetailMirror) {
+            weatherDetailMirror.textContent = frame.weatherPathLast ? String(frame.weatherPathLast) : '--';
+            weatherDetailMirror.title = frame.weatherPathLast ? String(frame.weatherPathLast) : '';
+        }
+    }
+
+    function appendMaintenanceSignalKEvent(message, className = '') {
+        const container = document.getElementById('maintenanceSignalKEvents');
+        if (!container) return;
+
+        const firstChild = container.firstElementChild;
+        if (firstChild && firstChild.classList.contains('signalk-monitor-event--muted')) {
+            container.innerHTML = '';
+        }
+
+        const item = document.createElement('div');
+        item.className = `signalk-monitor-event${className ? ` ${className}` : ''}`;
+        item.textContent = `${formatDateTimeFr(new Date().toISOString())} · ${message}`;
+        container.prepend(item);
+
+        while (container.children.length > 20) {
+            container.removeChild(container.lastElementChild);
+        }
+    }
+
+    function updateMaintenanceSignalKMonitor(data = null) {
+        if (!data || typeof data !== 'object') return;
+
+        setSignalKMonitorValue('maintenanceSignalKEngineCountValue', maintenanceSignalKStats.engine);
+
+        const dewPointC = estimateDewPointC(data.airTempC, data.humidityPct, data.absHumidityGm3);
+
+        setSignalKMonitorValue('maintenanceSignalKProbeTempValue', Number.isFinite(data.probeTempC) ? `${data.probeTempC.toFixed(1)}°C` : '--');
+        setSignalKMonitorValue('maintenanceSignalKBatteryTempValue', Number.isFinite(data.batteryTempC) ? `${data.batteryTempC.toFixed(1)}°C` : '--');
+        setSignalKMonitorValue('maintenanceSignalKHumidityValue', Number.isFinite(data.humidityPct) ? `${data.humidityPct.toFixed(0)}%` : '--');
+        setSignalKMonitorValue('maintenanceSignalKDewPointValue', Number.isFinite(dewPointC) ? `${dewPointC.toFixed(1)}°C` : '--');
+        setSignalKMonitorValue('maintenanceSignalKCloudCoverValue', Number.isFinite(data.cloudCoverPct) ? `${data.cloudCoverPct.toFixed(0)}%` : '--');
+        setSignalKMonitorValue('maintenanceSignalKRainRateValue', Number.isFinite(data.rainRateMmH) ? `${data.rainRateMmH.toFixed(2)} mm/h` : '--');
+
+        setSignalKMonitorValue('maintenanceSignalKLatValue', Number.isFinite(data.lat) ? data.lat.toFixed(5) : '--');
+        setSignalKMonitorValue('maintenanceSignalKLngValue', Number.isFinite(data.lng) ? data.lng.toFixed(5) : '--');
+        setSignalKMonitorValue('maintenanceSignalKSpeedValue', Number.isFinite(data.speedKn) ? `${data.speedKn.toFixed(1)} kn` : '--');
+        setSignalKMonitorValue('maintenanceSignalKCourseValue', Number.isFinite(data.courseDeg) ? `${Math.round(normalizeCourseDegrees(data.courseDeg))}°` : '--');
+        const headingDisplayDeg = Number.isFinite(data.headingDeg) ? data.headingDeg : data.courseDeg;
+        setSignalKMonitorValue('maintenanceSignalKHeadingValue', Number.isFinite(headingDisplayDeg) ? `${Math.round(normalizeCourseDegrees(headingDisplayDeg))}°` : '--');
+        setSignalKMonitorValue('maintenanceSignalKHeelValue', Number.isFinite(data.heelDeg) ? `${data.heelDeg.toFixed(1)}°` : '--');
+        setSignalKMonitorValue('maintenanceSignalKTwsValue', Number.isFinite(data.twsKn) ? `${data.twsKn.toFixed(1)} kn` : '--');
+        setSignalKMonitorValue('maintenanceSignalKTwaValue', Number.isFinite(data.twaDeg) ? `${Math.round(data.twaDeg)}°` : '--');
+        setSignalKMonitorValue('maintenanceSignalKTwdValue', Number.isFinite(data.twdDeg) ? `${Math.round(normalizeCourseDegrees(data.twdDeg))}°` : '--');
+        setSignalKMonitorValue('maintenanceSignalKBaroValue', Number.isFinite(data.baroHpa) ? `${data.baroHpa.toFixed(1)} hPa` : '--');
+        setSignalKMonitorValue('maintenanceSignalKLogValue', Number.isFinite(data.logNm) ? `${data.logNm.toFixed(2)} nm` : '--');
+        setSignalKMonitorValue('maintenanceSignalKEngineValue', typeof data.engineRunning === 'boolean' ? (data.engineRunning ? 'ON' : 'OFF') : '--');
+        setSignalKMonitorValue('maintenanceSignalKRpmValue', Number.isFinite(data.engineRpm) ? `${Math.round(data.engineRpm)} rpm` : '--');
+
+        const pathLabel = data.weatherPathLast ? `${data.weatherPathLast}` : null;
+        if (pathLabel) {
+            setSignalKMonitorValue('maintenanceSignalKStatusDetailValue', pathLabel);
+        }
+        setSignalKMonitorValue('maintenanceSignalKLastUpdateValue', formatDateTimeFr(new Date().toISOString()));
+        renderMaintenanceSignalKDashboard(data, dewPointC);
+    }
+
     function updateSignalKStatusBadge(status) {
-        const badge = document.getElementById('signalkStatusBadge');
-        const text  = document.getElementById('signalkStatusText');
-        if (!badge || !text) return;
-        badge.className = 'signalk-badge signalk-badge--' + status;
+        const badgeCandidates = [
+            document.getElementById('signalkStatusBadge'),
+            document.getElementById('maintenanceSignalKStatusBadge')
+        ].filter(Boolean);
+        const textCandidates = [
+            document.getElementById('signalkStatusText'),
+            document.getElementById('maintenanceSignalKStatusText')
+        ].filter(Boolean);
+
+        if (!badgeCandidates.length && !textCandidates.length) return;
+
         const labels = {
             disconnected: '⚫ Déconnecté',
             connecting:   '🟡 Connexion…',
             connected:    '🟢 Connecté',
             error:        '🔴 Erreur'
         };
-        text.textContent = labels[status] || status;
+
+        badgeCandidates.forEach(badge => {
+            badge.className = 'signalk-badge signalk-badge--' + status;
+        });
+        textCandidates.forEach(text => {
+            text.textContent = labels[status] || status;
+        });
+
+        const detail = document.getElementById('maintenanceSignalKStatusDetailValue');
+        const lastStatus = document.getElementById('maintenanceSignalKLastStatusValue');
+        if (detail) detail.textContent = labels[status] || status;
+        if (lastStatus) lastStatus.textContent = formatDateTimeFr(new Date().toISOString());
+
+        const dashboard = document.getElementById('maintenanceSignalKDashboard');
+        if (dashboard) dashboard.dataset.status = status;
     }
 
     function setSignalKManagedInputValue(inputId, value, formatter = null) {
@@ -17072,10 +18930,13 @@ function startNavigationLogging() {
         const headingValue = Number.isFinite(data.headingDeg)
             ? data.headingDeg
             : (Number.isFinite(data.courseDeg) ? data.courseDeg : null);
+        const relativeTwaDeg = Number.isFinite(data.twaDeg)
+            ? normalizeSignedRelativeDegrees(data.twaDeg)
+            : null;
         const windDirectionValue = Number.isFinite(data.twdDeg)
             ? data.twdDeg
-            : (Number.isFinite(data.twaDeg) && Number.isFinite(headingValue)
-                ? normalizeCourseDegrees(headingValue + data.twaDeg)
+            : (Number.isFinite(relativeTwaDeg) && Number.isFinite(headingValue)
+                ? normalizeCourseDegrees(headingValue + relativeTwaDeg)
                 : null);
 
         // ---- GPS position ----
@@ -17094,12 +18955,16 @@ function startNavigationLogging() {
                 map.setView([data.lat, data.lng], Math.max(map.getZoom(), 13));
                 navHasCenteredOnFirstFix = true;
             }
-            if (!navGpsSessionHasSample) captureNavGpsSample('signalk');
-            const pts = getCurrentNavGpsSessionSamples().length;
-            setNavLogStatus(t(
-                `SignalK · fix reçu · ${pts} point(s)`,
-                `SignalK · fix recibido · ${pts} punto(s)`
-            ));
+            if (signalkLoggingActive) {
+                if (!navGpsSessionHasSample) captureNavGpsSample('signalk');
+                const pts = getCurrentNavGpsSessionSamples().length;
+                setNavLogStatus(t(
+                    `SignalK · fix reçu · ${pts} point(s)`,
+                    `SignalK · fix recibido · ${pts} punto(s)`
+                ));
+            } else {
+                maybeAutoStartNavigationLogging(nextFix, 'SignalK');
+            }
         }
 
         if (Number.isFinite(headingValue)) {
@@ -17116,6 +18981,9 @@ function startNavigationLogging() {
             signalkLatestWindSpeedKn = data.twsKn;
             setSignalKManagedInputValue('watchWindSpeedInput', data.twsKn, value => value.toFixed(1));
         }
+        if (Number.isFinite(data.twaDeg)) {
+            signalkLatestTwaDeg = normalizeTwaDegrees(data.twaDeg);
+        }
         if (Number.isFinite(windDirectionValue)) {
             signalkLatestWindDir = windDirectionValue;
             setSignalKManagedInputValue('watchWindDirInput', windDirectionValue, value => Math.round(normalizeCourseDegrees(value)));
@@ -17123,14 +18991,46 @@ function startNavigationLogging() {
 
         // ---- Baromètre / loch ----
         if (Number.isFinite(data.baroHpa)) {
+            signalkLatestBaroHpa = data.baroHpa;
+            navLatestWeatherPressureHpa = data.baroHpa;
             setSignalKManagedInputValue('watchBarometerInput', data.baroHpa, value => value.toFixed(1));
         }
+        if (Number.isFinite(data.airTempC)) {
+            signalkLatestAirTempC = data.airTempC;
+            navLatestAirTempC = data.airTempC;
+        }
+        if (Number.isFinite(data.probeTempC)) {
+            signalkLatestProbeTempC = data.probeTempC;
+        }
+        if (Number.isFinite(data.batteryTempC)) {
+            signalkLatestBatteryTempC = data.batteryTempC;
+        }
+        if (Number.isFinite(data.humidityPct)) {
+            signalkLatestHumidityPct = data.humidityPct;
+        }
+        if (Number.isFinite(data.absHumidityGm3)) {
+            signalkLatestAbsHumidityGm3 = data.absHumidityGm3;
+            if (!Number.isFinite(signalkLatestHumidityPct) && Number.isFinite(signalkLatestAirTempC)) {
+                const computedHumidity = estimateRelativeHumidityPctFromAbsolute(signalkLatestAbsHumidityGm3, signalkLatestAirTempC);
+                if (Number.isFinite(computedHumidity)) {
+                    signalkLatestHumidityPct = computedHumidity;
+                }
+            }
+        }
+        if (Number.isFinite(data.cloudCoverPct)) {
+            signalkLatestCloudCoverPct = data.cloudCoverPct;
+        }
+        if (Number.isFinite(data.rainRateMmH)) {
+            signalkLatestRainRateMmH = data.rainRateMmH;
+        }
         if (Number.isFinite(data.logNm)) {
+            signalkLatestLogNm = data.logNm;
             setSignalKManagedInputValue('watchLogNmInput', data.logNm, value => value.toFixed(1));
         }
 
         // ---- Moteur ----
         if (typeof data.engineRunning === 'boolean') {
+            signalkLatestEngineRunning = data.engineRunning;
             engineSensorDetectedRunning = data.engineRunning;
             if (!data.engineRunning && !Number.isFinite(data.engineRpm)) {
                 signalkLatestEngineRpm = null;
@@ -17144,20 +19044,105 @@ function startNavigationLogging() {
             updateEngineAudioRegimeUi();
         }
 
-        updateNavLiveDashboard();
+        recordMaintenanceSignalKStats(data);
+        scheduleSignalKUiRefresh(data);
+    }
+
+    function bindSignalKClientCallbacks() {
+        if (!signalkClient) return;
+
+        signalkClient.onStatusChange = (status) => {
+            updateSignalKStatusBadge(status);
+            appendMaintenanceSignalKEvent(`SignalK status: ${status}`,
+                status === 'error' ? 'signalk-monitor-event--error' :
+                status === 'connected' ? 'signalk-monitor-event--ok' : '');
+            if (status === 'error') {
+                setNavLogStatus(t(
+                    'SignalK: connexion perdue — vérifiez le serveur RPi.',
+                    'SignalK: conexión perdida — verifique el servidor RPi.'
+                ), true);
+            } else if (status === 'connected' && signalkConfig.mode === 'signalk' && !signalkLoggingActive) {
+                setNavLogStatus(getAutoLogArmedStatusMessage('signalk'));
+            }
+        };
+        signalkClient.onUpdate = applySignalKUpdate;
+    }
+
+    function ensureSignalKStreamingConnection({ announce = true } = {}) {
+        const host = signalkConfig.host.trim();
+        if (!host) {
+            if (announce) {
+                setNavLogStatus(t(
+                    'SignalK: adresse du serveur manquante (paramètre SignalK).',
+                    'SignalK: dirección de servidor faltante (parámetro SignalK).'
+                ), true);
+            }
+            return false;
+        }
+
+        if (!signalkClient) {
+            signalkClient = new SignalKClient();
+        }
+
+        bindSignalKClientCallbacks();
+
+        const status = signalkClient.getStatus();
+        const shouldReconnect = signalkStreamingHost !== host || status === 'disconnected' || status === 'error';
+        signalkStreamingHost = host;
+
+        if (shouldReconnect) {
+            signalkClient.connect(host);
+            appendMaintenanceSignalKEvent(`Connexion demandée vers ${host}`);
+            if (announce) {
+                setNavLogStatus(t(`SignalK · connexion vers ${host}…`, `SignalK · conectando a ${host}…`));
+            }
+        } else if (announce && status === 'connected') {
+            setNavLogStatus(getAutoLogArmedStatusMessage('signalk'));
+        }
+
+        return true;
+    }
+
+    function stopSignalKStreamingConnection({ resetMonitor = true } = {}) {
+        signalkStreamingHost = '';
+        if (signalKUiRefreshTimerId !== null) {
+            window.clearTimeout(signalKUiRefreshTimerId);
+            signalKUiRefreshTimerId = null;
+        }
+        pendingSignalKUiData = null;
+        if (signalkClient) {
+            signalkClient.disconnect();
+        }
+        updateSignalKStatusBadge('disconnected');
+        appendMaintenanceSignalKEvent('SignalK déconnecté');
+        if (resetMonitor) {
+            signalkLatestTwaDeg = null;
+            signalkLatestBaroHpa = null;
+            signalkLatestAirTempC = null;
+            signalkLatestProbeTempC = null;
+            signalkLatestBatteryTempC = null;
+            signalkLatestHumidityPct = null;
+            signalkLatestAbsHumidityGm3 = null;
+            signalkLatestCloudCoverPct = null;
+            signalkLatestRainRateMmH = null;
+            signalkLatestEngineRpm = null;
+            signalkLatestEngineRunning = null;
+            signalkLatestLogNm = null;
+            resetMaintenanceSignalKMonitor();
+            renderEngineSensorUi();
+            updateEngineAudioRegimeUi();
+            updateNavLiveDashboard();
+        }
     }
 
     function startSignalKNavigationLogging() {
-        const host = signalkConfig.host.trim();
-        if (!host) {
-            setNavLogStatus(t(
-                'SignalK: adresse du serveur manquante (paramètre SignalK).',
-                'SignalK: dirección de servidor faltante (parámetro SignalK).'
-            ), true);
+        if (signalkLoggingActive) {
+            setNavLogStatus(t('Log SignalK déjà actif.', 'Log SignalK ya activo.'));
             return;
         }
 
-        navGpsLatestFix = null;
+        stopPassiveNavigationWatch();
+        resetNavAutoLogArming(null);
         navHasCenteredOnFirstFix = false;
         navGpsSessionStartMs = Date.now();
         navGpsSessionStartEntryIndex = navLogEntries.length;
@@ -17181,88 +19166,191 @@ function startNavigationLogging() {
             }
         }, NAV_GPS_SAMPLE_INTERVAL_MS);
 
-        if (!signalkClient) {
-            signalkClient = new SignalKClient();
-        }
-        signalkClient.onStatusChange = (status) => {
-            updateSignalKStatusBadge(status);
-            if (status === 'error') {
-                setNavLogStatus(t(
-                    'SignalK: connexion perdue — vérifiez le serveur RPi.',
-                    'SignalK: conexión perdida — verifique el servidor RPi.'
-                ), true);
+        if (!ensureSignalKStreamingConnection({ announce: true })) {
+            signalkLoggingActive = false;
+            if (navGpsSampleTimerId !== null) {
+                window.clearInterval(navGpsSampleTimerId);
+                navGpsSampleTimerId = null;
             }
-        };
-        signalkClient.onUpdate = applySignalKUpdate;
-        signalkClient.connect(host);
+            return;
+        }
+
+        if (navGpsLatestFix && !navGpsSessionHasSample) {
+            captureNavGpsSample('signalk');
+        }
 
         syncNavLogGpsCompactUi();
-        setNavLogStatus(t(`SignalK · connexion vers ${host}…`, `SignalK · conectando a ${host}…`));
+        setNavLogStatus(t('SignalK · log actif.', 'SignalK · log activo.'));
     }
 
-    function stopSignalKNavigationLogging() {
+    function stopSignalKNavigationLogging(options = {}) {
+        const { disconnectStream = false } = options;
         signalkLoggingActive = false;
-        signalkLatestEngineRpm = null;
-        if (signalkClient) {
-            signalkClient.disconnect();
-            updateSignalKStatusBadge('disconnected');
-        }
         if (navGpsSampleTimerId !== null) {
             window.clearInterval(navGpsSampleTimerId);
             navGpsSampleTimerId = null;
         }
-        renderEngineSensorUi();
-        updateEngineAudioRegimeUi();
+        if (disconnectStream) {
+            stopSignalKStreamingConnection({ resetMonitor: true });
+        }
     }
 
     function initSignalKUi() {
-        const modeAutoBtn = document.getElementById('signalkModeAutoBtn');
-        const modeSkBtn   = document.getElementById('signalkModeSkBtn');
-        const hostInput   = document.getElementById('signalkHostInput');
-        const connectBtn  = document.getElementById('signalkConnectBtn');
+        const modeAutoButtons = [
+            document.getElementById('signalkModeAutoBtn'),
+            document.getElementById('maintenanceSignalKModeAutoBtn')
+        ].filter(Boolean);
+        const modeSkButtons = [
+            document.getElementById('signalkModeSkBtn'),
+            document.getElementById('maintenanceSignalKModeSkBtn')
+        ].filter(Boolean);
+        const hostInputs = [
+            document.getElementById('signalkHostInput'),
+            document.getElementById('maintenanceSignalKHostInput')
+        ].filter(Boolean);
+        const autoLogToggles = [
+            document.getElementById('signalkAutoLogToggle'),
+            document.getElementById('maintenanceSignalKAutoLogToggle')
+        ].filter(Boolean);
+        const connectButtons = [
+            document.getElementById('signalkConnectBtn'),
+            document.getElementById('maintenanceSignalKConnectBtn')
+        ].filter(Boolean);
+        const disconnectButtons = [
+            document.getElementById('maintenanceSignalKDisconnectBtn')
+        ].filter(Boolean);
 
-        if (!modeAutoBtn || !modeSkBtn || !hostInput || !connectBtn) return;
+        if (!modeAutoButtons.length || !modeSkButtons.length || !hostInputs.length || !connectButtons.length) return;
 
         // Restore saved config
         loadSignalKConfig();
-        hostInput.value = signalkConfig.host;
+        hostInputs.forEach(input => {
+            input.value = signalkConfig.host;
+        });
+        syncSignalKAutoLogControls();
         _applySignalKModeButtons();
 
-        modeAutoBtn.addEventListener('click', () => {
-            signalkConfig.mode = 'auto';
-            saveSignalKConfig();
-            _applySignalKModeButtons();
-            stopSignalKNavigationLogging();
-            updateSignalKStatusBadge('disconnected');
-            setNavLogStatus(t('Mode autonome activé (GPS + capteurs iPad).', 'Modo autónomo activado (GPS + sensores iPad).'));
+        maintenanceSignalKStats = {
+            updates: 0,
+            weather: 0,
+            positions: 0,
+            wind: 0,
+            engine: 0,
+            lastWeatherTick: 0
+        };
+        initDashboardThresholdUi();
+        resetMaintenanceSignalKMonitor();
+
+        const eventsContainer = document.getElementById('maintenanceSignalKEvents');
+        if (eventsContainer && !eventsContainer.children.length) {
+            eventsContainer.innerHTML = '<div class="signalk-monitor-event signalk-monitor-event--muted">Aucun événement SignalK pour le moment.</div>';
+        }
+
+        modeAutoButtons.forEach(button => {
+            if (button.dataset.skBound === '1') return;
+            button.dataset.skBound = '1';
+            button.addEventListener('click', () => {
+                signalkConfig.mode = 'auto';
+                saveSignalKConfig();
+                _applySignalKModeButtons();
+                stopSignalKNavigationLogging({ disconnectStream: true });
+                resetNavAutoLogArming(navGpsLatestFix);
+                startPassiveNavigationWatch();
+                updateSignalKStatusBadge('disconnected');
+                setNavLogStatus(
+                    isSignalKAutoLogEnabled()
+                        ? t(
+                            `Mode autonome activé · auto-log armé (> ${NAV_AUTO_LOG_START_DISTANCE_M} m).`,
+                            `Modo autónomo activado · auto-log armado (> ${NAV_AUTO_LOG_START_DISTANCE_M} m).`
+                        )
+                        : t(
+                            'Mode autonome activé · auto-log désactivé.',
+                            'Modo autónomo activado · auto-log desactivado.'
+                        )
+                );
+            });
         });
 
-        modeSkBtn.addEventListener('click', () => {
-            signalkConfig.mode = 'signalk';
-            saveSignalKConfig();
-            _applySignalKModeButtons();
-            resetSignalKManagedInputUserEdits();
-            setNavLogStatus(t('Mode SignalK activé. Clique "Démarrer log GPS" pour connecter.', 'Modo SignalK activado. Toca "Iniciar log GPS" para conectar.'));
+        modeSkButtons.forEach(button => {
+            if (button.dataset.skBound === '1') return;
+            button.dataset.skBound = '1';
+            button.addEventListener('click', () => {
+                stopPassiveNavigationWatch();
+                signalkConfig.mode = 'signalk';
+                saveSignalKConfig();
+                _applySignalKModeButtons();
+                resetSignalKManagedInputUserEdits();
+                if (signalkConfig.host.trim()) {
+                    ensureSignalKStreamingConnection({ announce: true });
+                } else {
+                    setNavLogStatus(
+                        isSignalKAutoLogEnabled()
+                            ? t(
+                                'Mode SignalK activé. Renseigne l\'adresse du serveur pour armer l\'auto-log.',
+                                'Modo SignalK activado. Indica la dirección del servidor para armar el auto-log.'
+                            )
+                            : t(
+                                'Mode SignalK activé. Renseigne l\'adresse du serveur pour afficher le live.',
+                                'Modo SignalK activado. Indica la dirección del servidor para mostrar el live.'
+                            )
+                    );
+                }
+            });
         });
 
-        hostInput.addEventListener('input', () => {
-            signalkConfig.host = hostInput.value.trim();
-            saveSignalKConfig();
+        autoLogToggles.forEach(toggle => {
+            if (toggle.dataset.skBound === '1') return;
+            toggle.dataset.skBound = '1';
+            toggle.addEventListener('change', () => {
+                signalkConfig.autoLogEnabled = toggle.checked;
+                saveSignalKConfig();
+                resetNavAutoLogArming(navGpsLatestFix);
+                syncSignalKAutoLogControls();
+
+                if (activeTabName === 'navlog' && !isNavigationLoggingActive()) {
+                    setNavLogStatus(getAutoLogArmedStatusMessage(signalkConfig.mode));
+                }
+            });
         });
 
-        connectBtn.addEventListener('click', () => {
-            signalkConfig.host = hostInput.value.trim();
-            saveSignalKConfig();
-            if (!signalkConfig.host) {
-                setNavLogStatus(t('SignalK: entrez l\'adresse du serveur.', 'SignalK: ingrese la dirección del servidor.'), true);
-                return;
-            }
-            resetSignalKManagedInputUserEdits();
-            if (!signalkClient) signalkClient = new SignalKClient();
-            signalkClient.onStatusChange = updateSignalKStatusBadge;
-            signalkClient.onUpdate = applySignalKUpdate;
-            updateSignalKStatusBadge('connecting');
-            signalkClient.connect(signalkConfig.host);
+        hostInputs.forEach(input => {
+            if (input.dataset.skBound === '1') return;
+            input.dataset.skBound = '1';
+            input.addEventListener('input', () => {
+                signalkConfig.host = input.value.trim();
+                hostInputs.forEach(other => {
+                    if (other !== input) other.value = signalkConfig.host;
+                });
+                saveSignalKConfig();
+            });
+        });
+
+        connectButtons.forEach(button => {
+            if (button.dataset.skBound === '1') return;
+            button.dataset.skBound = '1';
+            button.addEventListener('click', () => {
+                signalkConfig.host = (hostInputs[0]?.value || '').trim();
+                hostInputs.forEach(input => {
+                    input.value = signalkConfig.host;
+                });
+                saveSignalKConfig();
+                if (!signalkConfig.host) {
+                    setNavLogStatus(t('SignalK: entrez l\'adresse du serveur.', 'SignalK: ingrese la dirección del servidor.'), true);
+                    return;
+                }
+                resetSignalKManagedInputUserEdits();
+                ensureSignalKStreamingConnection({ announce: true });
+            });
+        });
+
+        disconnectButtons.forEach(button => {
+            if (button.dataset.skBound === '1') return;
+            button.dataset.skBound = '1';
+            button.addEventListener('click', () => {
+                stopSignalKNavigationLogging({ disconnectStream: true });
+                updateSignalKStatusBadge('disconnected');
+                setNavLogStatus(t('SignalK: déconnecté.', 'SignalK: desconectado.'));
+            });
         });
 
         // Manual edits pause SignalK autofill for the targeted field until the next SignalK session/connect.
@@ -17273,58 +19361,52 @@ function startNavigationLogging() {
         });
 
         updateSignalKStatusBadge('disconnected');
+
+        if (signalkConfig.mode === 'signalk' && signalkConfig.host.trim() && !signalkLoggingActive) {
+            window.setTimeout(() => {
+                if (signalkConfig.mode !== 'signalk' || !signalkConfig.host.trim() || signalkLoggingActive) return;
+                ensureSignalKStreamingConnection({ announce: true });
+            }, 120);
+        } else if (signalkConfig.mode === 'auto') {
+            startPassiveNavigationWatch();
+        }
     }
 
     function _applySignalKModeButtons() {
-        const modeAutoBtn  = document.getElementById('signalkModeAutoBtn');
-        const modeSkBtn    = document.getElementById('signalkModeSkBtn');
+        const modeAutoButtons = [
+            document.getElementById('signalkModeAutoBtn'),
+            document.getElementById('maintenanceSignalKModeAutoBtn')
+        ].filter(Boolean);
+        const modeSkButtons = [
+            document.getElementById('signalkModeSkBtn'),
+            document.getElementById('maintenanceSignalKModeSkBtn')
+        ].filter(Boolean);
         const skPanel      = document.getElementById('signalkSkPanel');
         const motionBtn    = document.getElementById('requestMotionPermissionBtn');
-        if (!modeAutoBtn || !modeSkBtn) return;
+        if (!modeAutoButtons.length || !modeSkButtons.length) return;
         const isAuto = signalkConfig.mode === 'auto';
-        modeAutoBtn.classList.toggle('signalk-mode-btn--active', isAuto);
-        modeSkBtn.classList.toggle('signalk-mode-btn--active', !isAuto);
+        modeAutoButtons.forEach(btn => btn.classList.toggle('signalk-mode-btn--active', isAuto));
+        modeSkButtons.forEach(btn => btn.classList.toggle('signalk-mode-btn--active', !isAuto));
         if (skPanel) skPanel.style.display = isAuto ? 'none' : '';
         // Capteur inclinaison iPad inutile en mode SignalK (le gîte vient du serveur)
         if (motionBtn) motionBtn.style.display = isAuto ? '' : 'none';
+
+        const modeValue = document.getElementById('maintenanceSignalKModeValue');
+        if (modeValue) modeValue.textContent = isAuto ? t('Auto iPad', 'Auto iPad') : 'SignalK';
     }
 
     // ============================================================
     // END SIGNALK INTEGRATION
     // ============================================================
 
-    function startNavigationLogging() {
-        // ---- Route vers SignalK si le mode est activé ----
-        if (signalkConfig.mode === 'signalk') {
-            startSignalKNavigationLogging();
-            return;
-        }
-                captureNavGpsSample('gps-watch');
-            }
-
-            const sessionPoints = getCurrentNavGpsSessionSamples().length;
-            setNavLogStatus(t(`Log GPS actif · fix reçu · capture chaque minute · ${sessionPoints} point(s)`, `Log GPS activo · fix recibido · captura cada minuto · ${sessionPoints} punto(s)`));
-            updateNavLiveDashboard();
-        },
-        error => {
-            setNavLogStatus(getGeolocationErrorMessage(error), true);
-        },
-        {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 10000
-        }
-    );
-
-    syncNavLogGpsCompactUi();
-}
 
 function stopNavigationLogging(options = {}) {
     const { createAutoSessionSummary = true } = options;
+    const lastKnownFix = cloneNavFixForAutoLog(navGpsLatestFix);
 
-    // Stop SignalK streaming if active
+    // Stop active logging session while keeping passive monitoring alive.
     if (signalkConfig.mode === 'signalk') {
-        stopSignalKNavigationLogging();
+        stopSignalKNavigationLogging({ disconnectStream: false });
     }
 
     if (navWatchId !== null && navigator.geolocation) {
@@ -17365,12 +19447,21 @@ function stopNavigationLogging(options = {}) {
     }
 
     signalkLoggingActive = false;
-    navGpsLatestFix = null;
+    navGpsLatestFix = lastKnownFix;
     navGpsSessionStartMs = 0;
     navGpsSessionStartEntryIndex = navLogEntries.length;
     navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
     navGpsSessionHasSample = false;
     navHasCenteredOnFirstFix = false;
+    resetNavAutoLogArming(lastKnownFix);
+
+    if (signalkConfig.mode === 'auto') {
+        startPassiveNavigationWatch();
+    } else if (signalkConfig.mode === 'signalk' && signalkConfig.host.trim()) {
+        ensureSignalKStreamingConnection({ announce: false });
+    }
+
+    syncNavLogGpsCompactUi();
 }
 
 function clearNavigationLogbook() {
@@ -17395,7 +19486,7 @@ function clearNavigationLogbook() {
 }
 
 function loadNavigationLogbook() {
-    navLogEntries = loadArrayFromStorage(NAV_LOG_STORAGE_KEY);
+    navLogEntries = sanitizeNavLogEntriesList(loadArrayFromStorage(NAV_LOG_STORAGE_KEY));
     loadNavGpsTraceSamples();
     loadAnchorDragAlarmState();
     navGpsSessionStartSampleIndex = Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples.length : 0;
@@ -17432,6 +19523,7 @@ function openNavLogCreateForm() {
 
 function openEngineLogCreateForm() {
     editingEngineLogEntryId = null;
+    engineLogDraftStartProbeTempC = Number.isFinite(signalkLatestProbeTempC) ? signalkLatestProbeTempC : null;
     const hoursInput = document.getElementById('engineHoursInput');
     const fuelInput = document.getElementById('fuelAddedInput');
     const noteInput = document.getElementById('engineLogNoteInput');
@@ -17443,6 +19535,25 @@ function openEngineLogCreateForm() {
     updateEngineLogFormMode();
     renderEngineLogList();
     renderLogWorkspacePanel();
+}
+
+function renderEngineLogTemperatureFields() {
+    const startInput = document.getElementById('engineTempStartInput');
+    const endInput = document.getElementById('engineTempEndInput');
+    if (!startInput && !endInput) return;
+
+    const editedEntry = editingEngineLogEntryId
+        ? engineLogEntries.find(entry => String(entry?.id || '') === String(editingEngineLogEntryId))
+        : null;
+    const startTemp = editedEntry
+        ? Number(editedEntry?.probeTempStartC)
+        : Number(engineLogDraftStartProbeTempC);
+    const endTemp = editedEntry
+        ? Number(editedEntry?.probeTempEndC)
+        : Number(signalkLatestProbeTempC);
+
+    if (startInput) startInput.value = formatTemperatureC(startTemp, '');
+    if (endInput) endInput.value = formatTemperatureC(endTemp, '');
 }
 
 function getEngineLogPreviousEntry(entryId) {
@@ -17493,6 +19604,11 @@ function renderLogWorkspacePanel() {
 
     const navVisible = logWorkspaceMode === 'nav';
     const engineVisible = logWorkspaceMode === 'engine';
+    const shouldShowPanel = (activeTabName === 'navlog')
+        || (activeTabName === 'maintenance' && activeMaintenanceSubtab === 'engine');
+
+    panel.style.display = shouldShowPanel ? 'block' : 'none';
+    panel.classList.toggle('log-workspace-panel--nav-compact', activeTabName === 'navlog');
 
     navPanel.style.display = navVisible ? 'block' : 'none';
     enginePanel.style.display = engineVisible ? 'block' : 'none';
@@ -17507,10 +19623,12 @@ function renderLogWorkspacePanel() {
         title.textContent = editingEngineLogEntryId
             ? t('Modifier entrée moteur', 'Editar entrada de motor')
             : t('Créer entrée moteur', 'Crear entrada de motor');
+        renderEngineLogTemperatureFields();
     } else {
         title.textContent = t('Saisie journal', 'Edición diario');
     }
 
+        applyNavLogLayoutState();
     renderNavChecklist();
     updateNavLiveDashboard();
 }
@@ -17532,6 +19650,7 @@ function updateEngineLogFormMode() {
 
 function cancelEngineLogEdit() {
     editingEngineLogEntryId = null;
+    engineLogDraftStartProbeTempC = null;
 
     const hoursInput = document.getElementById('engineHoursInput');
     const fuelInput = document.getElementById('fuelAddedInput');
@@ -17561,6 +19680,7 @@ function startEditEngineLogEntry(entryId) {
     if (!hoursInput || !fuelInput || !noteInput) return;
 
     editingEngineLogEntryId = targetId;
+    engineLogDraftStartProbeTempC = null;
     hoursInput.value = Number.isFinite(entry?.hours) ? String(entry.hours) : '';
     fuelInput.value = Number.isFinite(entry?.fuelAddedL) ? String(entry.fuelAddedL) : '';
     noteInput.value = String(entry?.note || '');
@@ -17588,7 +19708,8 @@ function renderEngineLogList() {
     headerRow.innerHTML =
         `<span>${t('Date', 'Fecha')}</span>` +
         `<span>${t('Auteur', 'Autor')}</span>` +
-        `<span>${t('Compteur', 'Contador')}</span>`;
+        `<span>${t('Compteur', 'Contador')}</span>` +
+        `<span>${t('Temp moteur', 'Temp motor', 'Engine temp')}</span>`;
     container.appendChild(headerRow);
 
     engineLogEntries
@@ -17597,6 +19718,9 @@ function renderEngineLogList() {
         .forEach(entry => {
             const creator = String(entry?.creatorName || '').trim() || String(entry?.creatorEmail || '').trim() || 'N/A';
             const hours = Number.isFinite(entry?.hours) ? `${entry.hours.toFixed(1)} h` : 'N/A';
+            const tempStart = Number(entry?.probeTempStartC);
+            const tempEnd = Number(entry?.probeTempEndC);
+            const tempRange = `${formatTemperatureC(tempStart)} -> ${formatTemperatureC(tempEnd)}`;
 
             const row = document.createElement('div');
             row.className = 'log-list-row';
@@ -17609,7 +19733,8 @@ function renderEngineLogList() {
             summaryRow.innerHTML =
                 `<span class="log-list-col">${escapeHtml(formatDateTimeFr(entry?.timestamp))}</span>` +
                 `<span class="log-list-col">${escapeHtml(creator)}</span>` +
-                `<span class="log-list-col">${escapeHtml(hours)}</span>`;
+                `<span class="log-list-col">${escapeHtml(hours)}</span>` +
+                `<span class="log-list-col">${escapeHtml(tempRange)}</span>`;
             summaryRow.addEventListener('click', () => {
                 startEditEngineLogEntry(String(entry?.id || ''));
             });
@@ -17663,11 +19788,15 @@ function addEngineLogEntryFromForm() {
             editingEngineLogEntryId = null;
         }
     } else {
+        const probeTempStartC = Number.isFinite(engineLogDraftStartProbeTempC) ? engineLogDraftStartProbeTempC : null;
+        const probeTempEndC = Number.isFinite(signalkLatestProbeTempC) ? signalkLatestProbeTempC : null;
         engineLogEntries.push({
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             timestamp: new Date().toISOString(),
             creatorEmail: getCreatorPatch().creatorEmail,
             creatorName: getCreatorPatch().creatorName,
+            probeTempStartC,
+            probeTempEndC,
             ...nextValues
         });
 
@@ -17929,6 +20058,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initializeLanguageSwitcher();
     initializeNightModeToggle();
     initializeSidebarToggle();
+    loadNavLogLayoutState();
     populatePolarProfileSelects();
     loadPolarProfileEditor();
     updateRoutingPolarProfileUi();
@@ -18175,7 +20305,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             maintenanceInvoicePreviewPanel.style.display = shouldShowInvoicePreview ? 'block' : 'none';
         }
         if (logWorkspacePanel) {
-            logWorkspacePanel.style.display = shouldShowLogWorkspace ? 'block' : 'none';
+            logWorkspacePanel.style.display = shouldShowNavLogWorkspace
+                ? 'block'
+                : (shouldShowLogWorkspace ? 'block' : 'none');
             logWorkspacePanel.classList.toggle('log-workspace-panel--nav-compact', shouldShowNavLogWorkspace);
         }
 
@@ -18293,11 +20425,19 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         if (isNavLog) {
             void maybeHydrateNavLogCloudOnDemand();
+            if (signalkConfig.mode === 'signalk' && signalkConfig.host.trim()) {
+                ensureSignalKStreamingConnection({ announce: false });
+            }
+            updateNavPolarCaptureHint();
+            updateNavLiveDashboard();
+            applyNavLogLayoutState();
         }
 
         if (!isWeather) {
             setWeatherPointerPlacementMode(false);
         }
+
+        updateNavLogLayoutToolbarUi();
     }
 
     routingTabBtn.addEventListener('click', () => activateTab('routing'));
@@ -18517,12 +20657,49 @@ document.addEventListener('DOMContentLoaded', async function() {
         stopNavLogBtn.addEventListener('click', stopNavigationLogging);
     }
 
+    const navLogDisplayMenuBtn = document.getElementById('navLogDisplayMenuBtn');
+    if (navLogDisplayMenuBtn) {
+        navLogDisplayMenuBtn.addEventListener('click', () => {
+            setSidebarCollapsed(!isSidebarCollapsed);
+            updateNavLogLayoutToolbarUi();
+        });
+    }
+
+    const navLogDisplayMapBtn = document.getElementById('navLogDisplayMapBtn');
+    if (navLogDisplayMapBtn) {
+        navLogDisplayMapBtn.addEventListener('click', () => {
+            setNavLogLayoutSection('showMap', !navLogLayoutState.showMap);
+        });
+    }
+
+    const navLogDisplayLogBtn = document.getElementById('navLogDisplayLogBtn');
+    if (navLogDisplayLogBtn) {
+        navLogDisplayLogBtn.addEventListener('click', () => {
+            setNavLogLayoutSection('showLog', !navLogLayoutState.showLog);
+        });
+    }
+
+    const navLogDisplayChecklistBtn = document.getElementById('navLogDisplayChecklistBtn');
+    if (navLogDisplayChecklistBtn) {
+        navLogDisplayChecklistBtn.addEventListener('click', () => {
+            setNavLogLayoutSection('showChecklist', !navLogLayoutState.showChecklist);
+        });
+    }
+
     const requestMotionPermissionBtn = document.getElementById('requestMotionPermissionBtn');
     if (requestMotionPermissionBtn) {
         requestMotionPermissionBtn.addEventListener('click', requestMotionPermissionIfNeeded);
     }
 
     initSignalKUi();
+    if (signalkConfig.mode === 'auto') {
+        startPassiveNavigationWatch();
+    }
+
+    const maintenanceSignalKOpenNavLogBtn = document.getElementById('maintenanceSignalKOpenNavLogBtn');
+    if (maintenanceSignalKOpenNavLogBtn) {
+        maintenanceSignalKOpenNavLogBtn.addEventListener('click', () => activateTab('navlog'));
+    }
 
     const anchorDragSetBtn = document.getElementById('anchorDragSetBtn');
     if (anchorDragSetBtn) {
@@ -18596,6 +20773,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         cancelNavLogEditBtn.addEventListener('click', cancelNavLogEdit);
     }
 
+    const logWorkspaceCloseBtn = document.getElementById('logWorkspaceCloseBtn');
+    if (logWorkspaceCloseBtn) {
+        logWorkspaceCloseBtn.addEventListener('click', closeLogWorkspacePanel);
+    }
+
     const navChecklistDepartureBtn = document.getElementById('navChecklistDepartureBtn');
     if (navChecklistDepartureBtn) {
         navChecklistDepartureBtn.addEventListener('click', () => setActiveNavChecklistMode('departure'));
@@ -18631,11 +20813,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         navChecklistApplyTemplateBtn.addEventListener('click', applyNavChecklistTemplateToActiveMode);
     }
 
-    const navSwellProfileSelect = document.getElementById('navSwellProfileSelect');
-    if (navSwellProfileSelect) {
-        navSwellProfileSelect.addEventListener('change', () => {
-            setNavSwellProfile(navSwellProfileSelect.value);
-        });
+    const navCapturePolarBtn = document.getElementById('navCapturePolarBtn');
+    if (navCapturePolarBtn) {
+        navCapturePolarBtn.addEventListener('click', captureNavPolarPoint);
     }
 
     const saveEngineLogBtn = document.getElementById('saveEngineLogBtn');
@@ -18919,7 +21099,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (weatherGribFileInput) {
                 weatherGribFileInput.value = '';
             }
-            setWeatherGribStatus(t('GRIB: aucun fichier chargé.', 'GRIB: ningun archivo cargado.', 'GRIB: no file loaded.'));
+            setWeatherGribStatus(t('GRIB: aucun fichier chargé.', 'GRIB: ningún archivo cargado.', 'GRIB: no file loaded.'));
         });
     }
 
@@ -19303,6 +21483,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (polarProfileManagerSelect) {
         polarProfileManagerSelect.addEventListener('change', event => {
             loadPolarProfileEditor(String(event.target?.value || ''));
+            syncNavSailConfigWithActivePolar();
+            updateNavPolarCaptureHint();
+            updateNavLiveDashboard();
             setPolarProfileStatus(t('Profil chargé dans l’éditeur.', 'Perfil cargado en el editor.', 'Profile loaded in editor.'));
         });
     }

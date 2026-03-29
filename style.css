@@ -47,6 +47,45 @@ body.night-mode #map {
     font-size: 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
 }
+.navlog-display-toolbar {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 41;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(143, 231, 255, 0.32);
+    background: rgba(8, 20, 32, 0.9);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+body.navlog-layout-controls-active .navlog-display-toolbar {
+    display: inline-flex;
+}
+
+body.navlog-layout-controls-active #sidebarToggleBtn {
+    display: none;
+}
+
+.navlog-display-toolbar__btn {
+    margin-top: 0;
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: rgba(19, 42, 63, 0.88);
+    border: 1px solid rgba(143, 231, 255, 0.18);
+    color: #b7dff0;
+}
+
+.navlog-display-toolbar__btn--active {
+    background: rgba(33, 97, 142, 0.94);
+    border-color: rgba(143, 231, 255, 0.52);
+    color: #f3fbff;
+}
 
 body:not(.sidebar-collapsed) #sidebarToggleBtn {
     left: min(632px, calc(68vw + 12px));
@@ -676,9 +715,10 @@ body.sidebar-collapsed #sidebar {
 
 .log-workspace-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 1.05fr) minmax(280px, 0.82fr);
     height: 100%;
     min-height: 0;
+    gap: 10px;
 }
 
 .log-workspace-main {
@@ -688,35 +728,156 @@ body.sidebar-collapsed #sidebar {
     flex-direction: column;
 }
 
-.log-workspace-side {
-    border-left: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(6, 13, 21, 0.55);
-    padding: 10px;
+.log-workspace-live,
+.log-workspace-checklist {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.log-workspace-live {
+    overflow: hidden;
+}
+
+.log-workspace-checklist {
     overflow: auto;
-    position: sticky;
-    top: 0;
 }
 
 #logWorkspacePanel.log-workspace-panel--nav-compact {
-    flex: 0 0 360px;
-    min-width: 300px;
-    max-width: 420px;
+    flex: 0 1 clamp(460px, 56vw, 900px);
+    min-width: 360px;
+    max-width: none;
 }
 
 #logWorkspacePanel.log-workspace-panel--nav-compact .log-workspace-layout {
     grid-template-columns: 1fr;
 }
+#logWorkspacePanel.log-workspace-panel--checklist-only .log-workspace-layout,
+#logWorkspacePanel.log-workspace-panel--log-only .log-workspace-layout {
+    grid-template-columns: 1fr;
+}
+
+#logWorkspacePanel.log-workspace-panel--checklist-only .log-workspace-checklist,
+#logWorkspacePanel.log-workspace-panel--log-only .log-workspace-live {
+    grid-column: 1 / -1;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-checklist-split .log-workspace-layout {
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.9fr);
+}
+
+#logWorkspacePanel.log-workspace-panel--nav-compact.log-workspace-panel--live-checklist-split {
+    flex-basis: clamp(620px, 66vw, 980px);
+}
+
+#logWorkspacePanel.log-workspace-panel--live-checklist-split #navLiveTableCard,
+#logWorkspacePanel.log-workspace-panel--live-checklist-split #navChecklistCard {
+    margin-top: 0;
+    height: 100%;
+    min-height: 0;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-checklist-split .log-workspace-live,
+#logWorkspacePanel.log-workspace-panel--live-checklist-split .log-workspace-checklist {
+    display: flex;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .log-workspace-live {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus #navLiveTableCard {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-dashboard {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1.18fr) minmax(340px, 0.92fr);
+    grid-template-areas:
+        'rings rings'
+        'nav weather';
+    align-items: stretch;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-dashboard__rings {
+    grid-area: rings;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    align-content: stretch;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-panel--nav {
+    grid-area: nav;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-panel--weather {
+    grid-area: weather;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-widget .signalk-rpi-ring {
+    width: min(88px, 100%);
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-compass {
+    width: 124px;
+    height: 124px;
+}
+
+#logWorkspacePanel.log-workspace-panel--live-focus .nav-live-nav-grid {
+    grid-template-columns: 124px minmax(0, 1fr);
+    gap: 10px;
+}
 
 #logWorkspacePanel.log-workspace-panel--nav-compact .log-workspace-main {
     display: flex;
 }
+.signalk-navlog-link-card {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(143, 231, 255, 0.18);
+    background: linear-gradient(180deg, rgba(10, 27, 42, 0.94), rgba(7, 19, 30, 0.94));
+}
 
-#logWorkspacePanel.log-workspace-panel--nav-compact .log-workspace-side {
+.signalk-navlog-link-card__title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8fe7ff;
+}
+
+.signalk-navlog-link-card__hint {
+    margin-top: 6px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #d4edf8;
+}
+
+#maintenanceSignalKPanel #maintenanceSignalKDashboard,
+#maintenanceSignalKPanel #maintenanceSignalKEvents,
+#maintenanceSignalKPanel #maintenanceSignalKEventsLabel {
+    display: none;
+}
+
+#logWorkspacePanel.log-workspace-panel--nav-compact .log-workspace-live,
+#logWorkspacePanel.log-workspace-panel--nav-compact .log-workspace-checklist {
     display: block;
-    border-left: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    margin-top: 10px;
-    padding-top: 10px;
 }
 
 .log-live-table-card,
@@ -729,15 +890,47 @@ body.sidebar-collapsed #sidebar {
 }
 
 .log-checklist-card {
-    margin-top: 10px;
+    height: 100%;
+}
+
+.log-live-table-card {
+    position: relative;
+    overflow: hidden;
+    border-color: rgba(126, 203, 238, 0.48);
+    background:
+        radial-gradient(circle at 82% 12%, rgba(173, 231, 255, 0.26), rgba(173, 231, 255, 0) 38%),
+        radial-gradient(circle at 16% 88%, rgba(36, 143, 194, 0.22), rgba(36, 143, 194, 0) 44%),
+        linear-gradient(155deg, rgba(16, 44, 64, 0.96), rgba(9, 24, 39, 0.96));
+}
+
+.log-live-table-card::before {
+    content: '';
+    position: absolute;
+    right: -78px;
+    top: -84px;
+    width: 240px;
+    height: 240px;
+    border-radius: 999px;
+    pointer-events: none;
+    background:
+        conic-gradient(from 0deg,
+            rgba(143, 231, 255, 0.08) 0deg,
+            rgba(143, 231, 255, 0.01) 40deg,
+            rgba(143, 231, 255, 0.07) 80deg,
+            rgba(143, 231, 255, 0.01) 140deg,
+            rgba(143, 231, 255, 0.07) 200deg,
+            rgba(143, 231, 255, 0.01) 260deg,
+            rgba(143, 231, 255, 0.08) 320deg,
+            rgba(143, 231, 255, 0.08) 360deg);
+    box-shadow: inset 0 0 0 1px rgba(143, 231, 255, 0.16);
 }
 
 .log-live-table-card__title,
 .log-checklist-card__title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 800;
     color: #ebf9ff;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     letter-spacing: 0.2px;
 }
 
@@ -761,6 +954,211 @@ body.sidebar-collapsed #sidebar {
     padding: 6px 8px;
 }
 
+.log-live-polar-capture-row {
+    margin-bottom: 6px;
+    display: grid;
+    grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.nav-capture-polar-btn {
+    width: auto;
+    margin-top: 0;
+    border: 1px solid rgba(255, 132, 132, 0.75);
+    background: linear-gradient(180deg, rgba(163, 27, 40, 0.98), rgba(121, 12, 31, 0.98));
+    color: #ffeef0;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 190, 190, 0.24);
+    padding: 8px 10px;
+    font-size: 11px;
+}
+
+.nav-capture-polar-btn:hover {
+    background: linear-gradient(180deg, rgba(186, 35, 51, 1), rgba(136, 16, 36, 1));
+    border-color: rgba(255, 168, 168, 0.88);
+}
+
+.log-live-polar-hint {
+    margin-top: 0;
+    color: rgba(221, 240, 255, 0.84);
+    font-size: 10px;
+    line-height: 1.28;
+}
+
+.nav-live-dashboard {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.92fr);
+    grid-template-areas:
+        'rings rings'
+        'nav weather';
+    align-items: stretch;
+    min-height: 0;
+}
+
+.nav-live-dashboard__rings {
+    display: grid;
+    grid-area: rings;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.nav-live-widget {
+    padding: 8px 7px;
+}
+
+.nav-live-widget .signalk-rpi-widget__header {
+    margin-bottom: 6px;
+    font-size: 9px;
+}
+
+.nav-live-widget .signalk-rpi-ring {
+    width: clamp(58px, 7vw, 82px);
+}
+
+.nav-live-widget .signalk-rpi-ring__value {
+    font-size: clamp(12px, 1.15vw, 16px);
+}
+
+.nav-live-widget .signalk-rpi-ring__label {
+    font-size: 8px;
+}
+
+.nav-live-panel {
+    padding: 9px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.nav-live-signalk-dashboard {
+    gap: clamp(8px, 1vw, 14px);
+}
+
+.nav-live-signalk-dashboard__left {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.nav-live-signalk-dashboard__right {
+    gap: clamp(8px, 1vw, 14px);
+}
+
+.nav-live-nav-grid {
+    display: grid;
+    grid-template-columns: clamp(100px, 11vw, 124px) minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.nav-live-compass {
+    width: clamp(100px, 11vw, 124px);
+    height: clamp(100px, 11vw, 124px);
+}
+
+.nav-live-kpis {
+    gap: 7px;
+}
+
+.nav-live-kpis--nav-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nav-live-kpis--weather-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 8px;
+}
+
+.nav-live-weather-widgets {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.nav-live-engine-widget {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.nav-live-engine-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 7px;
+}
+
+.nav-live-engine-meta .signalk-rpi-kpi {
+    padding: 7px 8px;
+}
+
+.nav-live-panel .signalk-rpi-kpi {
+    padding: 6px 7px;
+}
+
+.nav-live-panel .signalk-rpi-kpi__label {
+    margin-bottom: 3px;
+    font-size: 8px;
+}
+
+.nav-live-panel .signalk-rpi-kpi__value,
+.nav-live-panel .signalk-rpi-balance-card__value {
+    font-size: clamp(12px, 1vw, 16px);
+}
+
+.nav-live-balance-card {
+    margin-top: 0;
+}
+
+.nav-live-lower-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.nav-live-panel--nav {
+    grid-area: nav;
+}
+
+.nav-live-panel--weather {
+    grid-area: weather;
+}
+
+.nav-live-panel--weather .signalk-rpi-widget__headline {
+    font-size: 16px;
+}
+
+#navLivePointOfSailValue {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: fit-content;
+    max-width: 100%;
+    font-size: 12px;
+    color: #dbf7ff;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+#navLivePointOfSailValue:not(:empty):not([data-empty='1']) {
+    background: rgba(143, 231, 255, 0.12);
+    border: 1px solid rgba(143, 231, 255, 0.34);
+    border-radius: 999px;
+    padding: 4px 9px;
+}
+
+.log-live-swell-hint {
+    margin-top: 0;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .log-live-table {
     width: 100%;
     border-collapse: collapse;
@@ -782,14 +1180,65 @@ body.sidebar-collapsed #sidebar {
 .log-live-table td {
     text-align: right;
     color: #f6fcff;
-    font-size: clamp(24px, 2.4vw, 33px);
     font-weight: 800;
     line-height: 1.05;
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.26);
 }
 
+.log-live-table__value--primary {
+    font-size: clamp(24px, 2.4vw, 33px);
+}
+
+.log-live-table__value--secondary {
+    font-size: clamp(15px, 1.3vw, 18px);
+    letter-spacing: 0.12px;
+    color: rgba(233, 247, 255, 0.96);
+    text-shadow: none;
+}
+
+#navLiveTwaValue {
+    color: #a8ecff;
+    font-weight: 900;
+}
+
+#navLivePointOfSailValue {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: fit-content;
+    max-width: 100%;
+    font-size: 12px;
+    color: #dbf7ff;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+#navLivePointOfSailValue:not(:empty):not([data-empty='1']) {
+    background: rgba(143, 231, 255, 0.12);
+    border: 1px solid rgba(143, 231, 255, 0.34);
+    border-radius: 999px;
+    padding: 5px 10px;
+}
+
+.log-live-table__section-row th {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    color: rgba(173, 231, 255, 0.92);
+    background: linear-gradient(90deg, rgba(143, 231, 255, 0.17), rgba(143, 231, 255, 0));
+    border-top: 1px solid rgba(143, 231, 255, 0.28);
+    border-bottom: 1px solid rgba(143, 231, 255, 0.22);
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
 .log-live-swell-hint {
-    margin-top: 8px;
+    margin-top: 0;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     color: #d8ecfa;
     font-size: 12px;
     line-height: 1.35;
@@ -813,6 +1262,10 @@ body.sidebar-collapsed #sidebar {
 
 .log-live-table-card.log-live-table-card--heavy {
     border-color: rgba(255, 112, 112, 0.55);
+}
+
+.log-live-table-card.log-live-table-card--weather-alert {
+    box-shadow: 0 0 0 1px rgba(255, 122, 122, 0.38), 0 14px 30px rgba(0, 0, 0, 0.34);
 }
 
 .log-checklist-switch {
@@ -915,14 +1368,56 @@ body.sidebar-collapsed #sidebar {
         grid-template-columns: 1fr;
     }
 
-    .log-workspace-side {
-        border-left: 0;
+    .log-workspace-live,
+    .log-workspace-checklist {
         border-top: 1px solid rgba(255, 255, 255, 0.12);
+        padding-top: 10px;
     }
 
     #logWorkspacePanel.log-workspace-panel--nav-compact {
         flex: 0 0 320px;
         min-width: 260px;
+    }
+
+    .nav-live-dashboard {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            'rings'
+            'nav'
+            'weather';
+    }
+
+    .nav-live-signalk-dashboard__left,
+    .nav-live-lower-grid,
+    .nav-live-kpis--weather-meta,
+    .nav-live-kpis--nav-summary,
+    .nav-live-weather-widgets,
+    .nav-live-dashboard__rings,
+    .nav-live-engine-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .log-live-polar-capture-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 860px) {
+    .nav-live-signalk-dashboard,
+    .nav-live-signalk-dashboard__left,
+    .nav-live-lower-grid,
+    .nav-live-dashboard__rings,
+    .nav-live-weather-widgets,
+    .nav-live-engine-meta,
+    .nav-live-kpis--nav-summary,
+    .nav-live-kpis--weather-meta,
+    .nav-live-nav-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #logWorkspacePanel.log-workspace-panel--nav-compact {
+        min-width: 0;
+        flex-basis: auto;
     }
 }
 
@@ -1480,6 +1975,35 @@ body.navlog-gps-inactive #navLogStatus {
     flex: 1 1 150px;
 }
 
+.signalk-autolog-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: rgba(7, 20, 31, 0.58);
+    border: 1px solid rgba(130, 201, 255, 0.16);
+    font-size: 12px;
+    font-weight: 700;
+    color: #eaf8ff;
+}
+
+.signalk-autolog-toggle input {
+    margin: 0;
+}
+
+.signalk-autolog-toggle__hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #9ec9db;
+}
+
+.signalk-autolog-toggle__hint[data-enabled='0'] {
+    color: #c8d7df;
+}
+
 .signalk-monitor-config {
     display: grid;
     gap: 8px;
@@ -1564,6 +2088,599 @@ body.navlog-gps-inactive #navLogStatus {
     flex: 0 0 138px;
     color: #8fe7ff;
     font-weight: 600;
+}
+
+.signalk-rpi-dashboard {
+    display: grid;
+    grid-template-columns: minmax(210px, 228px) minmax(0, 1fr);
+    gap: 12px;
+}
+
+.signalk-rpi-dashboard__left {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-content: start;
+}
+
+.signalk-rpi-dashboard__right {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+}
+
+.signalk-rpi-widget,
+.signalk-rpi-panel {
+    background:
+        linear-gradient(180deg, rgba(16, 39, 57, 0.96), rgba(8, 20, 31, 0.96));
+    border: 1px solid rgba(143, 231, 255, 0.14);
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 18px rgba(0, 0, 0, 0.18);
+}
+
+.signalk-rpi-widget {
+    padding: 10px;
+    min-width: 0;
+    --sk-fill: 0%;
+    --sk-accent: #7fe0ff;
+    transition: border-color 0.22s ease, box-shadow 0.22s ease, background-color 0.22s ease;
+}
+
+.signalk-rpi-bar {
+    --sk-accent: #7fe0ff;
+}
+
+.signalk-rpi-widget--wide {
+    grid-column: 1 / -1;
+}
+
+.signalk-rpi-widget[data-state="warn"],
+.signalk-rpi-bar[data-state="warn"] {
+    --sk-accent: #ffb454;
+}
+
+.signalk-rpi-widget[data-state="alert"],
+.signalk-rpi-bar[data-state="alert"] {
+    --sk-accent: #ff6b6b;
+}
+
+.signalk-rpi-widget__header,
+.signalk-rpi-balance-card__header,
+.signalk-rpi-engine-status,
+.signalk-rpi-panel__title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.signalk-rpi-widget__header {
+    margin-bottom: 10px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #b7d7e8;
+}
+
+.signalk-rpi-widget__range,
+.signalk-rpi-widget__headline {
+    font-size: 11px;
+    color: #ffffff;
+    opacity: 0.92;
+}
+
+.signalk-rpi-widget__headline {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.signalk-rpi-ring {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: min(92px, 100%);
+    aspect-ratio: 1;
+    margin: 0 auto;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at center, rgba(9, 21, 33, 0.98) 57%, transparent 58%),
+        conic-gradient(from 180deg, var(--sk-accent) var(--sk-fill), rgba(255, 255, 255, 0.08) 0);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.signalk-rpi-ring::after {
+    content: '';
+    position: absolute;
+    inset: 7px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.signalk-rpi-ring__core {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+}
+
+.signalk-rpi-ring__value {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+}
+
+.signalk-rpi-ring__label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8fb9cc;
+}
+
+.signalk-rpi-bar {
+    position: relative;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.signalk-rpi-bar__fill {
+    width: var(--sk-fill);
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #48b8ff, var(--sk-accent));
+    box-shadow: 0 0 14px rgba(72, 184, 255, 0.22);
+    transition: width 0.22s ease;
+}
+
+.signalk-rpi-widget--bar .signalk-rpi-bar,
+.signalk-rpi-bar--rpm {
+    margin-top: 6px;
+}
+
+.signalk-rpi-scale {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 7px;
+    font-size: 10px;
+    color: #7d9eb0;
+}
+
+.signalk-rpi-panel {
+    padding: 10px 11px;
+    min-width: 0;
+}
+
+.signalk-thresholds-panel {
+    margin-top: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(143, 231, 255, 0.12);
+    background: linear-gradient(180deg, rgba(11, 27, 41, 0.94), rgba(7, 18, 28, 0.94));
+    overflow: hidden;
+}
+
+.signalk-thresholds-panel summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 11px 13px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #dff7ff;
+}
+
+.signalk-thresholds-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.signalk-thresholds-panel__summary-note {
+    font-size: 10px;
+    font-weight: 600;
+    color: #89b6c9;
+}
+
+.signalk-thresholds-panel__body {
+    padding: 0 13px 13px;
+}
+
+.signalk-thresholds-panel__hint {
+    margin-bottom: 10px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #a8c7d6;
+}
+
+.signalk-thresholds-group + .signalk-thresholds-group {
+    margin-top: 12px;
+}
+
+.signalk-thresholds-group__title {
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8fe7ff;
+}
+
+.signalk-thresholds-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+
+.signalk-threshold-card {
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.signalk-threshold-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #f4fbff;
+}
+
+.signalk-threshold-card__unit {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #89b6c9;
+}
+
+.signalk-threshold-card__fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.signalk-threshold-card__fields input {
+    width: 100%;
+    padding: 7px 8px;
+    box-sizing: border-box;
+}
+
+.signalk-thresholds-panel__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.dashboard-threshold-status {
+    flex: 1;
+    font-size: 11px;
+    color: #9dc5d7;
+}
+
+.dashboard-threshold-status--error {
+    color: #ff9f9f;
+}
+
+@media (max-width: 980px) {
+    .navlog-display-toolbar {
+        top: 52px;
+        right: 8px;
+        left: 8px;
+        justify-content: space-between;
+        border-radius: 14px;
+    }
+
+    .navlog-display-toolbar__btn {
+        flex: 1 1 0;
+        padding: 7px 8px;
+        font-size: 10px;
+    }
+
+    .signalk-thresholds-panel__actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .signalk-threshold-card__fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+.signalk-rpi-panel__title {
+    margin-bottom: 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8fe7ff;
+}
+
+.signalk-rpi-nav-grid {
+    display: grid;
+    grid-template-columns: 128px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+}
+
+.signalk-rpi-compass {
+    position: relative;
+    width: 128px;
+    height: 128px;
+    margin: 0 auto;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at center, rgba(6, 17, 27, 0.98) 44%, transparent 45%),
+        radial-gradient(circle at center, rgba(127, 224, 255, 0.08) 58%, transparent 59%),
+        linear-gradient(180deg, rgba(9, 22, 35, 0.98), rgba(6, 15, 25, 0.98));
+    border: 1px solid rgba(143, 231, 255, 0.18);
+    overflow: hidden;
+}
+
+.signalk-rpi-compass__ring {
+    position: absolute;
+    inset: 9px;
+    border-radius: 50%;
+    border: 1px dashed rgba(143, 231, 255, 0.22);
+}
+
+.signalk-rpi-compass__needle {
+    position: absolute;
+    left: 50%;
+    bottom: 50%;
+    width: 3px;
+    height: 40px;
+    transform-origin: center bottom;
+    transform: translateX(-50%) rotate(0deg);
+    border-radius: 999px 999px 0 0;
+    transition: transform 0.35s ease;
+    will-change: transform;
+}
+
+.signalk-rpi-compass__needle--heading {
+    background: linear-gradient(180deg, #ffffff, #86dfff);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.18);
+}
+
+.signalk-rpi-compass__needle--course {
+    width: 2px;
+    height: 48px;
+    background: linear-gradient(180deg, #ff9a3a, #ff6e34);
+    opacity: 0.9;
+}
+
+.signalk-rpi-compass__center {
+    position: absolute;
+    inset: 36px;
+    border-radius: 50%;
+    background: rgba(8, 20, 31, 0.96);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.signalk-rpi-compass__value {
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.signalk-rpi-compass__label,
+.signalk-rpi-compass__mark {
+    font-size: 10px;
+    color: #92b7c8;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.signalk-rpi-compass__mark {
+    position: absolute;
+}
+
+.signalk-rpi-compass__mark--n { top: 8px; left: 50%; transform: translateX(-50%); }
+.signalk-rpi-compass__mark--e { right: 10px; top: 50%; transform: translateY(-50%); }
+.signalk-rpi-compass__mark--s { bottom: 8px; left: 50%; transform: translateX(-50%); }
+.signalk-rpi-compass__mark--w { left: 10px; top: 50%; transform: translateY(-50%); }
+
+.signalk-rpi-kpis {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.signalk-rpi-kpis--triple {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.signalk-rpi-kpis--quad {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.signalk-rpi-kpi {
+    min-width: 0;
+    padding: 8px 9px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.signalk-rpi-kpi--wide {
+    grid-column: 1 / -1;
+}
+
+.signalk-rpi-kpi__label,
+.signalk-rpi-engine-status__label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #88aebe;
+}
+
+.signalk-rpi-kpi__value,
+.signalk-rpi-engine-status__value,
+.signalk-rpi-balance-card__value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+}
+
+.signalk-rpi-kpi__value--small {
+    font-size: 13px;
+}
+
+.signalk-rpi-balance-card {
+    margin-top: 10px;
+}
+
+.signalk-rpi-balance-card--compact {
+    margin-top: 8px;
+}
+
+.signalk-rpi-balance-card__header {
+    margin-bottom: 7px;
+    font-size: 11px;
+    color: #c5deea;
+}
+
+.signalk-rpi-balance {
+    position: relative;
+    height: 18px;
+}
+
+.signalk-rpi-balance__track {
+    position: absolute;
+    inset: 4px 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(255, 107, 107, 0.32), rgba(255, 255, 255, 0.08) 50%, rgba(72, 184, 255, 0.32));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.signalk-rpi-balance__centerline {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    left: 50%;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.signalk-rpi-balance__marker {
+    position: absolute;
+    left: var(--sk-balance, 50%);
+    top: 0;
+    width: 12px;
+    height: 18px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 0 14px rgba(255, 255, 255, 0.24);
+    transform: translateX(-50%);
+    transition: left 0.35s ease;
+    will-change: left;
+}
+
+.signalk-rpi-lower-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.signalk-rpi-engine-status {
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.signalk-rpi-engine-status__main {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 8px 9px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.signalk-rpi-panel--weather .signalk-rpi-kpi__value {
+    font-size: 15px;
+}
+
+@media (max-width: 720px) {
+    .signalk-rpi-dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .signalk-rpi-dashboard__left {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .signalk-rpi-nav-grid,
+    .signalk-rpi-lower-grid,
+    .signalk-rpi-kpis--quad {
+        grid-template-columns: 1fr;
+    }
+
+    .signalk-rpi-compass {
+        width: 118px;
+        height: 118px;
+    }
+}
+
+@media (min-width: 980px) and (max-height: 700px) {
+    .signalk-monitor-card {
+        gap: 8px;
+    }
+
+    .signalk-rpi-dashboard {
+        gap: 10px;
+    }
+
+    .signalk-rpi-widget,
+    .signalk-rpi-panel {
+        padding: 9px 10px;
+    }
+
+    .signalk-rpi-compass {
+        width: 116px;
+        height: 116px;
+    }
+
+    .signalk-rpi-nav-grid {
+        grid-template-columns: 116px minmax(0, 1fr);
+        gap: 9px;
+    }
+
+    .signalk-rpi-ring {
+        width: 86px;
+    }
+
+    .signalk-rpi-kpi__value,
+    .signalk-rpi-engine-status__value,
+    .signalk-rpi-balance-card__value {
+        font-size: 16px;
+    }
 }
 
 @media (max-width: 720px) {

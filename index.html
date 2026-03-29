@@ -10,7 +10,7 @@
     <link rel="icon" type="image/jpeg" href="ceibo-favicon.jpg">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <link rel="stylesheet" href="style.css?v=20260315-35"/>
+    <link rel="stylesheet" href="style.css?v=20260329-41"/>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -274,7 +274,6 @@
         </div>
         <div id="navLogStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Journal navigation: en attente</div>
 
-        <!-- ======= SIGNALK CONFIG CARD ======= -->
         <div class="cloud-config-card" style="margin-top:10px;">
             <div class="cloud-config-title">Source de données navigation</div>
             <div class="button-row" style="margin-top:8px; gap:6px;">
@@ -284,6 +283,13 @@
                 <button id="signalkModeSkBtn" type="button" class="signalk-mode-btn" style="flex:1;">
                     ⚓ SignalK (RPi)
                 </button>
+            </div>
+            <label class="signalk-autolog-toggle" for="signalkAutoLogToggle">
+                <input type="checkbox" id="signalkAutoLogToggle" checked>
+                <span>Auto-log navigation après 100 m</span>
+            </label>
+            <div id="signalkAutoLogHint" class="signalk-autolog-toggle__hint">
+                Auto-log actif: démarrage automatique après 100 m. Le bouton Démarrer reste disponible.
             </div>
             <div id="signalkSkPanel" style="display:none; margin-top:10px;">
                 <div class="routing-control-grid">
@@ -306,7 +312,6 @@
                 </div>
             </div>
         </div>
-        <!-- ======= END SIGNALK CONFIG CARD ======= -->
 
         <div class="cloud-config-card" style="margin-top:10px;">
             <div class="cloud-config-title" id="anchorDragTitle">Alarme mouillage (rippage ancre)</div>
@@ -796,6 +801,14 @@
                     <button id="maintenanceSignalKModeSkBtn" type="button" class="signalk-mode-btn">SignalK</button>
                 </div>
 
+                <label class="signalk-autolog-toggle" for="maintenanceSignalKAutoLogToggle">
+                    <input type="checkbox" id="maintenanceSignalKAutoLogToggle" checked>
+                    <span>Auto-log navigation après 100 m</span>
+                </label>
+                <div id="maintenanceSignalKAutoLogHint" class="signalk-autolog-toggle__hint">
+                    Auto-log actif: démarrage automatique après 100 m. Le bouton Démarrer reste disponible.
+                </div>
+
                 <div class="signalk-monitor-config">
                     <div class="maintenance-control-item signalk-monitor-config__host">
                         <label id="maintenanceSignalKHostLabel" for="maintenanceSignalKHostInput">Serveur SignalK (IP ou hostname):</label>
@@ -820,31 +833,348 @@
                     </div>
                 </div>
 
-                <div class="signalk-monitor-grid">
-                    <div><strong>Trames utiles:</strong> <span id="maintenanceSignalKUpdateCountValue">0</span></div>
-                    <div><strong>Météo:</strong> <span id="maintenanceSignalKWeatherCountValue">0</span></div>
-                    <div><strong>Temp air:</strong> <span id="maintenanceSignalKAirTempValue">--</span></div>
-                    <div><strong>Humidité:</strong> <span id="maintenanceSignalKHumidityValue">--</span></div>
-                    <div><strong>Humidité abs:</strong> <span id="maintenanceSignalKAbsHumidityValue">--</span></div>
-                    <div><strong>Nuages:</strong> <span id="maintenanceSignalKCloudCoverValue">--</span></div>
-                    <div><strong>Pluie:</strong> <span id="maintenanceSignalKRainRateValue">--</span></div>
-                    <div><strong>Positions:</strong> <span id="maintenanceSignalKPositionCountValue">0</span></div>
-                    <div><strong>Vent:</strong> <span id="maintenanceSignalKWindCountValue">0</span></div>
-                    <div><strong>Moteur:</strong> <span id="maintenanceSignalKEngineCountValue">0</span></div>
-                    <div><strong>Latitude:</strong> <span id="maintenanceSignalKLatValue">--</span></div>
-                    <div><strong>Longitude:</strong> <span id="maintenanceSignalKLngValue">--</span></div>
-                    <div><strong>Vitesse:</strong> <span id="maintenanceSignalKSpeedValue">--</span></div>
-                    <div><strong>COG:</strong> <span id="maintenanceSignalKCourseValue">--</span></div>
-                    <div><strong>Heading:</strong> <span id="maintenanceSignalKHeadingValue">--</span></div>
-                    <div><strong>Gîte:</strong> <span id="maintenanceSignalKHeelValue">--</span></div>
-                    <div><strong>TWS:</strong> <span id="maintenanceSignalKTwsValue">--</span></div>
-                    <div><strong>TWA:</strong> <span id="maintenanceSignalKTwaValue">--</span></div>
-                    <div><strong>TWD:</strong> <span id="maintenanceSignalKTwdValue">--</span></div>
-                    <div><strong>Baro:</strong> <span id="maintenanceSignalKBaroValue">--</span></div>
-                    <div><strong>Loch:</strong> <span id="maintenanceSignalKLogValue">--</span></div>
-                    <div><strong>Moteur:</strong> <span id="maintenanceSignalKEngineValue">--</span></div>
-                    <div><strong>RPM:</strong> <span id="maintenanceSignalKRpmValue">--</span></div>
+                <div class="signalk-navlog-link-card">
+                    <div id="maintenanceSignalKNavLogLinkTitle" class="signalk-navlog-link-card__title">Monitoring live unique</div>
+                    <div id="maintenanceSignalKNavLogLinkHint" class="signalk-navlog-link-card__hint">Utilise Journal nav comme écran principal SignalK + navigation. Tu peux ensuite masquer menu, carte, log ou checklist selon l’écran disponible.</div>
+                    <div class="button-row">
+                        <button id="maintenanceSignalKOpenNavLogBtn" type="button" style="flex:1;">Ouvrir Journal nav</button>
+                    </div>
                 </div>
+
+                <div class="signalk-rpi-dashboard" id="maintenanceSignalKDashboard">
+                    <div class="signalk-rpi-dashboard__left">
+                        <article class="signalk-rpi-widget signalk-rpi-widget--ring" data-sk-widget="probeTemp">
+                            <div class="signalk-rpi-widget__header">
+                                <span>Temp moteur</span>
+                                <span class="signalk-rpi-widget__range">0-120 C</span>
+                            </div>
+                            <div class="signalk-rpi-ring">
+                                <div class="signalk-rpi-ring__core">
+                                    <span id="maintenanceSignalKProbeTempValue" class="signalk-rpi-ring__value">--</span>
+                                    <span class="signalk-rpi-ring__label">Moteur</span>
+                                </div>
+                            </div>
+                        </article>
+
+                        <article class="signalk-rpi-widget signalk-rpi-widget--ring" data-sk-widget="batteryTemp">
+                            <div class="signalk-rpi-widget__header">
+                                <span>Temp batterie</span>
+                                <span class="signalk-rpi-widget__range">0-60 C</span>
+                            </div>
+                            <div class="signalk-rpi-ring">
+                                <div class="signalk-rpi-ring__core">
+                                    <span id="maintenanceSignalKBatteryTempValue" class="signalk-rpi-ring__value">--</span>
+                                    <span class="signalk-rpi-ring__label">Batterie</span>
+                                </div>
+                            </div>
+                        </article>
+
+                        <article class="signalk-rpi-widget signalk-rpi-widget--ring" data-sk-widget="humidity">
+                            <div class="signalk-rpi-widget__header">
+                                <span>Humidité</span>
+                                <span class="signalk-rpi-widget__range">0-100 %</span>
+                            </div>
+                            <div class="signalk-rpi-ring">
+                                <div class="signalk-rpi-ring__core">
+                                    <span id="maintenanceSignalKHumidityValue" class="signalk-rpi-ring__value">--</span>
+                                    <span class="signalk-rpi-ring__label">Air</span>
+                                </div>
+                            </div>
+                        </article>
+
+                        <article class="signalk-rpi-widget signalk-rpi-widget--bar signalk-rpi-widget--wide" data-sk-widget="baro">
+                            <div class="signalk-rpi-widget__header">
+                                <span>Baromètre</span>
+                                <span id="maintenanceSignalKBaroValue" class="signalk-rpi-widget__headline">--</span>
+                            </div>
+                            <div class="signalk-rpi-bar">
+                                <div class="signalk-rpi-bar__fill"></div>
+                            </div>
+                            <div class="signalk-rpi-scale signalk-rpi-scale--bar">
+                                <span>960</span>
+                                <span>1000</span>
+                                <span>1040</span>
+                            </div>
+                        </article>
+                    </div>
+
+                    <div class="signalk-rpi-dashboard__right">
+                        <article class="signalk-rpi-panel signalk-rpi-panel--nav">
+                            <div class="signalk-rpi-panel__title">Navigation</div>
+                            <div class="signalk-rpi-nav-grid">
+                                <div class="signalk-rpi-compass" data-sk-compass>
+                                    <div class="signalk-rpi-compass__ring"></div>
+                                    <div class="signalk-rpi-compass__needle signalk-rpi-compass__needle--heading" data-sk-needle="heading"></div>
+                                    <div class="signalk-rpi-compass__needle signalk-rpi-compass__needle--course" data-sk-needle="course"></div>
+                                    <div class="signalk-rpi-compass__center">
+                                        <span id="maintenanceSignalKHeadingValue" class="signalk-rpi-compass__value">--</span>
+                                        <span class="signalk-rpi-compass__label">Heading</span>
+                                    </div>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--n">N</span>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--e">E</span>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--s">S</span>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--w">W</span>
+                                </div>
+
+                                <div class="signalk-rpi-kpis">
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">Vitesse</span>
+                                        <span id="maintenanceSignalKSpeedValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">COG</span>
+                                        <span id="maintenanceSignalKCourseValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">Loch</span>
+                                        <span id="maintenanceSignalKLogValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">Latitude</span>
+                                        <span id="maintenanceSignalKLatValue" class="signalk-rpi-kpi__value signalk-rpi-kpi__value--small">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi signalk-rpi-kpi--wide">
+                                        <span class="signalk-rpi-kpi__label">Longitude</span>
+                                        <span id="maintenanceSignalKLngValue" class="signalk-rpi-kpi__value signalk-rpi-kpi__value--small">--</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="signalk-rpi-balance-card">
+                                <div class="signalk-rpi-balance-card__header">
+                                    <span>Gîte</span>
+                                    <span id="maintenanceSignalKHeelValue" class="signalk-rpi-balance-card__value">--</span>
+                                </div>
+                                <div class="signalk-rpi-balance" data-sk-balance="heel">
+                                    <div class="signalk-rpi-balance__track"></div>
+                                    <div class="signalk-rpi-balance__centerline"></div>
+                                    <div class="signalk-rpi-balance__marker"></div>
+                                </div>
+                                <div class="signalk-rpi-scale signalk-rpi-scale--balance">
+                                    <span>-45</span>
+                                    <span>0</span>
+                                    <span>+45</span>
+                                </div>
+                            </div>
+                        </article>
+
+                        <div class="signalk-rpi-lower-grid">
+                            <article class="signalk-rpi-panel">
+                                <div class="signalk-rpi-panel__title">Vent réel</div>
+                                <div class="signalk-rpi-kpis signalk-rpi-kpis--triple">
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">TWS</span>
+                                        <span id="maintenanceSignalKTwsValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">TWA</span>
+                                        <span id="maintenanceSignalKTwaValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">TWD</span>
+                                        <span id="maintenanceSignalKTwdValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                </div>
+                                <div class="signalk-rpi-balance-card signalk-rpi-balance-card--compact">
+                                    <div class="signalk-rpi-balance-card__header">
+                                        <span>Angle au vent</span>
+                                    </div>
+                                    <div class="signalk-rpi-balance" data-sk-balance="twa">
+                                        <div class="signalk-rpi-balance__track"></div>
+                                        <div class="signalk-rpi-balance__centerline"></div>
+                                        <div class="signalk-rpi-balance__marker"></div>
+                                    </div>
+                                    <div class="signalk-rpi-scale signalk-rpi-scale--balance">
+                                        <span>-180</span>
+                                        <span>0</span>
+                                        <span>+180</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-panel">
+                                <div class="signalk-rpi-panel__title">Moteur</div>
+                                <div class="signalk-rpi-engine-status">
+                                    <div class="signalk-rpi-engine-status__main">
+                                        <span class="signalk-rpi-engine-status__label">État</span>
+                                        <span id="maintenanceSignalKEngineValue" class="signalk-rpi-engine-status__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-engine-status__main">
+                                        <span class="signalk-rpi-engine-status__label">Frames</span>
+                                        <span id="maintenanceSignalKEngineCountValue" class="signalk-rpi-engine-status__value">0</span>
+                                    </div>
+                                </div>
+                                <div class="signalk-rpi-balance-card signalk-rpi-balance-card--compact">
+                                    <div class="signalk-rpi-balance-card__header">
+                                        <span>RPM</span>
+                                        <span id="maintenanceSignalKRpmValue" class="signalk-rpi-balance-card__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-bar signalk-rpi-bar--rpm" data-sk-widget="rpm">
+                                        <div class="signalk-rpi-bar__fill"></div>
+                                    </div>
+                                    <div class="signalk-rpi-scale signalk-rpi-scale--bar">
+                                        <span>0</span>
+                                        <span>1750</span>
+                                        <span>3500</span>
+                                    </div>
+                                </div>
+                            </article>
+                        </div>
+
+                        <article class="signalk-rpi-panel signalk-rpi-panel--weather">
+                            <div class="signalk-rpi-panel__title">Ambiance</div>
+                            <div class="signalk-rpi-kpis signalk-rpi-kpis--quad">
+                                <div class="signalk-rpi-kpi">
+                                    <span class="signalk-rpi-kpi__label">Rosée</span>
+                                    <span id="maintenanceSignalKDewPointValue" class="signalk-rpi-kpi__value">--</span>
+                                </div>
+                                <div class="signalk-rpi-kpi">
+                                    <span class="signalk-rpi-kpi__label">Nuages</span>
+                                    <span id="maintenanceSignalKCloudCoverValue" class="signalk-rpi-kpi__value">--</span>
+                                </div>
+                                <div class="signalk-rpi-kpi">
+                                    <span class="signalk-rpi-kpi__label">Pluie</span>
+                                    <span id="maintenanceSignalKRainRateValue" class="signalk-rpi-kpi__value">--</span>
+                                </div>
+                                <div class="signalk-rpi-kpi">
+                                    <span class="signalk-rpi-kpi__label">Serveur</span>
+                                    <span class="signalk-rpi-kpi__value signalk-rpi-kpi__value--small" id="maintenanceSignalKWeatherDetailMirror">--</span>
+                                </div>
+                            </div>
+                        </article>
+                    </div>
+                </div>
+
+                <details class="signalk-thresholds-panel">
+                    <summary>
+                        <span>Configuration seuils widgets</span>
+                        <span class="signalk-thresholds-panel__summary-note">bas / haut, avertissement / alerte</span>
+                    </summary>
+                    <div class="signalk-thresholds-panel__body">
+                        <div class="signalk-thresholds-panel__hint">
+                            Laisse un champ vide pour désactiver un seuil. Ces réglages recolorent les jauges SignalK et le dashboard live du log navigation sur cet appareil.
+                        </div>
+
+                        <div class="signalk-thresholds-group">
+                            <div class="signalk-thresholds-group__title">Dashboard SignalK</div>
+                            <div class="signalk-thresholds-grid">
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Temp moteur</span>
+                                        <span class="signalk-threshold-card__unit">deg C</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkProbeWarnLow">Avert. bas</label><input id="thresholdSignalkProbeWarnLow" type="number" step="0.1" data-threshold-metric="signalkProbeTemp" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkProbeAlertLow">Alerte bas</label><input id="thresholdSignalkProbeAlertLow" type="number" step="0.1" data-threshold-metric="signalkProbeTemp" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkProbeWarnHigh">Avert. haut</label><input id="thresholdSignalkProbeWarnHigh" type="number" step="0.1" data-threshold-metric="signalkProbeTemp" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkProbeAlertHigh">Alerte haut</label><input id="thresholdSignalkProbeAlertHigh" type="number" step="0.1" data-threshold-metric="signalkProbeTemp" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Temp batterie</span>
+                                        <span class="signalk-threshold-card__unit">deg C</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBatteryWarnLow">Avert. bas</label><input id="thresholdSignalkBatteryWarnLow" type="number" step="0.1" data-threshold-metric="signalkBatteryTemp" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBatteryAlertLow">Alerte bas</label><input id="thresholdSignalkBatteryAlertLow" type="number" step="0.1" data-threshold-metric="signalkBatteryTemp" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBatteryWarnHigh">Avert. haut</label><input id="thresholdSignalkBatteryWarnHigh" type="number" step="0.1" data-threshold-metric="signalkBatteryTemp" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBatteryAlertHigh">Alerte haut</label><input id="thresholdSignalkBatteryAlertHigh" type="number" step="0.1" data-threshold-metric="signalkBatteryTemp" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Humidité</span>
+                                        <span class="signalk-threshold-card__unit">%</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkHumidityWarnLow">Avert. bas</label><input id="thresholdSignalkHumidityWarnLow" type="number" step="1" data-threshold-metric="signalkHumidity" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkHumidityAlertLow">Alerte bas</label><input id="thresholdSignalkHumidityAlertLow" type="number" step="1" data-threshold-metric="signalkHumidity" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkHumidityWarnHigh">Avert. haut</label><input id="thresholdSignalkHumidityWarnHigh" type="number" step="1" data-threshold-metric="signalkHumidity" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkHumidityAlertHigh">Alerte haut</label><input id="thresholdSignalkHumidityAlertHigh" type="number" step="1" data-threshold-metric="signalkHumidity" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Baromètre</span>
+                                        <span class="signalk-threshold-card__unit">hPa</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBaroWarnLow">Avert. bas</label><input id="thresholdSignalkBaroWarnLow" type="number" step="0.1" data-threshold-metric="signalkBaro" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBaroAlertLow">Alerte bas</label><input id="thresholdSignalkBaroAlertLow" type="number" step="0.1" data-threshold-metric="signalkBaro" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBaroWarnHigh">Avert. haut</label><input id="thresholdSignalkBaroWarnHigh" type="number" step="0.1" data-threshold-metric="signalkBaro" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkBaroAlertHigh">Alerte haut</label><input id="thresholdSignalkBaroAlertHigh" type="number" step="0.1" data-threshold-metric="signalkBaro" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>RPM moteur</span>
+                                        <span class="signalk-threshold-card__unit">rpm</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkRpmWarnLow">Avert. bas</label><input id="thresholdSignalkRpmWarnLow" type="number" step="10" data-threshold-metric="signalkRpm" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkRpmAlertLow">Alerte bas</label><input id="thresholdSignalkRpmAlertLow" type="number" step="10" data-threshold-metric="signalkRpm" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkRpmWarnHigh">Avert. haut</label><input id="thresholdSignalkRpmWarnHigh" type="number" step="10" data-threshold-metric="signalkRpm" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdSignalkRpmAlertHigh">Alerte haut</label><input id="thresholdSignalkRpmAlertHigh" type="number" step="10" data-threshold-metric="signalkRpm" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+
+                        <div class="signalk-thresholds-group">
+                            <div class="signalk-thresholds-group__title">Dashboard navigation live</div>
+                            <div class="signalk-thresholds-grid">
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Vitesse</span>
+                                        <span class="signalk-threshold-card__unit">kn</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdNavSpeedWarnLow">Avert. bas</label><input id="thresholdNavSpeedWarnLow" type="number" step="0.1" data-threshold-metric="navSpeed" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavSpeedAlertLow">Alerte bas</label><input id="thresholdNavSpeedAlertLow" type="number" step="0.1" data-threshold-metric="navSpeed" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavSpeedWarnHigh">Avert. haut</label><input id="thresholdNavSpeedWarnHigh" type="number" step="0.1" data-threshold-metric="navSpeed" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavSpeedAlertHigh">Alerte haut</label><input id="thresholdNavSpeedAlertHigh" type="number" step="0.1" data-threshold-metric="navSpeed" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Gîte</span>
+                                        <span class="signalk-threshold-card__unit">deg</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdNavHeelWarnLow">Avert. bas</label><input id="thresholdNavHeelWarnLow" type="number" step="0.1" data-threshold-metric="navHeel" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavHeelAlertLow">Alerte bas</label><input id="thresholdNavHeelAlertLow" type="number" step="0.1" data-threshold-metric="navHeel" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavHeelWarnHigh">Avert. haut</label><input id="thresholdNavHeelWarnHigh" type="number" step="0.1" data-threshold-metric="navHeel" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavHeelAlertHigh">Alerte haut</label><input id="thresholdNavHeelAlertHigh" type="number" step="0.1" data-threshold-metric="navHeel" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-threshold-card">
+                                    <div class="signalk-threshold-card__header">
+                                        <span>Houle estimée</span>
+                                        <span class="signalk-threshold-card__unit">m</span>
+                                    </div>
+                                    <div class="signalk-threshold-card__fields">
+                                        <div class="maintenance-control-item"><label for="thresholdNavSwellWarnLow">Avert. bas</label><input id="thresholdNavSwellWarnLow" type="number" step="0.1" data-threshold-metric="navSwell" data-threshold-field="warnLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavSwellAlertLow">Alerte bas</label><input id="thresholdNavSwellAlertLow" type="number" step="0.1" data-threshold-metric="navSwell" data-threshold-field="alertLow"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavSwellWarnHigh">Avert. haut</label><input id="thresholdNavSwellWarnHigh" type="number" step="0.1" data-threshold-metric="navSwell" data-threshold-field="warnHigh"></div>
+                                        <div class="maintenance-control-item"><label for="thresholdNavSwellAlertHigh">Alerte haut</label><input id="thresholdNavSwellAlertHigh" type="number" step="0.1" data-threshold-metric="navSwell" data-threshold-field="alertHigh"></div>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+
+                        <div class="signalk-thresholds-panel__actions">
+                            <button id="dashboardThresholdResetBtn" type="button">Réinitialiser seuils</button>
+                            <div id="dashboardThresholdStatus" class="dashboard-threshold-status">Seuils dashboard chargés.</div>
+                        </div>
+                    </div>
+                </details>
 
                 <label id="maintenanceSignalKEventsLabel" style="display:block; margin-top:12px; font-size:12px;">Événements récents:</label>
                 <div id="maintenanceSignalKEvents" class="signalk-monitor-events">
@@ -857,7 +1187,7 @@
     <div id="sidebarFooterContainer">
         <div class="sidebar-footer">
             <span class="creator-credit">Programa creado por Max Patissier</span>
-            <span id="buildVersionBadge" class="build-version-badge">v20260315-35</span>
+            <span id="buildVersionBadge" class="build-version-badge">v20260329-41</span>
             <button id="nightModeToggleBtn" class="night-mode-btn" type="button" aria-pressed="false">Mode nuit: OFF</button>
             <div class="lang-switch" aria-label="Sélecteur de langue">
                 <button id="langFrBtn" class="lang-btn" type="button">FR</button>
@@ -870,6 +1200,13 @@
 </div>
 
 <button id="sidebarToggleBtn" type="button" aria-pressed="false" title="Masquer panneau">Masquer panneau</button>
+
+<div id="navLogDisplayToolbar" class="navlog-display-toolbar" aria-label="Affichage journal navigation">
+    <button id="navLogDisplayMenuBtn" type="button" class="navlog-display-toolbar__btn" aria-pressed="true">Menu</button>
+    <button id="navLogDisplayMapBtn" type="button" class="navlog-display-toolbar__btn navlog-display-toolbar__btn--active" aria-pressed="true">Carte</button>
+    <button id="navLogDisplayLogBtn" type="button" class="navlog-display-toolbar__btn navlog-display-toolbar__btn--active" aria-pressed="true">Log</button>
+    <button id="navLogDisplayChecklistBtn" type="button" class="navlog-display-toolbar__btn navlog-display-toolbar__btn--active" aria-pressed="true">Checklist</button>
+</div>
 
 <div id="mapWorkspace">
     <div id="map">
@@ -956,7 +1293,7 @@
                         </div>
                         <div class="routing-control-item">
                             <label for="watchSailConfigInput">Voilure:</label>
-                            <input type="text" id="watchSailConfigInput" placeholder="Ex: GV 1 ris + génois" style="width:100%; padding:8px; box-sizing:border-box;">
+                            <select id="watchSailConfigInput" style="width:100%; padding:8px; box-sizing:border-box;"></select>
                         </div>
                         <div class="routing-control-item">
                             <label for="watchBarometerInput">Baromètre (hPa):</label>
@@ -973,6 +1310,7 @@
 
                     <div class="button-row">
                         <button id="addManualNavLogBtn" type="button" style="flex:1;">Enregistrer entrée</button>
+                        <button id="logWorkspaceCloseBtn" type="button" style="flex:1;">Fermer</button>
                         <button id="deleteNavLogBtn" type="button" style="flex:1; display:none;">Supprimer ce log</button>
                         <button id="cancelNavLogEditBtn" type="button" style="flex:1;">Annuler</button>
                     </div>
@@ -987,6 +1325,12 @@
                     <label for="fuelAddedInput" style="display:block; margin-top:10px; font-size:12px;">Carburant ajouté (L):</label>
                     <input type="number" id="fuelAddedInput" step="0.1" placeholder="Ex: 35" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
 
+                    <label for="engineTempStartInput" style="display:block; margin-top:10px; font-size:12px;">Température départ moteur:</label>
+                    <input type="text" id="engineTempStartInput" readonly placeholder="--" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; opacity: 0.85;">
+
+                    <label for="engineTempEndInput" style="display:block; margin-top:10px; font-size:12px;">Température fin moteur:</label>
+                    <input type="text" id="engineTempEndInput" readonly placeholder="--" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; opacity: 0.85;">
+
                     <label for="engineLogNoteInput" style="display:block; margin-top:10px; font-size:12px;">Note:</label>
                     <textarea id="engineLogNoteInput" rows="3" placeholder="Maintenance, bruit, filtre, etc." style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;"></textarea>
 
@@ -997,41 +1341,272 @@
                 </div>
             </div>
 
-            <aside class="log-workspace-side">
+            <aside class="log-workspace-live">
                 <div id="navLiveTableCard" class="log-live-table-card">
-                    <div class="log-live-table-card__title">Tableau navigation</div>
-                    <div class="log-live-controls-row">
-                        <label for="navSwellProfileSelect">Profil houle:</label>
-                        <select id="navSwellProfileSelect">
-                            <option value="conservative">Conservateur</option>
-                            <option value="balanced" selected>Equilibre</option>
-                            <option value="sport">Sportif</option>
-                        </select>
+                    <div id="navLiveTableTitle" class="log-live-table-card__title">Tableau navigation voile</div>
+                    <div class="log-live-polar-capture-row">
+                        <button id="navCapturePolarBtn" type="button" class="nav-capture-polar-btn">Capturer point polaire</button>
+                        <div id="navCapturePolarHint" class="log-live-polar-hint">Jeu de voile: utiliser le champ Voilure puis capturer quand l'allure est stable.</div>
                     </div>
-                    <table class="log-live-table" aria-label="Tableau navigation live">
-                        <tbody>
-                            <tr>
-                                <th>Vitesse</th>
-                                <td id="navLiveSpeedValue">-- kn</td>
-                            </tr>
-                            <tr>
-                                <th>Inclinaison</th>
-                                <td id="navLiveHeelValue">-- deg</td>
-                            </tr>
-                            <tr>
-                                <th>Cap reel</th>
-                                <td id="navLiveHeadingValue">-- deg</td>
-                            </tr>
-                            <tr>
-                                <th>Houle estimee</th>
-                                <td id="navLiveSwellValue">-- m</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div id="navLiveSwellHint" class="log-live-swell-hint">Evaluation houle: en attente</div>
-                </div>
+                    <div class="nav-live-dashboard" aria-label="Tableau navigation live">
+                        <div class="nav-live-dashboard__rings">
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="speed">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveSpeedLabel">Vitesse</span>
+                                    <span class="signalk-rpi-widget__range">0-12 kn</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveSpeedValue" class="signalk-rpi-ring__value">-- kn</span>
+                                        <span class="signalk-rpi-ring__label">Surface</span>
+                                    </div>
+                                </div>
+                            </article>
 
-                <div class="log-checklist-card">
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="twa">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveTwaLabel">Angle vent (TWA)</span>
+                                    <span class="signalk-rpi-widget__range">0-180 deg</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveTwaValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Angle</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="tws">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveTwsLabel">Vent reel (TWS)</span>
+                                    <span class="signalk-rpi-widget__range">0-40 kn</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveTwsValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Vent</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="cog">
+                                <div class="signalk-rpi-widget__header">
+                                    <span>COG</span>
+                                    <span class="signalk-rpi-widget__range">0-360 deg</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveCourseValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Route</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="heel">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveHeelLabel">Gîte live</span>
+                                    <span class="signalk-rpi-widget__range">0-45 deg</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveHeelValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Heel</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="airTemp">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveAirTempLabel">Temp air</span>
+                                    <span class="signalk-rpi-widget__range">-10 a 45 C</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveAirTempValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Air</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="dewPoint">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveDewPointLabel">Point de rosee</span>
+                                    <span class="signalk-rpi-widget__range">-10 a 30 C</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveDewPointValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Rosée</span>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="swell">
+                                <div class="signalk-rpi-widget__header">
+                                    <span id="navLiveSwellLabel">Houle estimee</span>
+                                    <span class="signalk-rpi-widget__range">0-5.5 m</span>
+                                </div>
+                                <div class="signalk-rpi-ring">
+                                    <div class="signalk-rpi-ring__core">
+                                        <span id="navLiveSwellValue" class="signalk-rpi-ring__value">--</span>
+                                        <span class="signalk-rpi-ring__label">Mer</span>
+                                    </div>
+                                </div>
+                            </article>
+                        </div>
+
+                        <article class="signalk-rpi-panel nav-live-panel nav-live-panel--nav">
+                            <div class="signalk-rpi-panel__title">Navigation live</div>
+                            <div class="nav-live-nav-grid">
+                                <div class="signalk-rpi-compass nav-live-compass">
+                                    <div class="signalk-rpi-compass__ring"></div>
+                                    <div class="signalk-rpi-compass__needle signalk-rpi-compass__needle--heading" data-nav-needle="heading"></div>
+                                    <div class="signalk-rpi-compass__needle signalk-rpi-compass__needle--course" data-nav-needle="wind"></div>
+                                    <div class="signalk-rpi-compass__center">
+                                        <span id="navLiveHeadingValue" class="signalk-rpi-compass__value">-- deg</span>
+                                        <span id="navLiveHeadingLabel" class="signalk-rpi-compass__label">Cap reel</span>
+                                    </div>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--n">N</span>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--e">E</span>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--s">S</span>
+                                    <span class="signalk-rpi-compass__mark signalk-rpi-compass__mark--w">W</span>
+                                </div>
+
+                                <div class="signalk-rpi-kpis nav-live-kpis nav-live-kpis--nav-summary">
+                                    <div class="signalk-rpi-kpi signalk-rpi-kpi--wide">
+                                        <span id="navLivePointOfSailLabel" class="signalk-rpi-kpi__label">Allure</span>
+                                        <span id="navLivePointOfSailValue" class="signalk-rpi-kpi__value signalk-rpi-kpi__value--small">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">Loch</span>
+                                        <span id="navLiveLogValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-kpi">
+                                        <span class="signalk-rpi-kpi__label">TWD</span>
+                                        <span id="navLiveTwdValue" class="signalk-rpi-kpi__value">--</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="nav-live-lower-grid">
+                                <div class="signalk-rpi-balance-card nav-live-balance-card">
+                                    <div class="signalk-rpi-balance-card__header">
+                                        <span id="navLiveTwdLabel">Vent relatif</span>
+                                        <span id="navLiveHeelBalanceValue" class="signalk-rpi-balance-card__value">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-balance" data-nav-balance="twa">
+                                        <div class="signalk-rpi-balance__track"></div>
+                                        <div class="signalk-rpi-balance__centerline"></div>
+                                        <div class="signalk-rpi-balance__marker"></div>
+                                    </div>
+                                    <div class="signalk-rpi-scale signalk-rpi-scale--balance">
+                                        <span>-180</span>
+                                        <span>0</span>
+                                        <span>+180</span>
+                                    </div>
+                                </div>
+
+                                <article class="signalk-rpi-widget signalk-rpi-widget--bar nav-live-engine-widget" data-nav-widget="rpm">
+                                    <div class="signalk-rpi-widget__header">
+                                        <span>Moteur</span>
+                                        <span id="navLiveRpmValue" class="signalk-rpi-widget__headline">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-bar signalk-rpi-bar--rpm">
+                                        <div class="signalk-rpi-bar__fill"></div>
+                                    </div>
+                                    <div class="signalk-rpi-scale signalk-rpi-scale--bar">
+                                        <span>0</span>
+                                        <span>2000</span>
+                                        <span>3500</span>
+                                    </div>
+                                    <div class="nav-live-engine-meta">
+                                        <div class="signalk-rpi-kpi">
+                                            <span class="signalk-rpi-kpi__label">État</span>
+                                            <span id="navLiveEngineValue" class="signalk-rpi-kpi__value">--</span>
+                                        </div>
+                                        <div class="signalk-rpi-kpi">
+                                            <span class="signalk-rpi-kpi__label">Frames</span>
+                                            <span id="navLiveEngineFramesValue" class="signalk-rpi-kpi__value">--</span>
+                                        </div>
+                                    </div>
+                                </article>
+                            </div>
+                        </article>
+
+                        <article class="signalk-rpi-panel nav-live-panel nav-live-panel--weather">
+                            <div class="signalk-rpi-panel__title" id="navLiveWeatherSectionLabel">Meteo SignalK</div>
+                            <div class="nav-live-weather-widgets">
+                                <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="probeTemp">
+                                    <div class="signalk-rpi-widget__header">
+                                        <span id="navLiveProbeTempWidgetLabel">Temp moteur</span>
+                                        <span class="signalk-rpi-widget__range">0-120 C</span>
+                                    </div>
+                                    <div class="signalk-rpi-ring">
+                                        <div class="signalk-rpi-ring__core">
+                                            <span id="navLiveProbeTempValue" class="signalk-rpi-ring__value">--</span>
+                                            <span class="signalk-rpi-ring__label">Moteur</span>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="batteryTemp">
+                                    <div class="signalk-rpi-widget__header">
+                                        <span id="navLiveBatteryTempLabel">Temp batterie</span>
+                                        <span class="signalk-rpi-widget__range">0-60 C</span>
+                                    </div>
+                                    <div class="signalk-rpi-ring">
+                                        <div class="signalk-rpi-ring__core">
+                                            <span id="navLiveBatteryTempValue" class="signalk-rpi-ring__value">--</span>
+                                            <span class="signalk-rpi-ring__label">Batterie</span>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-rpi-widget signalk-rpi-widget--ring nav-live-widget" data-nav-widget="humidity">
+                                    <div class="signalk-rpi-widget__header">
+                                        <span id="navLiveHumidityWidgetLabel">Humidité</span>
+                                        <span class="signalk-rpi-widget__range">0-100 %</span>
+                                    </div>
+                                    <div class="signalk-rpi-ring">
+                                        <div class="signalk-rpi-ring__core">
+                                            <span id="navLiveHumidityValue" class="signalk-rpi-ring__value">--</span>
+                                            <span class="signalk-rpi-ring__label">Air</span>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <article class="signalk-rpi-widget signalk-rpi-widget--bar signalk-rpi-widget--wide" data-nav-widget="baro">
+                                    <div class="signalk-rpi-widget__header">
+                                        <span id="navLiveBaroWidgetLabel">Barometre</span>
+                                        <span id="navLiveBaroValue" class="signalk-rpi-widget__headline">--</span>
+                                    </div>
+                                    <div class="signalk-rpi-bar">
+                                        <div class="signalk-rpi-bar__fill"></div>
+                                    </div>
+                                    <div class="signalk-rpi-scale signalk-rpi-scale--bar">
+                                        <span>960</span>
+                                        <span>1000</span>
+                                        <span>1040</span>
+                                    </div>
+                                </article>
+                            </div>
+                            <div class="signalk-rpi-kpis nav-live-kpis nav-live-kpis--weather-meta">
+                                <div class="signalk-rpi-kpi">
+                                    <span id="navLiveCloudLabel" class="signalk-rpi-kpi__label">Nuages</span>
+                                    <span id="navLiveCloudValue" class="signalk-rpi-kpi__value">--</span>
+                                </div>
+                                <div class="signalk-rpi-kpi">
+                                    <span id="navLiveRainLabel" class="signalk-rpi-kpi__label">Pluie</span>
+                                    <span id="navLiveRainValue" class="signalk-rpi-kpi__value">--</span>
+                                </div>
+                            </div>
+                        </article>
+                    </div>
+                </div>
+            </aside>
+
+            <aside class="log-workspace-checklist">
+                <div id="navChecklistCard" class="log-checklist-card">
                     <div class="log-checklist-card__title">Checklist Navigation</div>
                     <div class="log-checklist-switch">
                         <button id="navChecklistDepartureBtn" type="button" class="page-subtab-btn active">Avant depart</button>
@@ -1086,7 +1661,7 @@
     </div>
 </div>
 
-<script type="module" src="app.20260315-36.js"></script>
+<script type="module" src="app.js?v=20260329-41"></script>
 
 </body>
 </html>
