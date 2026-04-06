@@ -9,6 +9,8 @@ create table if not exists public.engine_log (
     timestamp timestamptz not null,
     hours double precision not null check (hours >= 0),
     fuel_added_l double precision not null default 0 check (fuel_added_l >= 0),
+    probe_temp_start_c double precision,
+    probe_temp_end_c double precision,
     note text not null default '',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()

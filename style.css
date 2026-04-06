@@ -4325,6 +4325,71 @@ button:focus-visible {
     border-color: rgba(143, 231, 255, 0.6);
 }
 
+#weatherDiagnosticPanel {
+    margin-top: 8px;
+}
+
+.weather-analysis-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.weather-analysis-chip {
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: rgba(16, 34, 58, 0.78);
+    border: 1px solid rgba(143, 231, 255, 0.18);
+    color: #e7f6ff;
+    font-size: 11px;
+}
+
+.weather-analysis-chip strong {
+    display: block;
+    margin-bottom: 3px;
+    color: #bcecff;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.weather-analysis-section-title {
+    display: block;
+    margin-bottom: 5px;
+    color: #bcecff;
+}
+
+.weather-analysis-list {
+    margin: 6px 0 0 18px;
+    padding: 0;
+}
+
+.weather-analysis-list li {
+    margin: 4px 0;
+}
+
+.weather-analysis-command {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(8, 18, 30, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #dff4ff;
+    font-family: Menlo, Consolas, Monaco, monospace;
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+@media (max-width: 760px) {
+    .weather-analysis-meta {
+        grid-template-columns: 1fr;
+    }
+}
+
 .weather-focus-icon {
     background: transparent;
     border: none;
@@ -4684,6 +4749,202 @@ button:focus-visible {
     display: none;
     pointer-events: none;
     box-sizing: border-box;
+}
+
+#weatherCenterStage {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1205;
+    width: min(760px, calc(100% - 32px));
+    max-height: min(72vh, calc(100% - 36px));
+    overflow: auto;
+    padding: 14px;
+    padding-top: 52px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(7, 17, 27, 0.93), rgba(10, 22, 35, 0.88));
+    border: 1px solid rgba(143, 231, 255, 0.24);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(6px);
+    color: #eef8ff;
+    display: none;
+    box-sizing: border-box;
+}
+
+.weather-center-stage__title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.weather-center-stage__title-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.weather-center-stage__title strong {
+    font-size: 16px;
+    letter-spacing: 0.01em;
+}
+
+.weather-center-stage__subtitle {
+    color: #b8deef;
+    font-size: 12px;
+}
+
+.weather-center-stage__close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    appearance: none;
+    border: 1px solid rgba(143, 231, 255, 0.3);
+    background: rgba(15, 35, 54, 0.92);
+    color: #eef8ff;
+    border-radius: 999px;
+    padding: 6px 11px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.weather-center-stage__close:hover {
+    background: rgba(23, 50, 77, 0.96);
+}
+
+.weather-regime-grid,
+.weather-corsica-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.weather-regime-card,
+.weather-corsica-card {
+    padding: 10px 11px;
+    border-radius: 12px;
+    background: rgba(16, 34, 58, 0.72);
+    border: 1px solid rgba(143, 231, 255, 0.16);
+}
+
+.weather-regime-card__head,
+.weather-corsica-card__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.weather-regime-card__head strong,
+.weather-corsica-card__head strong {
+    font-size: 13px;
+    color: #f5fbff;
+}
+
+.weather-regime-badge,
+.weather-corsica-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.weather-regime-badge--active,
+.weather-corsica-badge--active {
+    background: rgba(68, 160, 255, 0.22);
+    color: #b8e6ff;
+    border-color: rgba(124, 199, 255, 0.42);
+}
+
+.weather-regime-badge--watch,
+.weather-corsica-badge--watch {
+    background: rgba(255, 183, 76, 0.18);
+    color: #ffe2ad;
+    border-color: rgba(255, 183, 76, 0.35);
+}
+
+.weather-regime-badge--quiet,
+.weather-corsica-badge--quiet {
+    background: rgba(141, 235, 177, 0.16);
+    color: #d7f8e6;
+    border-color: rgba(141, 235, 177, 0.34);
+}
+
+.weather-regime-card__summary,
+.weather-corsica-card__summary {
+    color: #d8eefb;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.weather-stage-confidence {
+    margin-top: 8px;
+    color: #9fdfff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.weather-stage-indicators {
+    margin: 7px 0 0;
+    padding-left: 16px;
+    color: #cfe6f3;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.weather-stage-indicators li + li {
+    margin-top: 3px;
+}
+
+.weather-center-stage__section {
+    margin-top: 12px;
+}
+
+.weather-center-stage__section-title {
+    display: block;
+    color: #9fdfff;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 7px;
+}
+
+@media (max-width: 860px) {
+    #weatherCenterStage {
+        top: auto;
+        bottom: 12px;
+        transform: translateX(-50%);
+        max-height: 58vh;
+    }
+
+    .weather-center-stage__title,
+    .weather-center-stage__title-actions {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .weather-center-stage__title-actions {
+        justify-content: flex-start;
+    }
+
+    .weather-regime-grid,
+    .weather-corsica-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 #weatherOverlayLegend > strong {

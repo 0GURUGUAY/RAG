@@ -70,6 +70,7 @@ let documentRagLlmSettings = {
     apiKey: ''
 };
 const LOCAL_RAG_API_URL = 'http://127.0.0.1:8765';
+const LOCAL_WEATHER_ANALYSIS_API_URL = 'http://127.0.0.1:8777';
 let documentCloudHydrationInFlight = false;
 let documentCloudHydratedOnce = false;
 let pendingWaypointPhotoDraft = null;
@@ -283,10 +284,20 @@ let signalkLatestRainRateMmH = null;
 let signalkLatestEngineRpm = null;
 let signalkLatestEngineRunning = null;
 let signalkLatestLogNm = null;
+let signalkLatestJoystickX = null;
+let signalkLatestJoystickY = null;
+let signalkLatestJoystickPressed = false;
+let signalkLatestJoystickDirection = 'center';
+let signalkLastJoystickDirection = 'center';
+let signalkLastJoystickPressed = false;
+let signalkLastJoystickActionAtMs = 0;
+let signalkLastJoystickButtonEventAt = 0;
+let signalKJoystickOpenTimerId = null;
 let maintenanceSignalKLatestFrame = null;
 let pendingSignalKUiData = null;
 let signalKUiRefreshTimerId = null;
 let lastSignalKUiRefreshAtMs = 0;
+const SIGNALK_JOYSTICK_REPEAT_MS = 900;
 let maintenanceSignalKStats = {
     updates: 0,
     weather: 0,
@@ -322,6 +333,8 @@ let weatherFocusMarker = null;
 let weatherFocusPoint = null;
 let weatherPointerPlacementMode = false;
 let weatherOutlookBootstrapped = false;
+let lastWeatherDiagnosticPayload = null;
+let weatherCenterStageDismissed = false;
 let owmKeyValidationBootstrapped = false;
 let maintenanceCloudHydrationInFlight = false;
 let maintenanceCloudHydratedOnce = false;
@@ -502,6 +515,28 @@ function setElementPlaceholder(selector, value) {
     const node = document.querySelector(selector);
     if (!node || typeof value !== 'string') return;
     node.placeholder = value;
+}
+
+function invalidateWeatherDiagnostic(message = t('Analyse synoptique: à actualiser', 'Análisis sinóptico: actualizar', 'Synoptic analysis: refresh needed')) {
+    const status = document.getElementById('weatherDiagnosticStatus');
+    const panel = document.getElementById('weatherDiagnosticPanel');
+    const stage = document.getElementById('weatherCenterStage');
+    lastWeatherDiagnosticPayload = null;
+    weatherCenterStageDismissed = false;
+    if (status) status.textContent = message;
+    if (panel) panel.innerHTML = '';
+    if (stage) {
+        stage.innerHTML = '';
+        stage.style.display = 'none';
+    }
+}
+
+function closeWeatherCenterStage() {
+    const stage = document.getElementById('weatherCenterStage');
+    weatherCenterStageDismissed = true;
+    if (stage) {
+        stage.style.display = 'none';
+    }
 }
 
 function updateRoutingActiveRouteDisplay() {
@@ -874,6 +909,7 @@ function applyLanguageToUi() {
     setElementText('#placeWeatherPointerBtn', t('Placer pointeur météo', 'Colocar puntero meteo'));
     setElementText('#useMapCenterWeatherBtn', t('Centre carte → pointeur', 'Centro mapa → puntero'));
     setElementText('#refreshWeatherOutlookBtn', t('Actualiser météo', 'Actualizar meteo'));
+    setElementText('#weatherDiagnosticBtn', t('Analyse synoptique locale', 'Análisis sinóptico local', 'Local synoptic analysis'));
     setElementText('#testOwmApiKeyBtn', t('Tester clé OWM', 'Probar clave OWM'));
     setElementText('#saveOwmApiKeyBtn', t('Enregistrer clé OWM', 'Guardar clave OWM'));
     setElementText('#clearOwmApiKeyBtn', t('Supprimer clé OWM', 'Borrar clave OWM'));
@@ -881,6 +917,7 @@ function applyLanguageToUi() {
     setElementText('#owmApiKeyStatus', t('Clé OWM: non testée', 'Clave OWM: no probada'));
     setElementText('#weatherApiConfigSummary', t('API météo connectée.', 'API meteo conectada.'));
     setElementText('#weatherOutlookStatus', t('Météo: en attente', 'Meteo: en espera'));
+    setElementText('#weatherDiagnosticStatus', t('Analyse synoptique: en attente', 'Análisis sinóptico: en espera', 'Synoptic analysis: waiting'));
     setElementText('#weatherGribSection .cloud-config-title', t('GRIB local', 'GRIB local', 'Local GRIB'));
     setElementText('label[for="weatherGribFileInput"]', t('Fichiers GRIB / JSON météo:', 'Archivos GRIB / JSON meteo:', 'GRIB / weather JSON files:'));
     setElementText('#weatherImportGribBtn', t('Importer GRIB/JSON', 'Importar GRIB/JSON', 'Import GRIB/JSON'));
@@ -18924,6 +18961,155 @@ function startNavigationLogging() {
         });
     }
 
+    function sanitizeSignalKJoystickDirection(direction) {
+        const normalized = String(direction || '').trim().toLowerCase();
+        return ['left', 'right', 'up', 'down', 'center'].includes(normalized) ? normalized : 'center';
+    }
+
+    function resetSignalKJoystickState() {
+        signalkLatestJoystickX = null;
+        signalkLatestJoystickY = null;
+        signalkLatestJoystickPressed = false;
+        signalkLatestJoystickDirection = 'center';
+        signalkLastJoystickDirection = 'center';
+        signalkLastJoystickPressed = false;
+        signalkLastJoystickActionAtMs = 0;
+        signalkLastJoystickButtonEventAt = 0;
+        if (signalKJoystickOpenTimerId !== null) {
+            window.clearTimeout(signalKJoystickOpenTimerId);
+            signalKJoystickOpenTimerId = null;
+        }
+    }
+
+    function restoreNavLogLayoutFromJoystick() {
+        navLogLayoutState = { showMap: true, showLog: true, showChecklist: true };
+        saveNavLogLayoutState();
+        setSidebarCollapsed(false);
+        renderLogWorkspacePanel();
+        applyNavLogLayoutState();
+    }
+
+    function openNavLogFromJoystick() {
+        const navLogTabTrigger = document.getElementById('navLogTabBtn');
+
+        try {
+            activateTab('navlog');
+            if (activeTabName !== 'navlog' && navLogTabTrigger instanceof HTMLElement) {
+                navLogTabTrigger.click();
+            }
+
+            window.setTimeout(() => {
+                if (activeTabName === 'navlog') {
+                    setNavLogStatus(t('Joystick · Journal nav ouvert.', 'Joystick · Diario nav abierto.'));
+                    return;
+                }
+            }, 80);
+        } catch (error) {
+            if (navLogTabTrigger instanceof HTMLElement) {
+                try {
+                    navLogTabTrigger.click();
+                } catch (_fallbackError) {
+                    return;
+                }
+            }
+        }
+    }
+
+    function scheduleNavLogOpenFromJoystick() {
+        if (signalKJoystickOpenTimerId !== null) {
+            return;
+        }
+
+        signalKJoystickOpenTimerId = window.setTimeout(() => {
+            signalKJoystickOpenTimerId = null;
+            openNavLogFromJoystick();
+        }, 0);
+    }
+
+    function runSignalKJoystickNavLogAction(direction) {
+        switch (direction) {
+            case 'left':
+                setSidebarCollapsed(!isSidebarCollapsed);
+                setNavLogStatus(t('Joystick · menu Journal nav basculé.', 'Joystick · menú Diario nav alternado.'));
+                return;
+            case 'up':
+                setNavLogLayoutSection('showMap', !navLogLayoutState.showMap);
+                setNavLogStatus(t('Joystick · panneau carte basculé.', 'Joystick · panel mapa alternado.'));
+                return;
+            case 'right':
+                setNavLogLayoutSection('showLog', !navLogLayoutState.showLog);
+                setNavLogStatus(t('Joystick · panneau log basculé.', 'Joystick · panel diario alternado.'));
+                return;
+            case 'down':
+                setNavLogLayoutSection('showChecklist', !navLogLayoutState.showChecklist);
+                setNavLogStatus(t('Joystick · panneau checklist basculé.', 'Joystick · panel checklist alternado.'));
+                return;
+            default:
+                return;
+        }
+    }
+
+    function handleSignalKJoystickInput(data) {
+        if (!data || typeof data !== 'object') return;
+
+        if (Number.isFinite(data.joystickX)) signalkLatestJoystickX = Number(data.joystickX);
+        if (Number.isFinite(data.joystickY)) signalkLatestJoystickY = Number(data.joystickY);
+        if (typeof data.joystickPressed === 'boolean') signalkLatestJoystickPressed = data.joystickPressed;
+
+        const direction = sanitizeSignalKJoystickDirection(data.joystickDirection);
+        signalkLatestJoystickDirection = direction;
+        const pressedEdge = signalkLatestJoystickPressed && !signalkLastJoystickPressed;
+        signalkLastJoystickPressed = signalkLatestJoystickPressed;
+
+        if (activeTabName !== 'navlog' && signalkLatestJoystickPressed) {
+            scheduleNavLogOpenFromJoystick();
+            return;
+        }
+
+        const buttonEventAt = Number(data.joystickButtonEventAt);
+        if (Number.isFinite(buttonEventAt) && buttonEventAt > signalkLastJoystickButtonEventAt) {
+            signalkLastJoystickButtonEventAt = buttonEventAt;
+            if (activeTabName !== 'navlog') {
+                scheduleNavLogOpenFromJoystick();
+            } else {
+                restoreNavLogLayoutFromJoystick();
+                setNavLogStatus(t('Joystick · affichage Journal nav réinitialisé.', 'Joystick · vista Diario nav reiniciada.'));
+            }
+            return;
+        }
+
+        if (pressedEdge) {
+            if (activeTabName !== 'navlog') {
+                scheduleNavLogOpenFromJoystick();
+            } else {
+                restoreNavLogLayoutFromJoystick();
+                setNavLogStatus(t('Joystick · affichage Journal nav réinitialisé.', 'Joystick · vista Diario nav reiniciada.'));
+            }
+            return;
+        }
+
+        if (direction === 'center') {
+            signalkLastJoystickDirection = 'center';
+            return;
+        }
+
+        if (activeTabName !== 'navlog') {
+            signalkLastJoystickDirection = direction;
+            return;
+        }
+
+        const now = Date.now();
+        const directionChanged = direction !== signalkLastJoystickDirection;
+        const repeatAllowed = (now - signalkLastJoystickActionAtMs) >= SIGNALK_JOYSTICK_REPEAT_MS;
+        if (!directionChanged && !repeatAllowed) {
+            return;
+        }
+
+        signalkLastJoystickDirection = direction;
+        signalkLastJoystickActionAtMs = now;
+        runSignalKJoystickNavLogAction(direction);
+    }
+
     function applySignalKUpdate(data) {
         const fix = navGpsLatestFix;
         const now = Date.now();
@@ -19028,6 +19214,8 @@ function startNavigationLogging() {
             setSignalKManagedInputValue('watchLogNmInput', data.logNm, value => value.toFixed(1));
         }
 
+        handleSignalKJoystickInput(data);
+
         // ---- Moteur ----
         if (typeof data.engineRunning === 'boolean') {
             signalkLatestEngineRunning = data.engineRunning;
@@ -19128,6 +19316,7 @@ function startNavigationLogging() {
             signalkLatestEngineRpm = null;
             signalkLatestEngineRunning = null;
             signalkLatestLogNm = null;
+            resetSignalKJoystickState();
             resetMaintenanceSignalKMonitor();
             renderEngineSensorUi();
             updateEngineAudioRegimeUi();
@@ -19853,6 +20042,7 @@ function setWeatherFocusPoint(latlng, { refresh = true, sourceLabel = t('pointeu
     if (!Number.isFinite(latlng?.lat) || !Number.isFinite(latlng?.lng)) return;
 
     weatherFocusPoint = { lat: latlng.lat, lng: latlng.lng };
+    invalidateWeatherDiagnostic(t('Analyse synoptique: point changé, relance l\'analyse.', 'Análisis sinóptico: punto cambiado, vuelve a lanzar el análisis.', 'Synoptic analysis: point changed, run it again.'));
     ensureWeatherFocusMarker();
     if (weatherFocusMarker) {
         weatherFocusMarker.setLatLng([weatherFocusPoint.lat, weatherFocusPoint.lng]);
@@ -19906,6 +20096,252 @@ function getWeatherReferenceCoordinates(forceMapCenter = false) {
     }
 
     return null;
+}
+
+function buildWeatherAnalysisListHtml(items) {
+    if (!Array.isArray(items) || !items.length) return '';
+    return `<ul class="weather-analysis-list">${items.map(item => `<li>${escapeHtml(String(item || ''))}</li>`).join('')}</ul>`;
+}
+
+function buildWeatherIndicatorListHtml(items) {
+    if (!Array.isArray(items) || !items.length) return '';
+    return `<ul class="weather-stage-indicators">${items.map(item => `<li>${escapeHtml(String(item || ''))}</li>`).join('')}</ul>`;
+}
+
+function normalizeWeatherStageBadgeClass(status) {
+    const value = String(status || '').toLowerCase();
+    if (value === 'active') return 'weather-regime-badge weather-regime-badge--active';
+    if (value === 'watch') return 'weather-regime-badge weather-regime-badge--watch';
+    return 'weather-regime-badge weather-regime-badge--quiet';
+}
+
+function normalizeCorsicaStageBadgeClass(status) {
+    const value = String(status || '').toLowerCase();
+    if (value === 'active') return 'weather-corsica-badge weather-corsica-badge--active';
+    if (value === 'watch') return 'weather-corsica-badge weather-corsica-badge--watch';
+    return 'weather-corsica-badge weather-corsica-badge--quiet';
+}
+
+function formatWeatherStageBadgeLabel(status) {
+    const value = String(status || '').toLowerCase();
+    if (value === 'active') return t('Actif', 'Activo', 'Active');
+    if (value === 'watch') return t('À surveiller', 'Vigilar', 'Watch');
+    return t('Calme', 'Calma', 'Quiet');
+}
+
+function renderWeatherCenterStage(payload) {
+    const stage = document.getElementById('weatherCenterStage');
+    if (!stage) return;
+
+    const isWeather = activeTabName === 'weather';
+    if (!isWeather || !payload || typeof payload !== 'object' || weatherCenterStageDismissed) {
+        stage.innerHTML = '';
+        stage.style.display = 'none';
+        return;
+    }
+
+    const regimeMatrix = Array.isArray(payload.regime_matrix) ? payload.regime_matrix : [];
+    const corsicaSubregions = Array.isArray(payload.corsica_subregions) ? payload.corsica_subregions : [];
+    const corsicaRelays = Array.isArray(payload.corsica_regional_relays) ? payload.corsica_regional_relays : [];
+
+    const regimeHtml = regimeMatrix.length
+        ? `<div class="weather-center-stage__section">
+                <strong class="weather-center-stage__section-title">${t('Tableau des régimes', 'Tabla de regímenes', 'Regime matrix')}</strong>
+                <div class="weather-regime-grid">${regimeMatrix.map(item => `
+                    <article class="weather-regime-card">
+                        <div class="weather-regime-card__head">
+                            <strong>${escapeHtml(String(item?.label || ''))}</strong>
+                            <span class="${normalizeWeatherStageBadgeClass(item?.status)}">${escapeHtml(formatWeatherStageBadgeLabel(item?.status))}</span>
+                        </div>
+                        <div class="weather-regime-card__summary">${escapeHtml(String(item?.summary || ''))}</div>
+                        <div class="weather-stage-confidence">${t('Confiance', 'Confianza', 'Confidence')}: ${escapeHtml(String(item?.confidence || 'n/a'))}</div>
+                        ${buildWeatherIndicatorListHtml(item?.indicators)}
+                    </article>`).join('')}</div>
+            </div>`
+        : '';
+
+    const corsicaHtml = corsicaSubregions.length
+        ? `<div class="weather-center-stage__section">
+                <strong class="weather-center-stage__section-title">${t('Zoom Corse', 'Zoom Córcega', 'Corsica focus')}</strong>
+                <div class="weather-corsica-grid">${corsicaSubregions.map(item => `
+                    <article class="weather-corsica-card">
+                        <div class="weather-corsica-card__head">
+                            <strong>${escapeHtml(String(item?.label || ''))}</strong>
+                            <span class="${normalizeCorsicaStageBadgeClass(item?.status)}">${escapeHtml(formatWeatherStageBadgeLabel(item?.status))}</span>
+                        </div>
+                        <div class="weather-corsica-card__summary">${escapeHtml(String(item?.summary || ''))}</div>
+                        <div class="weather-stage-confidence">${t('Confiance', 'Confianza', 'Confidence')}: ${escapeHtml(String(item?.confidence || 'n/a'))}</div>
+                        ${buildWeatherIndicatorListHtml(item?.indicators)}
+                    </article>`).join('')}</div>
+            </div>`
+        : '';
+
+    const corsicaRelaysHtml = corsicaRelays.length
+        ? `<div class="weather-center-stage__section">
+                <strong class="weather-center-stage__section-title">${t('Relais Ligurie / Sardaigne / Tyrrhénienne', 'Relés Liguria / Cerdeña / Tirreno', 'Ligurian / Sardinian / Tyrrhenian relays')}</strong>
+                ${buildWeatherAnalysisListHtml(corsicaRelays)}
+            </div>`
+        : '';
+
+    stage.innerHTML = `
+        <button type="button" class="weather-center-stage__close" id="weatherCenterStageCloseBtn" aria-label="${escapeHtml(t('Fermer', 'Cerrar', 'Close'))}">${escapeHtml(t('Fermer', 'Cerrar', 'Close'))}</button>
+        <div class="weather-center-stage__title">
+            <div>
+                <strong>${escapeHtml(String(payload.focus_region || t('Zone analysée', 'Zona analizada', 'Analyzed area')))}</strong>
+                <div class="weather-center-stage__subtitle">${escapeHtml(String(payload.headline || ''))}</div>
+            </div>
+            <div class="weather-center-stage__title-actions">
+                <div class="weather-center-stage__subtitle">${escapeHtml(String(payload.generated_at_label || ''))}</div>
+            </div>
+        </div>
+        ${regimeHtml}
+        ${corsicaHtml}
+        ${corsicaRelaysHtml}`;
+    const closeBtn = document.getElementById('weatherCenterStageCloseBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeWeatherCenterStage, { once: true });
+    }
+    stage.style.display = regimeHtml || corsicaHtml || corsicaRelaysHtml ? 'block' : 'none';
+}
+
+function renderWeatherDiagnostic(payload) {
+    const panel = document.getElementById('weatherDiagnosticPanel');
+    if (!panel) return;
+
+    if (!payload || typeof payload !== 'object') {
+        panel.innerHTML = '';
+        return;
+    }
+
+    const metrics = payload.metrics || {};
+    const sections = [
+        {
+            title: t('Faits générateurs', 'Hechos generadores', 'Generating factors'),
+            items: payload.generating_factors
+        },
+        {
+            title: t('Pourquoi maintenant', 'Por qué ahora', 'Why now'),
+            items: payload.mechanisms
+        },
+        {
+            title: t('Régimes Méditerranée ouest', 'Regímenes Mediterráneo oeste', 'Western Mediterranean regimes'),
+            items: payload.regional_regimes
+        },
+        {
+            title: t('Relais Corse bassin proche', 'Relés Córcega cuenca cercana', 'Corsica nearby-basin relays'),
+            items: payload.corsica_regional_relays
+        },
+        {
+            title: t('Évolution 2–7 jours', 'Evolución 2–7 días', 'Evolution 2–7 days'),
+            items: payload.day_outlook
+        },
+        {
+            title: t('Contexte climatologique', 'Contexto climatológico', 'Climatology context'),
+            items: payload.climate_context
+        },
+        {
+            title: t('Relais régionaux / atlantiques', 'Relés regionales / atlánticos', 'Regional / Atlantic relays'),
+            items: payload.remote_signals
+        },
+        {
+            title: t('Limites', 'Límites', 'Limits'),
+            items: payload.limitations
+        }
+    ].filter(section => Array.isArray(section.items) && section.items.length);
+
+    const metaHtml = `
+        <div class="weather-analysis-meta">
+            <div class="weather-analysis-chip"><strong>${t('Confiance', 'Confianza', 'Confidence')}</strong>${escapeHtml(String(payload.confidence || 'n/a'))}</div>
+            <div class="weather-analysis-chip"><strong>${t('Généré', 'Generado', 'Generated')}</strong>${escapeHtml(String(payload.generated_at_label || payload.generated_at || 'n/a'))}</div>
+            <div class="weather-analysis-chip"><strong>${t('Vent actuel', 'Viento actual', 'Current wind')}</strong>${escapeHtml(String(metrics.current_wind || 'n/a'))}</div>
+            <div class="weather-analysis-chip"><strong>${t('Pression', 'Presión', 'Pressure')}</strong>${escapeHtml(String(metrics.current_pressure || 'n/a'))}</div>
+        </div>`;
+
+    const sectionsHtml = sections.map(section => `
+        <div class="weather-card">
+            <strong class="weather-analysis-section-title">${escapeHtml(section.title)}</strong>
+            ${buildWeatherAnalysisListHtml(section.items)}
+        </div>`).join('');
+
+    const commandHtml = payload.command_hint
+        ? `<div class="weather-analysis-command">${escapeHtml(String(payload.command_hint))}</div>`
+        : '';
+
+    panel.innerHTML = `
+        <div class="weather-card weather-card--ok">
+            <strong>${escapeHtml(String(payload.headline || t('Analyse synoptique', 'Análisis sinóptico', 'Synoptic analysis')))}</strong><br>
+            ${escapeHtml(String(payload.summary || ''))}
+            ${metaHtml}
+        </div>
+        ${sectionsHtml}
+        ${commandHtml}`;
+
+    lastWeatherDiagnosticPayload = payload;
+    weatherCenterStageDismissed = false;
+    renderWeatherCenterStage(payload);
+}
+
+async function requestWeatherDiagnostic(lat, lon, horizonDays) {
+    const response = await fetch(`${LOCAL_WEATHER_ANALYSIS_API_URL}/weather/analyze`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            lat,
+            lon,
+            horizon_days: Math.max(2, Math.min(7, Number(horizonDays) || 3)),
+            language: currentLanguage
+        })
+    });
+
+    if (!response.ok) {
+        const raw = await response.text();
+        throw new Error(raw || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function refreshWeatherDiagnostic() {
+    const status = document.getElementById('weatherDiagnosticStatus');
+    const panel = document.getElementById('weatherDiagnosticPanel');
+    const focus = getWeatherReferenceCoordinates(false);
+
+    if (!status || !panel) return;
+    if (!focus) {
+        status.textContent = t('Analyse synoptique: coordonnées indisponibles.', 'Análisis sinóptico: coordenadas no disponibles.', 'Synoptic analysis: coordinates unavailable.');
+        panel.innerHTML = '';
+        renderWeatherCenterStage(null);
+        return;
+    }
+
+    status.textContent = `${t('Analyse synoptique', 'Análisis sinóptico', 'Synoptic analysis')}: ${t('chargement', 'cargando', 'loading')} (${focus.lat.toFixed(4)}, ${focus.lng.toFixed(4)})...`;
+    lastWeatherDiagnosticPayload = null;
+    weatherCenterStageDismissed = false;
+    panel.innerHTML = '';
+    renderWeatherCenterStage(null);
+
+    try {
+        const payload = await requestWeatherDiagnostic(focus.lat, focus.lng, forecastWindowDays);
+        renderWeatherDiagnostic(payload);
+        status.textContent = `${t('Analyse synoptique', 'Análisis sinóptico', 'Synoptic analysis')}: ${focus.source} (${focus.lat.toFixed(4)}, ${focus.lng.toFixed(4)})`;
+    } catch (error) {
+        const commandHint = 'cd /Users/maxpatissier/Downloads/ceibo && /Users/maxpatissier/Downloads/ceibo/.venv/bin/python weather/server.py --host 127.0.0.1 --port 8777';
+        lastWeatherDiagnosticPayload = null;
+        renderWeatherCenterStage(null);
+        status.textContent = t(
+            'Analyse synoptique indisponible: démarre le serveur météo local.',
+            'Análisis sinóptico no disponible: inicia el servidor meteo local.',
+            'Synoptic analysis unavailable: start the local weather server.'
+        );
+        panel.innerHTML = `
+            <div class="weather-card weather-card--risk">
+                <strong>${t('Serveur météo local requis', 'Servidor meteo local requerido', 'Local weather server required')}</strong><br>
+                ${escapeHtml(String(error?.message || error || 'Erreur inconnue'))}
+                <div class="weather-analysis-command">${escapeHtml(commandHint)}</div>
+            </div>`;
+    }
 }
 
 async function refreshWeatherOutlook({ forceMapCenter = false } = {}) {
@@ -20417,17 +20853,19 @@ document.addEventListener('DOMContentLoaded', async function() {
             maybeBootstrapOwmKeyValidation();
             refreshWeatherOutlook();
             renderWeatherOverlayLegend();
+            renderWeatherCenterStage(lastWeatherDiagnosticPayload);
         }
 
         if (isMaintenance) {
             void maybeHydrateMaintenanceCloudOnDemand();
         }
 
+        if (signalkConfig.mode === 'signalk' && signalkConfig.host.trim() && !signalkLoggingActive) {
+            ensureSignalKStreamingConnection({ announce: false });
+        }
+
         if (isNavLog) {
             void maybeHydrateNavLogCloudOnDemand();
-            if (signalkConfig.mode === 'signalk' && signalkConfig.host.trim()) {
-                ensureSignalKStreamingConnection({ announce: false });
-            }
             updateNavPolarCaptureHint();
             updateNavLiveDashboard();
             applyNavLogLayoutState();
@@ -20435,6 +20873,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         if (!isWeather) {
             setWeatherPointerPlacementMode(false);
+            renderWeatherCenterStage(null);
         }
 
         updateNavLogLayoutToolbarUi();
@@ -20488,6 +20927,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const parsed = parseInt(String(e.target.value || '3'), 10);
             forecastWindowDays = Number.isFinite(parsed) ? Math.max(2, Math.min(7, parsed)) : 3;
             e.target.value = String(forecastWindowDays);
+            invalidateWeatherDiagnostic(t('Analyse synoptique: fenêtre changée, relance l\'analyse.', 'Análisis sinóptico: ventana cambiada, vuelve a lanzar el análisis.', 'Synoptic analysis: window changed, run it again.'));
         });
     }
 
@@ -20905,6 +21345,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     const refreshWeatherOutlookBtn = document.getElementById('refreshWeatherOutlookBtn');
     if (refreshWeatherOutlookBtn) {
         refreshWeatherOutlookBtn.addEventListener('click', () => refreshWeatherOutlook());
+    }
+
+    const weatherDiagnosticBtn = document.getElementById('weatherDiagnosticBtn');
+    if (weatherDiagnosticBtn) {
+        weatherDiagnosticBtn.addEventListener('click', () => refreshWeatherDiagnostic());
     }
 
     const owmApiKeyInput = document.getElementById('owmApiKeyInput');

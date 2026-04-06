@@ -623,7 +623,7 @@ function applyLanguageToUi() {
     setElementText('#documentDockPanelTitle', t('Documents enregistrés:', 'Documentos guardados:'));
     setElementText('#documentRagStatus', t('RAG: infrastructure locale prête.', 'RAG: infraestructura local lista.'));
     setElementText('#documentBuildRagBtn', t('Analyser / indexer les fichiers', 'Analizar / indexar archivos'));
-    setElementText('#documentGeminiConfigSummary', t('Configuration Gemini', 'Configuracion Gemini'));
+    setElementText('#documentGeminiConfigSummary', t('Configuration Gemini', 'Configuración Gemini'));
     setElementText('#documentLlmModeLabel', t('Mode IA:', 'Modo IA:'));
     setElementText('#documentLlmProviderLabel', t('Fournisseur externe:', 'Proveedor externo:'));
     setElementText('#documentLlmResponseStyleLabel', t('Style de réponse:', 'Estilo de respuesta:', 'Response style:'));
@@ -720,7 +720,7 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsQuotaLabel', t('Quota utilisé (500 Mo)', 'Cuota usada (500 MB)'));
 
     setElementText('#startNavLogBtn', t('Démarrer log GPS', 'Iniciar log GPS'));
-    setElementText('#locateNowBtn', t('Ma position', 'Mi posicion'));
+    setElementText('#locateNowBtn', t('Ma position', 'Mi posición'));
     setElementText('#stopNavLogBtn', t('Arrêter log GPS', 'Detener log GPS'));
     setElementText('#aiTrafficTitle', t('Trafic modèle en cours', 'Tráfico del modelo en curso', 'Model traffic in progress'));
     setElementText('#aiTrafficCloseBtn', t('Fermer', 'Cerrar', 'Close'));
@@ -767,13 +767,30 @@ function applyLanguageToUi() {
     setElementText('#navChecklistAddBtn', t('Ajouter', 'Anadir'));
     setElementText('#navChecklistResetBtn', t('Reinitialiser checklist', 'Reiniciar checklist'));
     setElementText('#navChecklistApplyTemplateBtn', t('Appliquer', 'Aplicar'));
-    setElementPlaceholder('#navChecklistNewItemInput', t('Ajouter une action checklist', 'Agregar una accion checklist'));
+    setElementPlaceholder('#navChecklistNewItemInput', t('Ajouter une action checklist', 'Agregar una acción checklist'));
     setElementText('.log-checklist-template-row label[for="navChecklistTemplateSelect"]', t('Template:', 'Plantilla:'));
     setElementText('#navChecklistTemplateSelect option[value="standard"]', t('Standard', 'Estándar'));
     setElementText('#navChecklistTemplateSelect option[value="night"]', t('Navigation de nuit', 'Navegación nocturna'));
     setElementText('#navChecklistTemplateSelect option[value="bad_weather"]', t('Mauvais temps', 'Mal tiempo'));
     setElementText('#navChecklistTemplateSelect option[value="harbor"]', t('Port / manoeuvre', 'Puerto / maniobra'));
     setElementText('.log-live-controls-row label[for="navSwellProfileSelect"]', t('Profil houle:', 'Perfil oleaje:'));
+    setElementText('#navLiveTableTitle', t('Tableau navigation voile', 'Tabla navegación vela', 'Sailing navigation table'));
+    setElementText('#navLiveSpeedLabel', t('Vitesse', 'Velocidad', 'Speed'));
+    setElementText('#navLiveHeelLabel', t('Inclinaison', 'Escora', 'Heel'));
+    setElementText('#navLiveHeadingLabel', t('Cap reel', 'Rumbo real', 'True heading'));
+    setElementText('#navLiveTwaLabel', t('Angle vent (TWA)', 'Ángulo viento (TWA)', 'Wind angle (TWA)'));
+    setElementText('#navLivePointOfSailLabel', t('Allure', 'Rumbo vela', 'Point of sail'));
+    setElementText('#navLiveSwellLabel', t('Houle estimee', 'Oleaje estimado', 'Estimated swell'));
+    setElementText('#navLiveWeatherSectionLabel', t('Meteo SignalK', 'Meteo SignalK', 'SignalK weather'));
+    setElementText('#navLiveTwsLabel', t('Vent reel (TWS)', 'Viento real (TWS)', 'True wind (TWS)'));
+    setElementText('#navLiveTwdLabel', t('Direction vent (TWD)', 'Dirección viento (TWD)', 'Wind direction (TWD)'));
+    setElementText('#navLiveBaroLabel', t('Barometre', 'Barómetro', 'Barometer'));
+    setElementText('#navLiveAirTempLabel', t('Temp air', 'Temp aire', 'Air temp'));
+    setElementText('#navLiveHumidityLabel', t('Humidite', 'Humedad', 'Humidity'));
+    setElementText('#navLiveCloudLabel', t('Nuages', 'Nubes', 'Cloud cover'));
+    setElementText('#navLiveRainLabel', t('Pluie', 'Lluvia', 'Rain'));
+    setElementText('#navCapturePolarBtn', t('Capturer point polaire', 'Capturar punto polar', 'Capture polar point'));
+    setElementText('#navCapturePolarHint', t('Jeu de voile: utiliser le champ Voilure puis capturer quand l\'allure est stable.', 'Juego de velas: usa el campo Velamen y captura cuando el rumbo esté estable.', 'Sail set: use the Sail plan field, then capture once the point of sail is stable.'));
     setElementText('#navSwellProfileSelect option[value="conservative"]', t('Conservateur', 'Conservador'));
     setElementText('#navSwellProfileSelect option[value="balanced"]', t('Equilibre', 'Equilibrado'));
     setElementText('#navSwellProfileSelect option[value="sport"]', t('Sportif', 'Deportivo'));
@@ -819,7 +836,7 @@ function applyLanguageToUi() {
     setElementText('#weatherGribSection .cloud-config-title', t('GRIB local', 'GRIB local', 'Local GRIB'));
     setElementText('label[for="weatherGribFileInput"]', t('Fichiers GRIB / JSON météo:', 'Archivos GRIB / JSON meteo:', 'GRIB / weather JSON files:'));
     setElementText('#weatherImportGribBtn', t('Importer GRIB/JSON', 'Importar GRIB/JSON', 'Import GRIB/JSON'));
-    setElementText('#weatherConvertGribBtn', t('Commande conversion', 'Comando conversion', 'Conversion Command'));
+    setElementText('#weatherConvertGribBtn', t('Commande conversion', 'Comando conversión', 'Conversion Command'));
     setElementText('#weatherClearGribBtn', t('Effacer GRIB', 'Borrar GRIB', 'Clear GRIB'));
     setElementText('#weatherGribStatus', t('GRIB: aucun fichier chargé.', 'GRIB: ningun archivo cargado.', 'GRIB: no file loaded.'));
     setElementText('#weatherGribHint', t('Astuce: sélectionne GRIB + JSON converti (même nom) en une fois pour chargement auto.', 'Consejo: selecciona GRIB + JSON convertido (mismo nombre) en una sola acción para carga automática.', 'Tip: select GRIB + converted JSON (same name) together for automatic loading.'));
@@ -2204,6 +2221,199 @@ function getPolarEditorCurrentData() {
     try { return JSON.parse(String(jsonInput?.value || '{}')); } catch { return {}; }
 }
 
+function getNearestNumericValue(values, target) {
+    const numeric = (Array.isArray(values) ? values : [])
+        .map(Number)
+        .filter(value => Number.isFinite(value));
+    if (!numeric.length || !Number.isFinite(target)) return null;
+
+    let nearest = numeric[0];
+    let nearestDelta = Math.abs(target - nearest);
+    numeric.forEach(value => {
+        const delta = Math.abs(target - value);
+        if (delta < nearestDelta) {
+            nearest = value;
+            nearestDelta = delta;
+        }
+    });
+    return nearest;
+}
+
+function getLivePolarCaptureData() {
+    const snapshot = signalkLatestSnapshot || {};
+    const windSpeedInput = document.getElementById('watchWindSpeedInput');
+    const headingInput = document.getElementById('watchHeadingInput');
+    const sailConfigInput = document.getElementById('watchSailConfigInput');
+    const activeProfile = activePolarProfileId !== POLAR_AUTO_PROFILE_ID
+        ? getActivePolarProfile()
+        : null;
+
+    const speedKn = Number.isFinite(navLatestSpeedKn)
+        ? navLatestSpeedKn
+        : (Number.isFinite(snapshot?.speedKn) ? snapshot.speedKn : null);
+    const twsKn = Number.isFinite(snapshot?.twsKn)
+        ? snapshot.twsKn
+        : Number.parseFloat(String(windSpeedInput?.value || ''));
+
+    const headingDeg = Number.isFinite(navLatestCourseDeg)
+        ? navLatestCourseDeg
+        : Number.parseFloat(String(headingInput?.value || ''));
+    const twdDeg = Number.isFinite(snapshot?.twdDeg)
+        ? snapshot.twdDeg
+        : (Number.isFinite(signalkLatestWindDir) ? signalkLatestWindDir : null);
+    const twaDeg = Number.isFinite(snapshot?.twaDeg)
+        ? ((((snapshot.twaDeg + 180) % 360) + 360) % 360) - 180
+        : (Number.isFinite(twdDeg) && Number.isFinite(headingDeg)
+            ? ((((twdDeg - headingDeg + 180) % 360) + 360) % 360) - 180
+            : null);
+
+    const manualSailConfig = String(sailConfigInput?.value || '').trim();
+    const activeProfileName = String(activeProfile?.name || '').trim();
+    const sailConfig = manualSailConfig || activeProfileName;
+
+    return {
+        speedKn,
+        twsKn,
+        twaDeg,
+        headingDeg,
+        twdDeg,
+        sailConfig,
+        preferredProfileId: String(activeProfile?.id || ''),
+        preferredProfileName: activeProfileName
+    };
+}
+
+function resolveProfileForLivePolarCapture({ sailConfig = '', preferredProfileId = '' } = {}) {
+    const normalizedSail = String(sailConfig || '').trim().toLowerCase();
+    const preferredId = String(preferredProfileId || '').trim();
+    let profile = null;
+    let created = false;
+
+    if (preferredId) {
+        profile = polarProfiles.find(item => String(item?.id || '') === preferredId) || null;
+    }
+
+    if (!profile && normalizedSail) {
+        profile = polarProfiles.find(item => {
+            const haystack = `${String(item?.name || '')} ${String(item?.notes || '')}`.toLowerCase();
+            return haystack.includes(normalizedSail);
+        }) || null;
+    }
+
+    if (!profile && activePolarProfileId !== POLAR_AUTO_PROFILE_ID) {
+        profile = getActivePolarProfile();
+    }
+
+    if (!profile) {
+        const base = getActivePolarProfile() || buildDefaultPolarProfiles()[0];
+        const nowIso = new Date().toISOString();
+        profile = {
+            id: generateClientUuid(),
+            name: normalizedSail
+                ? `${t('Polaire', 'Polar', 'Polar')} · ${sailConfig}`
+                : `${t('Polaire', 'Polar', 'Polar')} · ${new Date().toLocaleTimeString(getCurrentLocale(), { hour: '2-digit', minute: '2-digit' })}`,
+            notes: normalizedSail
+                ? t(`Créée depuis capture live (${sailConfig}).`, `Creada desde captura live (${sailConfig}).`, `Created from live capture (${sailConfig}).`)
+                : t('Créée depuis capture live.', 'Creada desde captura live.', 'Created from live capture.'),
+            polarData: clonePolarData(base?.polarData || DEFAULT_POLAR_DATA),
+            createdAt: nowIso,
+            updatedAt: nowIso
+        };
+        polarProfiles.push(profile);
+        created = true;
+    }
+
+    return { profile, created };
+}
+
+function captureSampleIntoPolarProfile(profile, sample) {
+    let matrix = normalizePolarData(profile?.polarData || {}) || clonePolarData(DEFAULT_POLAR_DATA);
+
+    const twsKeys = Object.keys(matrix).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    const globalTwaSet = new Set();
+    twsKeys.forEach(tws => Object.keys(matrix[tws] || {}).forEach(twa => globalTwaSet.add(Number(twa))));
+    const globalTwaKeys = Array.from(globalTwaSet).filter(Number.isFinite).sort((a, b) => a - b);
+
+    const twsTarget = getNearestNumericValue(twsKeys, sample.twsKn) ?? Math.round(sample.twsKn);
+    const twsKey = String(Math.max(1, Math.min(60, Math.round(twsTarget))));
+    if (!matrix[twsKey] || typeof matrix[twsKey] !== 'object') {
+        matrix[twsKey] = {};
+    }
+
+    const rowTwaKeys = Object.keys(matrix[twsKey]).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    const sourceTwaKeys = rowTwaKeys.length ? rowTwaKeys : globalTwaKeys;
+    const absTwa = Math.abs(sample.twaDeg);
+    const twaTarget = getNearestNumericValue(sourceTwaKeys, absTwa) ?? Math.round(absTwa / 5) * 5;
+    const twaKey = String(Math.max(0, Math.min(180, Math.round(twaTarget))));
+
+    const currentValue = Number(matrix[twsKey]?.[twaKey]);
+    const measured = Math.max(0, Number(sample.speedKn));
+    const nextValue = Number.isFinite(currentValue) && currentValue > 0
+        ? Math.max(currentValue, measured)
+        : measured;
+
+    matrix[twsKey][twaKey] = Number(nextValue.toFixed(1));
+    matrix = normalizePolarData(matrix) || matrix;
+
+    profile.polarData = matrix;
+    profile.updatedAt = new Date().toISOString();
+
+    return {
+        twsKey,
+        twaKey,
+        previousSpeedKn: Number.isFinite(currentValue) ? currentValue : null,
+        nextSpeedKn: Number(nextValue.toFixed(1))
+    };
+}
+
+function captureLivePolarPointFromNavigation() {
+    const sample = getLivePolarCaptureData();
+
+    if (!Number.isFinite(sample.speedKn) || sample.speedKn <= 0.2) {
+        setNavLogStatus(t('Capture polaire impossible: vitesse invalide.', 'Captura polar imposible: velocidad inválida.', 'Polar capture failed: invalid speed.'), true);
+        setPolarProfileStatus(t('Capture polaire impossible: vitesse invalide.', 'Captura polar imposible: velocidad inválida.', 'Polar capture failed: invalid speed.'), true);
+        return;
+    }
+    if (!Number.isFinite(sample.twsKn) || sample.twsKn <= 0.2) {
+        setNavLogStatus(t('Capture polaire impossible: vent (TWS) indisponible.', 'Captura polar imposible: viento (TWS) no disponible.', 'Polar capture failed: TWS unavailable.'), true);
+        setPolarProfileStatus(t('Capture polaire impossible: vent (TWS) indisponible.', 'Captura polar imposible: viento (TWS) no disponible.', 'Polar capture failed: TWS unavailable.'), true);
+        return;
+    }
+    if (!Number.isFinite(sample.twaDeg)) {
+        setNavLogStatus(t('Capture polaire impossible: angle vent (TWA) indisponible.', 'Captura polar imposible: ángulo viento (TWA) no disponible.', 'Polar capture failed: TWA unavailable.'), true);
+        setPolarProfileStatus(t('Capture polaire impossible: angle vent (TWA) indisponible.', 'Captura polar imposible: ángulo viento (TWA) no disponible.', 'Polar capture failed: TWA unavailable.'), true);
+        return;
+    }
+
+    const { profile, created } = resolveProfileForLivePolarCapture({
+        sailConfig: sample.sailConfig,
+        preferredProfileId: sample.preferredProfileId
+    });
+    const updateResult = captureSampleIntoPolarProfile(profile, sample);
+
+    savePolarProfiles();
+    setActivePolarProfile(profile.id, { persist: true, syncEditor: false });
+    populatePolarProfileSelects();
+    if (selectedPolarProfileEditorId === profile.id || created) {
+        loadPolarProfileEditor(profile.id);
+    }
+
+    const message = t(
+        `Polaire ${created ? 'créée' : 'mise à jour'} (${profile.name}) · CAP ${Number.isFinite(sample.headingDeg) ? Math.round(normalizeCourseDegrees(sample.headingDeg)) : '--'}° · TWD ${Number.isFinite(sample.twdDeg) ? Math.round(normalizeCourseDegrees(sample.twdDeg)) : '--'}° · TWS ${updateResult.twsKey} kn · TWA ${updateResult.twaKey}° · BSP ${updateResult.nextSpeedKn.toFixed(1)} kn`,
+        `Polar ${created ? 'creada' : 'actualizada'} (${profile.name}) · RUMBO ${Number.isFinite(sample.headingDeg) ? Math.round(normalizeCourseDegrees(sample.headingDeg)) : '--'}° · TWD ${Number.isFinite(sample.twdDeg) ? Math.round(normalizeCourseDegrees(sample.twdDeg)) : '--'}° · TWS ${updateResult.twsKey} kn · TWA ${updateResult.twaKey}° · BSP ${updateResult.nextSpeedKn.toFixed(1)} kn`,
+        `Polar ${created ? 'created' : 'updated'} (${profile.name}) · HDG ${Number.isFinite(sample.headingDeg) ? Math.round(normalizeCourseDegrees(sample.headingDeg)) : '--'}° · TWD ${Number.isFinite(sample.twdDeg) ? Math.round(normalizeCourseDegrees(sample.twdDeg)) : '--'}° · TWS ${updateResult.twsKey} kn · TWA ${updateResult.twaKey}° · BSP ${updateResult.nextSpeedKn.toFixed(1)} kn`
+    );
+
+    setPolarProfileStatus(message);
+    setNavLogStatus(message);
+
+    if (isCloudReady()) {
+        void pushPolarProfilesToCloudTable().catch(error => {
+            setCloudStatus(t(`Synchro polaires échouée: ${formatCloudError(error)}`, `Sincronización polares fallida: ${formatCloudError(error)}`, `Polars sync failed: ${formatCloudError(error)}`), true);
+        });
+    }
+}
+
 // ---- POLAR PROFILES CLOUD SYNC ----
 
 async function pushPolarProfilesToCloudTable() {
@@ -2563,7 +2773,7 @@ function buildConvertedGribJsonLayer(payload) {
                         })
                     });
                     arrow.bindPopup(
-                        `${t('Vent', 'Viento', 'Wind')}: ${speed.toFixed(1)} m/s<br>${t('Direction', 'Direccion', 'Direction')}: ${directionFrom.toFixed(0)}°`
+                        `${t('Vent', 'Viento', 'Wind')}: ${speed.toFixed(1)} m/s<br>${t('Direction', 'Dirección', 'Direction')}: ${directionFrom.toFixed(0)}°`
                     );
                     group.addLayer(arrow);
                 }
@@ -5279,7 +5489,7 @@ function renderNearbyList(containerId, items, emptyText) {
         `<div class="arrival-list__item">
             <div class="arrival-list__head">
                 <strong>${escapeHtml(item.name)}</strong>
-                <span class="arrival-list__score">${t('Score', 'Puntuacion')}: ${formatAmenityScore(item, kind)}/100</span>
+                <span class="arrival-list__score">${t('Score', 'Puntuación')}: ${formatAmenityScore(item, kind)}/100</span>
             </div>
             <div class="arrival-list__meta">${item.distanceNm.toFixed(2)} nm · ${escapeHtml(buildAmenitySummary(item, kind))}</div>
             <a class="arrival-list__link" href="${buildGoogleSearchUrl(item)}">${t('Voir sur Google', 'Ver en Google')}</a>
@@ -5784,7 +5994,7 @@ async function analyzeArrivalZone() {
         const shops = await fetchNearbyAmenityList(destination.lat, destination.lng, 'shop');
         pushAiTrafficLog(t(`Magasins trouvés: ${shops.length}`, `Tiendas encontradas: ${shops.length}`));
 
-        pushAiTrafficLog(t('Scoring météo des mouillages...', 'Puntuacion meteo de los fondeos...'));
+        pushAiTrafficLog(t('Scoring météo des mouillages...', 'Puntuación meteo de los fondeos...'));
         const recommendations = await scoreAnchoragesForArrival(anchorages, arrivalTime);
         pushAiTrafficLog(t(
             `Top recommandations calculées: ${recommendations.length}`,
@@ -8251,7 +8461,7 @@ async function askLocalRagFromApp() {
                 `Cuota Gemini excedida (429). Revisa tu plan/facturacion Gemini API.${retryHint}`
             );
             setDocumentStatus(
-                t('Quota Gemini depasse: attendre puis reessayer, ou activer la facturation Gemini.', 'Cuota Gemini excedida: espera y reintenta, o activa la facturacion Gemini.'),
+                t('Quota Gemini depasse: attendre puis reessayer, ou activer la facturation Gemini.', 'Cuota Gemini excedida: espera y reintenta, o activa la facturación Gemini.'),
                 true
             );
         } else {
@@ -8276,10 +8486,10 @@ async function buildLocalRagIndexFromApp() {
     if (answerBox) {
         answerBox.textContent = t(
             'Indexation RAG locale en cours. Cela peut prendre 1 a 3 minutes selon le volume de documents.',
-            'Indexacion RAG local en curso. Puede tardar 1 a 3 minutos segun el volumen de documentos.'
+            'Indexación RAG local en curso. Puede tardar 1 a 3 minutos según el volumen de documentos.'
         );
     }
-    setDocumentStatus(t('Indexation RAG en cours...', 'Indexacion RAG en curso...'));
+    setDocumentStatus(t('Indexation RAG en cours...', 'Indexación RAG en curso...'));
 
     try {
         const response = await fetch(`${LOCAL_RAG_API_URL}/build-index`, {
@@ -8318,19 +8528,19 @@ async function buildLocalRagIndexFromApp() {
         if (answerBox) {
             answerBox.textContent = t(
                 `Indexation terminee. Fichiers pris en compte: ${filesCount}. Tu peux maintenant poser une question documentaire.`,
-                `Indexacion terminada. Archivos tomados en cuenta: ${filesCount}. Ahora puedes hacer una pregunta documental.`
+                `Indexación terminada. Archivos tomados en cuenta: ${filesCount}. Ahora puedes hacer una pregunta documental.`
             );
         }
     } catch (error) {
         const reason = String(error?.message || error);
         setDocumentStatus(
-            t(`Indexation RAG impossible (${reason})`, `Indexacion RAG imposible (${reason})`),
+            t(`Indexation RAG impossible (${reason})`, `Indexación RAG imposible (${reason})`),
             true
         );
         if (answerBox) {
             answerBox.textContent = t(
                 `Impossible de lancer l'indexation locale (${reason}). Vérifie que le serveur RAG est lancé: python3 rag/server.py`,
-                `No se puede lanzar la indexacion local (${reason}). Verifica que el servidor RAG este iniciado: python3 rag/server.py`
+                `No se puede lanzar la indexación local (${reason}). Verifica que el servidor RAG esté iniciado: python3 rag/server.py`
             );
         }
     } finally {
@@ -10594,7 +10804,7 @@ function buildMaintenanceInvoiceAiReportText(analysis) {
             const detail = item.detail ? `: ${item.detail}` : '';
             lines.push(`- ${base}${detail}`);
             if (item.recommendation) {
-                lines.push(`  ${t('Action recommandée', 'Accion recomendada')}: ${item.recommendation}`);
+                lines.push(`  ${t('Action recommandée', 'Acción recomendada')}: ${item.recommendation}`);
             }
         });
         lines.push('');
@@ -10613,7 +10823,7 @@ function buildMaintenanceInvoiceAiReportText(analysis) {
     }
 
     if (checks.length) {
-        lines.push(t('Contrôles recommandés après intervention:', 'Controles recomendados tras la intervencion:'));
+        lines.push(t('Contrôles recommandés après intervention:', 'Controles recomendados tras la intervención:'));
         checks.forEach(item => lines.push(`- ${item}`));
         lines.push('');
     }
@@ -10642,7 +10852,7 @@ async function buildMaintenanceInvoiceAiAnalysisWithGemini({ supplierName, invoi
     const llmSettings = readDocumentRagLlmSettingsFromUi();
     const apiKey = String(llmSettings?.apiKey || '').trim();
     if (!apiKey) {
-        throw new Error(t('Clé API Gemini absente (onglet Documents > configuration IA).', 'Falta la clave API de Gemini (pestana Documentos > configuracion IA).'));
+        throw new Error(t('Clé API Gemini absente (onglet Documents > configuration IA).', 'Falta la clave API de Gemini (pestaña Documentos > configuración IA).'));
     }
 
     const requestedModel = String(llmSettings?.model || '').trim();
@@ -10832,7 +11042,7 @@ function buildMaintenanceInvoiceAiAnalysis({ supplierName, invoiceDate, lines, s
         {
             id: 'vidange',
             match: /(vidange|huile moteur|oil change)/,
-            risk: t('Surveiller la pression d’huile et l’absence de consommation anormale.', 'Vigilar la presion de aceite y ausencia de consumo anormal.'),
+            risk: t('Surveiller la pression d’huile et l’absence de consommation anormale.', 'Vigilar la presión de aceite y ausencia de consumo anormal.'),
             tasks: [
                 { title: t('Contrôler niveau huile à chaud', 'Comprobar nivel de aceite en caliente'), days: 2, priority: 'medium' }
             ]
@@ -10843,15 +11053,15 @@ function buildMaintenanceInvoiceAiAnalysis({ supplierName, invoiceDate, lines, s
             risk: t('Risque de surchauffe si circuit eau imparfait. Vérifier débit échappement.', 'Riesgo de sobrecalentamiento si el circuito de agua no es correcto. Verificar caudal de escape.'),
             tasks: [
                 { title: t('Vérifier débit eau échappement', 'Verificar caudal de agua escape'), days: 1, priority: 'high' },
-                { title: t('Inspection pompe eau après sortie', 'Inspeccion bomba de agua tras salida'), days: 10, priority: 'medium' }
+                { title: t('Inspection pompe eau après sortie', 'Inspección bomba de agua tras salida'), days: 10, priority: 'medium' }
             ]
         },
         {
             id: 'courroie',
             match: /(courroie|belt|alternateur|alternator)/,
-            risk: t('Risque de tension incorrecte ou usure précoce. Contrôle tension conseillé.', 'Riesgo de tension incorrecta o desgaste prematuro. Se recomienda revisar tension.'),
+            risk: t('Risque de tension incorrecte ou usure précoce. Contrôle tension conseillé.', 'Riesgo de tensión incorrecta o desgaste prematuro. Se recomienda revisar tensión.'),
             tasks: [
-                { title: t('Contrôler tension de courroie', 'Comprobar tension de correa'), days: 5, priority: 'medium' }
+                { title: t('Contrôler tension de courroie', 'Comprobar tensión de correa'), days: 5, priority: 'medium' }
             ]
         },
         {
@@ -10895,7 +11105,7 @@ function buildMaintenanceInvoiceAiAnalysis({ supplierName, invoiceDate, lines, s
     const reportText = [
         summary,
         '',
-        t('Avis IA (aide à la décision, non diagnostic certifié):', 'Opinion IA (ayuda a la decision, no diagnostico certificado):'),
+        t('Avis IA (aide à la décision, non diagnostic certifié):', 'Opinión IA (ayuda a la decisión, no diagnóstico certificado):'),
         ...risks.map(item => `- ${item}`),
         '',
         t('Tâches suggérées:', 'Tareas sugeridas:'),
@@ -15074,6 +15284,7 @@ async function pullNavLogEntriesFromCloudTable() {
 }
 
 function saveNavLogEntries() {
+    navLogEntries = sanitizeNavLogEntriesList(navLogEntries);
     saveArrayToStorage(NAV_LOG_STORAGE_KEY, navLogEntries);
     scheduleCloudLogbookPush({ includeNav: true, includeEngine: false });
 }
@@ -15089,6 +15300,10 @@ function sanitizeNavGpsTraceSamplesList(list) {
 
             const speedKn = Number(item?.speedKn);
             const heelDeg = Number(item?.heelDeg);
+            const headingDeg = Number(item?.headingDeg);
+            const windDirectionDeg = Number(item?.windDirectionDeg);
+            const windSpeedKn = Number(item?.windSpeedKn);
+            const barometerHpa = Number(item?.barometerHpa);
             const timestamp = String(item?.timestamp || '').trim() || new Date().toISOString();
             const source = String(item?.source || 'gps-watch').trim() || 'gps-watch';
 
@@ -15099,6 +15314,12 @@ function sanitizeNavGpsTraceSamplesList(list) {
                 lng,
                 speedKn: Number.isFinite(speedKn) ? speedKn : null,
                 heelDeg: Number.isFinite(heelDeg) ? heelDeg : null,
+                headingDeg: Number.isFinite(headingDeg) ? normalizeCourseDegrees(headingDeg) : null,
+                windDirectionDeg: Number.isFinite(windDirectionDeg) ? normalizeCourseDegrees(windDirectionDeg) : null,
+                windSpeedKn: Number.isFinite(windSpeedKn) ? windSpeedKn : null,
+                seaState: String(item?.seaState || '').trim(),
+                sailConfig: String(item?.sailConfig || '').trim(),
+                barometerHpa: Number.isFinite(barometerHpa) ? barometerHpa : null,
                 source
             };
         })
@@ -15118,7 +15339,7 @@ function getCurrentNavGpsSessionSamples() {
     const startIndex = Math.max(0, Number(navGpsSessionStartSampleIndex) || 0);
     return (Array.isArray(navGpsSessionSamples) ? navGpsSessionSamples : [])
         .slice(startIndex)
-        .filter(item => item?.source === 'gps-watch' && Number.isFinite(item?.lat) && Number.isFinite(item?.lng));
+    .filter(item => (item?.source === 'gps-watch' || item?.source === 'signalk') && Number.isFinite(item?.lat) && Number.isFinite(item?.lng));
 }
 
 function formatNowTimeLabel() {
@@ -15251,9 +15472,9 @@ function getNavChecklistTemplateItems(mode, templateKey = 'standard') {
             standard: [
                 t('Meteo et route confirmees', 'Meteo y ruta confirmadas'),
                 t('Niveaux moteur / carburant verifies', 'Niveles motor / combustible verificados'),
-                t('Securite equipe (gilets, VHF, pharmacie)', 'Seguridad tripulacion (chalecos, VHF, botiquin)'),
+                t('Securite equipe (gilets, VHF, pharmacie)', 'Seguridad tripulación (chalecos, VHF, botiquin)'),
                 t('Mouillage/amarres prepares pour depart', 'Fondeo/amarres preparados para salida'),
-                t('Briefing equipage effectue', 'Briefing tripulacion realizado')
+                t('Briefing equipage effectue', 'Briefing tripulación realizado')
             ],
             night: [
                 t('Feux de navigation verifies', 'Luces de navegación verificadas'),
@@ -15282,7 +15503,7 @@ function getNavChecklistTemplateItems(mode, templateKey = 'standard') {
                 t('Mouillage ou place confirme(e)', 'Fondeo o plaza confirmada'),
                 t('Manoeuvre arrivee preparee (aussiere, pare-battage)', 'Maniobra llegada preparada (cabos, defensas)'),
                 t('Moteur coupe et controles de securite', 'Motor parado y controles de seguridad'),
-                t('Log navigation complete', 'Bitacora navegacion completada'),
+                t('Log navigation complete', 'Bitácora navegación completada'),
                 t('Bateau securise pour la nuit', 'Barco asegurado para la noche')
             ],
             night: [
@@ -15571,7 +15792,16 @@ function updateNavLiveDashboard() {
     const speedNode = document.getElementById('navLiveSpeedValue');
     const heelNode = document.getElementById('navLiveHeelValue');
     const headingNode = document.getElementById('navLiveHeadingValue');
+    const twaNode = document.getElementById('navLiveTwaValue');
+    const pointOfSailNode = document.getElementById('navLivePointOfSailValue');
     const swellNode = document.getElementById('navLiveSwellValue');
+    const twsNode = document.getElementById('navLiveTwsValue');
+    const twdNode = document.getElementById('navLiveTwdValue');
+    const baroNode = document.getElementById('navLiveBaroValue');
+    const airTempNode = document.getElementById('navLiveAirTempValue');
+    const humidityNode = document.getElementById('navLiveHumidityValue');
+    const cloudNode = document.getElementById('navLiveCloudValue');
+    const rainNode = document.getElementById('navLiveRainValue');
     const swellHintNode = document.getElementById('navLiveSwellHint');
     const liveCardNode = document.getElementById('navLiveTableCard');
     if (!speedNode || !heelNode || !headingNode || !swellNode || !swellHintNode) return;
@@ -15591,8 +15821,11 @@ function updateNavLiveDashboard() {
     const derivedTraceMetrics = computeDerivedNavMetricsFromPoints(previousTraceEntry, latestTraceEntry);
 
     const headingInput = document.getElementById('watchHeadingInput');
+    const windDirectionInput = document.getElementById('watchWindDirInput');
     const windSpeedInput = document.getElementById('watchWindSpeedInput');
+    const barometerInput = document.getElementById('watchBarometerInput');
     const seaStateInput = document.getElementById('watchSeaStateInput');
+    const sailConfigInput = document.getElementById('watchSailConfigInput');
 
     const speed = selectedEntry
         ? (Number.isFinite(latestTraceEntry?.speedKn)
@@ -15635,13 +15868,64 @@ function updateNavLiveDashboard() {
         ? liveWindInput
         : (Number.isFinite(contextEntry?.windSpeedKn) ? contextEntry.windSpeedKn : null);
 
+    const liveWindDirInput = Number.parseFloat(String(windDirectionInput?.value || ''));
+    const liveBarometerInput = Number.parseFloat(String(barometerInput?.value || ''));
+    const snapshot = signalkLatestSnapshot || {};
+    const tws = Number.isFinite(snapshot?.twsKn)
+        ? snapshot.twsKn
+        : (Number.isFinite(wind) ? wind : null);
+    const twd = Number.isFinite(snapshot?.twdDeg)
+        ? snapshot.twdDeg
+        : (Number.isFinite(signalkLatestWindDir)
+            ? signalkLatestWindDir
+            : (Number.isFinite(contextEntry?.windDirectionDeg)
+                ? contextEntry.windDirectionDeg
+                : (Number.isFinite(liveWindDirInput) ? liveWindDirInput : null)));
+    const baroHpa = Number.isFinite(snapshot?.baroHpa)
+        ? snapshot.baroHpa
+        : (Number.isFinite(contextEntry?.barometerHpa)
+            ? contextEntry.barometerHpa
+            : (Number.isFinite(liveBarometerInput) ? liveBarometerInput : null));
+
     const seaState = String(seaStateInput?.value || contextEntry?.seaState || '');
+    const sailConfig = String(sailConfigInput?.value || contextEntry?.sailConfig || '').trim();
     const swell = estimateSwellFromNavContext({ windSpeedKn: wind, heelDeg: heel, seaState });
+
+    const normalizeSignedAngle = value => {
+        if (!Number.isFinite(value)) return null;
+        return ((((value + 180) % 360) + 360) % 360) - 180;
+    };
+    const twaDeg = Number.isFinite(snapshot?.twaDeg)
+        ? normalizeSignedAngle(snapshot.twaDeg)
+        : (Number.isFinite(twd) && Number.isFinite(heading)
+            ? normalizeSignedAngle(twd - heading)
+            : null);
+    const formatPointOfSail = value => {
+        if (!Number.isFinite(value)) return '--';
+        const absTwa = Math.abs(value);
+        let label = t('Pres serre', 'Ceñida cerrada', 'Close hauled');
+        if (absTwa >= 35) label = t('Bon plein', 'Ceñida abierta', 'Close reach');
+        if (absTwa >= 60) label = t('Travers', 'Traves', 'Beam reach');
+        if (absTwa >= 115) label = t('Largue', 'Largo', 'Broad reach');
+        if (absTwa >= 150) label = t('Grand largue', 'Empopada', 'Run');
+        const tack = value >= 0 ? t('tribord', 'estribor', 'starboard') : t('babord', 'babor', 'port');
+        return `${label} · ${tack}`;
+    };
 
     speedNode.textContent = Number.isFinite(speed) ? `${speed.toFixed(1)} kn` : '-- kn';
     heelNode.textContent = Number.isFinite(heel) ? `${heel.toFixed(1)} deg` : '-- deg';
     headingNode.textContent = Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))} deg` : '-- deg';
+    if (twaNode) twaNode.textContent = Number.isFinite(twaDeg) ? `${Math.round(twaDeg)}°` : '--';
+    if (pointOfSailNode) pointOfSailNode.textContent = formatPointOfSail(twaDeg);
     swellNode.textContent = `${swell.value.toFixed(1)} m`;
+
+    if (twsNode) twsNode.textContent = formatSignalKSpeed(tws);
+    if (twdNode) twdNode.textContent = formatSignalKDegrees(twd);
+    if (baroNode) baroNode.textContent = formatSignalKPressure(baroHpa);
+    if (airTempNode) airTempNode.textContent = Number.isFinite(snapshot?.airTempC) ? `${snapshot.airTempC.toFixed(1)}°C` : '--';
+    if (humidityNode) humidityNode.textContent = formatSignalKHumidity(snapshot);
+    if (cloudNode) cloudNode.textContent = formatSignalKPercent(snapshot?.cloudCoverPct);
+    if (rainNode) rainNode.textContent = formatSignalKRainRate(snapshot?.rainRateMmH);
 
     const swellClass = swell.value >= 3.4
         ? 'log-live-swell--heavy'
@@ -15650,6 +15934,10 @@ function updateNavLiveDashboard() {
     swellNode.classList.add(swellClass);
     if (liveCardNode) {
         liveCardNode.classList.toggle('log-live-table-card--heavy', swell.value >= 2.6);
+        const weatherAlert = (Number.isFinite(tws) && tws >= 25)
+            || (Number.isFinite(snapshot?.rainRateMmH) && snapshot.rainRateMmH >= 3)
+            || (Number.isFinite(snapshot?.cloudCoverPct) && snapshot.cloudCoverPct >= 95);
+        liveCardNode.classList.toggle('log-live-table-card--weather-alert', weatherAlert);
     }
 
     const profileLabel = navSwellProfile === 'conservative'
@@ -15659,6 +15947,24 @@ function updateNavLiveDashboard() {
         `Evaluation houle: ${swell.level} · profil ${profileLabel}`,
         `Evaluacion oleaje: ${swell.level} · perfil ${profileLabel}`
     );
+
+    const captureHintNode = document.getElementById('navCapturePolarHint');
+    if (captureHintNode) {
+        const activeProfile = activePolarProfileId !== POLAR_AUTO_PROFILE_ID
+            ? getActivePolarProfile()
+            : null;
+        const activeProfileName = String(activeProfile?.name || '').trim();
+        const effectiveSailSet = sailConfig || activeProfileName;
+        const headingValue = Number.isFinite(heading) ? `${Math.round(normalizeCourseDegrees(heading))}°` : '--';
+        const twdValue = Number.isFinite(twd) ? `${Math.round(normalizeCourseDegrees(twd))}°` : '--';
+        const twsValue = Number.isFinite(tws) ? `${tws.toFixed(1)} kn` : '--';
+        const twaValue = Number.isFinite(twaDeg) ? `${Math.round(twaDeg)}°` : '--';
+        captureHintNode.textContent = t(
+            `Capture live · Voilure ${effectiveSailSet || 'auto'} · CAP ${headingValue} · TWD ${twdValue} · TWS ${twsValue} · TWA ${twaValue}`,
+            `Captura live · Velamen ${effectiveSailSet || 'auto'} · RUMBO ${headingValue} · TWD ${twdValue} · TWS ${twsValue} · TWA ${twaValue}`,
+            `Live capture · Sail set ${effectiveSailSet || 'auto'} · HDG ${headingValue} · TWD ${twdValue} · TWS ${twsValue} · TWA ${twaValue}`
+        );
+    }
 }
 
 function readFiniteOrientationValue(value) {
@@ -16016,12 +16322,12 @@ function updateNavCurrentPositionMarker(fix) {
         ? `${Math.round(((headingDeg % 360) + 360) % 360)} deg`
         : 'N/A';
     navCurrentPositionMarker.bindPopup(
-        `${t('Position GPS actuelle', 'Posicion GPS actual')}<br>` +
+        `${t('Position GPS actuelle', 'Posición GPS actual')}<br>` +
         `${t('Heure', 'Hora')}: ${fixTimeLabel}<br>` +
         `${t('Vitesse', 'Velocidad')}: ${speedLabel}<br>` +
         `${t('Cap', 'Rumbo')}: ${headingLabel}`
     );
-    navCurrentPositionMarker.bindTooltip(t('Position actuelle', 'Posicion actual'), {
+    navCurrentPositionMarker.bindTooltip(t('Position actuelle', 'Posición actual'), {
         direction: 'top',
         offset: [0, -8],
         opacity: 0.9
@@ -16055,7 +16361,7 @@ function renderNavGpsTraceOnMap() {
         opacity: 0.9
     });
     if (selectedEntry) {
-        const label = String(selectedEntry?.watchCrew || '').trim() || t('Session GPS', 'Sesion GPS');
+        const label = String(selectedEntry?.watchCrew || '').trim() || t('Session GPS', 'Sesión GPS');
         polyline.bindPopup(`${t('Trace sélectionnée', 'Traza seleccionada')}<br>${escapeHtml(label)}`);
     }
     layerGroup.addLayer(polyline);
@@ -16272,6 +16578,31 @@ function captureNavGpsSample(sampleSource = 'gps-watch') {
         return false;
     }
 
+    const watchHeadingInput = document.getElementById('watchHeadingInput');
+    const watchWindDirInput = document.getElementById('watchWindDirInput');
+    const watchWindSpeedInput = document.getElementById('watchWindSpeedInput');
+    const watchSeaStateInput = document.getElementById('watchSeaStateInput');
+    const watchSailConfigInput = document.getElementById('watchSailConfigInput');
+    const watchBarometerInput = document.getElementById('watchBarometerInput');
+
+    const headingFromInput = Number.parseFloat(String(watchHeadingInput?.value || ''));
+    const windDirFromInput = Number.parseFloat(String(watchWindDirInput?.value || ''));
+    const windSpeedFromInput = Number.parseFloat(String(watchWindSpeedInput?.value || ''));
+    const barometerFromInput = Number.parseFloat(String(watchBarometerInput?.value || ''));
+
+    const sampleHeadingDeg = Number.isFinite(navLatestCourseDeg)
+        ? normalizeCourseDegrees(navLatestCourseDeg)
+        : (Number.isFinite(headingFromInput) ? normalizeCourseDegrees(headingFromInput) : null);
+    const sampleWindDirectionDeg = Number.isFinite(signalkLatestWindDir)
+        ? normalizeCourseDegrees(signalkLatestWindDir)
+        : (Number.isFinite(windDirFromInput) ? normalizeCourseDegrees(windDirFromInput) : null);
+    const sampleWindSpeedKn = Number.isFinite(signalkLatestWindSpeedKn)
+        ? signalkLatestWindSpeedKn
+        : (Number.isFinite(windSpeedFromInput) ? windSpeedFromInput : null);
+    const sampleSeaState = String(watchSeaStateInput?.value || '').trim();
+    const sampleSailConfig = String(watchSailConfigInput?.value || '').trim();
+    const sampleBarometerHpa = Number.isFinite(barometerFromInput) ? barometerFromInput : null;
+
     navGpsSessionSamples.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: new Date().toISOString(),
@@ -16279,6 +16610,12 @@ function captureNavGpsSample(sampleSource = 'gps-watch') {
         lng: navGpsLatestFix.lng,
         speedKn: navGpsLatestFix.speedKn,
         heelDeg: Number.isFinite(navLatestHeelDeg) ? navLatestHeelDeg : null,
+        headingDeg: sampleHeadingDeg,
+        windDirectionDeg: sampleWindDirectionDeg,
+        windSpeedKn: sampleWindSpeedKn,
+        seaState: sampleSeaState,
+        sailConfig: sampleSailConfig,
+        barometerHpa: sampleBarometerHpa,
         source: sampleSource
     });
 
@@ -16313,6 +16650,31 @@ function appendAutoNavSessionSummaryEntry() {
     const averageHeel = heelValues.length ? heelValues.reduce((sum, value) => sum + Math.abs(value), 0) / heelValues.length : null;
     const durationMinutes = navGpsSessionStartMs > 0 ? Math.max(0, (Date.now() - navGpsSessionStartMs) / 60000) : null;
 
+    const watchHeadingInput = document.getElementById('watchHeadingInput');
+    const watchWindDirInput = document.getElementById('watchWindDirInput');
+    const watchWindSpeedInput = document.getElementById('watchWindSpeedInput');
+    const watchSeaStateInput = document.getElementById('watchSeaStateInput');
+    const watchSailConfigInput = document.getElementById('watchSailConfigInput');
+    const watchBarometerInput = document.getElementById('watchBarometerInput');
+
+    const headingFromInput = Number.parseFloat(String(watchHeadingInput?.value || ''));
+    const windDirFromInput = Number.parseFloat(String(watchWindDirInput?.value || ''));
+    const windSpeedFromInput = Number.parseFloat(String(watchWindSpeedInput?.value || ''));
+    const barometerFromInput = Number.parseFloat(String(watchBarometerInput?.value || ''));
+
+    const latestHeadingDeg = Number.isFinite(navLatestCourseDeg)
+        ? normalizeCourseDegrees(navLatestCourseDeg)
+        : (Number.isFinite(headingFromInput) ? normalizeCourseDegrees(headingFromInput) : null);
+    const latestWindDirectionDeg = Number.isFinite(signalkLatestWindDir)
+        ? normalizeCourseDegrees(signalkLatestWindDir)
+        : (Number.isFinite(windDirFromInput) ? normalizeCourseDegrees(windDirFromInput) : null);
+    const latestWindSpeedKn = Number.isFinite(signalkLatestWindSpeedKn)
+        ? signalkLatestWindSpeedKn
+        : (Number.isFinite(windSpeedFromInput) ? windSpeedFromInput : null);
+    const latestBarometerHpa = Number.isFinite(barometerFromInput) ? barometerFromInput : null;
+    const latestSeaState = String(watchSeaStateInput?.value || '').trim();
+    const latestSailConfig = String(watchSailConfigInput?.value || '').trim();
+
     const summaryText = t(
         `Session GPS auto: ${sessionEntries.length} points · durée ${durationMinutes ? durationMinutes.toFixed(1) : '0.0'} min · distance ${distance.toFixed(2)} NM · vitesse moy ${Number.isFinite(averageSpeed) ? averageSpeed.toFixed(1) : 'N/A'} kn · inclinaison moy ${Number.isFinite(averageHeel) ? averageHeel.toFixed(1) : 'N/A'}°`,
         `Sesión GPS auto: ${sessionEntries.length} puntos · duración ${durationMinutes ? durationMinutes.toFixed(1) : '0.0'} min · distancia ${distance.toFixed(2)} NM · velocidad media ${Number.isFinite(averageSpeed) ? averageSpeed.toFixed(1) : 'N/A'} kn · inclinación media ${Number.isFinite(averageHeel) ? averageHeel.toFixed(1) : 'N/A'}°`
@@ -16327,6 +16689,12 @@ function appendAutoNavSessionSummaryEntry() {
         watchTimeIso: navGpsSessionStartMs > 0 ? new Date(navGpsSessionStartMs).toISOString() : new Date().toISOString(),
         watchEndTimeIso: new Date().toISOString(),
         watchCrew: t('AUTO GPS', 'AUTO GPS'),
+        headingDeg: latestHeadingDeg,
+        windDirectionDeg: latestWindDirectionDeg,
+        windSpeedKn: latestWindSpeedKn,
+        seaState: latestSeaState,
+        sailConfig: latestSailConfig,
+        barometerHpa: latestBarometerHpa,
         logDistanceNm: distance,
         events: summaryText,
         traceSamples: sessionEntries
@@ -16372,7 +16740,7 @@ function addManualNavigationLogEntry(event) {
             updateNavLogFormMode();
             renderNavLogList();
             setNavLogStatus(t('Entrée journal mise à jour.', 'Entrada de diario actualizada.'));
-            alert(t('Mise à jour du log de navigation confirmée.', 'Actualizacion del log de navegacion confirmada.'));
+            alert(t('Mise à jour du log de navigation confirmée.', 'Actualización del log de navegación confirmada.'));
             // Keep nav editor visible after an update to avoid closing the workspace unexpectedly.
             logWorkspaceMode = 'nav';
             renderLogWorkspacePanel();
@@ -16787,14 +17155,14 @@ function getGeolocationErrorMessage(error) {
     if (code === 1) {
         return t(
             `Acces GPS refuse. Autorise la localisation dans Safari pour ce site${details}`,
-            `Acceso GPS denegado. Autoriza la ubicacion en Safari para este sitio${details}`
+            `Acceso GPS denegado. Autoriza la ubicación en Safari para este sitio${details}`
         );
     }
 
     if (code === 2) {
         return t(
             `Position indisponible (signal GPS/Wi-Fi insuffisant)${details}`,
-            `Posicion no disponible (senal GPS/Wi-Fi insuficiente)${details}`
+            `Posición no disponible (señal GPS/Wi-Fi insuficiente)${details}`
         );
     }
 
@@ -16893,12 +17261,12 @@ function locateNowOnMap() {
         return;
     }
 
-    setNavLogStatus(t('Recherche de la position en cours...', 'Buscando posicion actual...'));
+    setNavLogStatus(t('Recherche de la position en cours...', 'Buscando posición actual...'));
 
     requestCurrentPositionWithFallback(
         position => {
             if (!applyCurrentPositionFix(position)) return;
-            setNavLogStatus(t('Position actuelle affichee sur la carte.', 'Posicion actual mostrada en el mapa.'));
+            setNavLogStatus(t('Position actuelle affichee sur la carte.', 'Posición actual mostrada en el mapa.'));
         },
         error => {
             setNavLogStatus(getGeolocationErrorMessage(error), true);
@@ -16923,12 +17291,12 @@ function locatePreciselyOnMap() {
         return;
     }
 
-    setNavLogStatus(t('Forcage geolocalisation precise en cours...', 'Forzando geolocalizacion precisa...'));
+    setNavLogStatus(t('Forcage geolocalisation precise en cours...', 'Forzando geolocalización precisa...'));
 
     navigator.geolocation.getCurrentPosition(
         position => {
             if (!applyCurrentPositionFix(position)) return;
-            setNavLogStatus(t('Position precise affichee sur la carte.', 'Posicion precisa mostrada en el mapa.'));
+            setNavLogStatus(t('Position precise affichee sur la carte.', 'Posición precisa mostrada en el mapa.'));
         },
         error => {
             setNavLogStatus(getGeolocationErrorMessage(error), true);
@@ -17080,7 +17448,7 @@ function getSignalKWeatherSummary(snapshot = {}) {
         parts.push(`${t('pluie', 'lluvia', 'rain')}: ${snapshot.rainRateMmH.toFixed(1)} mm/h`);
     }
     if (Number.isFinite(snapshot?.baroHpa)) {
-        parts.push(`${t('pression', 'presion', 'pressure')}: ${snapshot.baroHpa.toFixed(1)} hPa`);
+        parts.push(`${t('pression', 'presión', 'pressure')}: ${snapshot.baroHpa.toFixed(1)} hPa`);
     }
     if (!parts.length) return '';
     return `${t('Météo SignalK', 'Meteo SignalK', 'SignalK weather')}: ${parts.join(' · ')}`;
@@ -18886,7 +19254,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (!Number.isInteger(index) || index < 0 || index >= googlePhotosPickerItems.length) return;
 
             void importGooglePhotoItemIntoWaypoint(googlePhotosPickerItems[index]).catch(error => {
-                setGooglePhotosPickerStatus(`${t('Import photo impossible', 'Importacion de foto imposible')}: ${String(error?.message || error)}`, true);
+                setGooglePhotosPickerStatus(`${t('Import photo impossible', 'Importación de foto imposible')}: ${String(error?.message || error)}`, true);
             });
         });
     }
@@ -18919,6 +19287,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     const stopNavLogBtn = document.getElementById('stopNavLogBtn');
     if (stopNavLogBtn) {
         stopNavLogBtn.addEventListener('click', stopNavigationLogging);
+    }
+
+    const navCapturePolarBtn = document.getElementById('navCapturePolarBtn');
+    if (navCapturePolarBtn) {
+        navCapturePolarBtn.addEventListener('click', captureLivePolarPointFromNavigation);
     }
 
     const requestMotionPermissionBtn = document.getElementById('requestMotionPermissionBtn');
@@ -23686,7 +24059,7 @@ function reverseCurrentRoute() {
     if (routeNameInput) {
         const baseName = String(routeNameInput.value || '').trim();
         if (!baseName) {
-            routeNameInput.value = t('Route RETOUR', 'Ruta RETOUR');
+            routeNameInput.value = t('Route RETOUR', 'Ruta RETORNO');
         } else if (!/\bretour\b/i.test(baseName)) {
             routeNameInput.value = `${baseName} RETOUR`;
         }

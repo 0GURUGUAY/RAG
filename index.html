@@ -10,7 +10,7 @@
     <link rel="icon" type="image/jpeg" href="ceibo-favicon.jpg">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <link rel="stylesheet" href="style.css?v=20260329-41"/>
+    <link rel="stylesheet" href="style.css?v=20260329-41-joyfix1"/>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -451,6 +451,11 @@
             <button id="useMapCenterWeatherBtn" style="flex:1;">Centre carte → pointeur</button>
             <button id="refreshWeatherOutlookBtn" style="flex:1;">Actualiser météo</button>
         </div>
+        <div class="button-row">
+            <button id="weatherDiagnosticBtn" style="flex:1;">Analyse synoptique locale</button>
+        </div>
+        <div id="weatherDiagnosticStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Analyse synoptique: en attente</div>
+        <div id="weatherDiagnosticPanel"></div>
         <div id="weatherApiConfigSection">
             <label for="owmApiKeyInput" style="display:block; margin-top:10px; font-size:12px;">Clé API OpenWeatherMap (isobares):</label>
             <input type="password" id="owmApiKeyInput" placeholder="Ta clé OWM" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
@@ -1212,6 +1217,7 @@
     <div id="map">
         <button id="locatePreciseBtn" type="button" title="Forcer GPS précis" aria-label="Forcer GPS précis">➤</button>
         <div id="mapWeatherOverlayLegend"></div>
+        <div id="weatherCenterStage"></div>
     </div>
     <aside id="waypointDockPanel" class="waypoint-dock-panel">
         <div id="waypointSavedAnchoragesDockLabel" class="waypoint-dock-panel__title">Mouillages enregistrés:</div>
@@ -1661,7 +1667,7 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=20260329-41"></script>
+<script type="module" src="app.js?v=20260329-41-joyfix1"></script>
 
 </body>
 </html>

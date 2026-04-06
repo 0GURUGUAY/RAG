@@ -46,6 +46,11 @@ const SK_PATHS = [
     'environment.outside.absoluteHumidity',
     'environment.outside.cloudCover',
     'environment.outside.precipitation',
+    'environment.outside.fakeJoystick.x',
+    'environment.outside.fakeJoystick.y',
+    'environment.outside.fakeJoystick.pressed',
+    'environment.outside.fakeJoystick.direction',
+    'environment.outside.fakeJoystick.buttonEvent',
     'inside.engineroom.temperature',
     'environment.inside.28-011457a5a0aa.temperature',
     'inside.baterie.temperature',
@@ -136,6 +141,25 @@ function extractNumericValue(value) {
                 stack.push({ node: nested, depth: depth + 1 });
             }
         }
+    }
+
+    return null;
+}
+
+function extractBooleanValue(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'on', 'yes', 'pressed'].includes(normalized)) return true;
+        if (['false', '0', 'off', 'no', 'released'].includes(normalized)) return false;
+    }
+    if (!value || typeof value !== 'object') return null;
+
+    const candidates = [value.value, value.pressed, value.button, value.active, value.state];
+    for (const candidate of candidates) {
+        const extracted = extractBooleanValue(candidate);
+        if (typeof extracted === 'boolean') return extracted;
     }
 
     return null;
@@ -507,6 +531,39 @@ export class SignalKClient {
                         v.rainRateMmH = n;
                         v.weatherFrameTick = Date.now();
                     }
+                }
+                break;
+
+            case 'environment.outside.fakeJoystick.x':
+                {
+                    const n = extractNumericValue(value);
+                    if (Number.isFinite(n)) v.joystickX = n;
+                }
+                break;
+
+            case 'environment.outside.fakeJoystick.y':
+                {
+                    const n = extractNumericValue(value);
+                    if (Number.isFinite(n)) v.joystickY = n;
+                }
+                break;
+
+            case 'environment.outside.fakeJoystick.pressed':
+                {
+                    const pressed = extractBooleanValue(value);
+                    if (typeof pressed === 'boolean') v.joystickPressed = pressed;
+                }
+                break;
+
+            case 'environment.outside.fakeJoystick.direction':
+                if (typeof value === 'string' && value.trim()) {
+                    v.joystickDirection = value.trim().toLowerCase();
+                }
+                break;
+
+            case 'environment.outside.fakeJoystick.buttonEvent':
+                if (extractBooleanValue(value) === true) {
+                    v.joystickButtonEventAt = Date.now();
                 }
                 break;
 
