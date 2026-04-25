@@ -24,12 +24,24 @@
     <div class="sidebar-tabs">
         <button id="cloudTabBtn" class="tab-btn active" type="button">Cloud</button>
         <button id="routesTabBtn" class="tab-btn" type="button">Routes</button>
+        <button id="voyagesTabBtn" class="tab-btn" type="button">Voyages</button>
         <button id="routingTabBtn" class="tab-btn" type="button">Routage</button>
         <button id="documentTabBtn" class="tab-btn" type="button">Document</button>
         <button id="navLogTabBtn" class="tab-btn" type="button">Journal nav</button>
         <button id="maintenanceTabBtn" class="tab-btn" type="button">Maintenance</button>
         <button id="arrivalTabBtn" class="tab-btn" type="button">Arrivée</button>
         <button id="waypointTabBtn" class="tab-btn" type="button">Waypoint</button>
+    </div>
+
+    <div id="voyagesTab" class="tab-panel">
+        <div class="route-voyage-card">
+            <div class="route-voyage-card__title">Vue voyages</div>
+            <div id="voyagesTabIntro" class="route-voyage-summary">Le planning détaillé s'affiche dans la partie principale, à la place de la carte.</div>
+            <div class="button-row" style="margin-top:10px;">
+                <button id="voyagesSidebarNewBtn" type="button" style="flex:1;">Nouveau voyage</button>
+            </div>
+            <div id="voyagesSidebarList" class="voyages-sidebar-list"></div>
+        </div>
     </div>
 
     <div id="routingTab" class="tab-panel">
@@ -86,13 +98,12 @@
                     <option value="7">7 jours</option>
                 </select>
             </div>
-            <button id="suggestDepartureBtn" style="margin-top:8px;">Conseiller départ météo (≤ 20 kn)</button>
-            <div id="departureSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Suggestion départ: en attente</div>
             <button id="openWeatherFromRoutingBtn" style="margin-top:8px;">Ouvrir météo routage</button>
             <div id="routingWeatherHint" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo est accessible depuis Routage.</div>
-            <button id="suggestAiRoutesBtn" style="margin-top:8px;">Proposer routes IA (safe / perf)</button>
-            <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Routes IA: en attente</div>
-            <div id="aiRouteSuggestions"></div>
+            <div class="button-row" style="margin-top:8px;">
+                <button id="suggestAiRoutesBtn" style="flex:1;">Calculer matrice départ (5 j)</button>
+                <button id="refreshAiRoutesBtn" style="flex:1;" disabled>Rafraîchir</button>
+            </div>
         </div>
         <div id="windSpeedLegend"></div>
         <div id="selectedWpInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">WP sélectionné: aucun · clic sur WP pour sélectionner · clic droit pour supprimer</div>
@@ -128,7 +139,6 @@
                 <button id="exportRouteBtn" style="flex:1;">Exporter JSON</button>
                 <button id="exportRouteGpxBtn" style="flex:1;">Exporter GPX</button>
             </div>
-            <button id="exportVoyagePdfBtn" style="margin-top:8px;">Exporter rapport PDF</button>
 
             <label for="importRouteInput" style="display: block; margin-top: 12px; font-size: 12px;">Importer (JSON / GPX):</label>
             <input type="file" id="importRouteInput" accept=".json,.gpx,application/json,application/gpx+xml,text/xml,application/xml" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
@@ -1214,6 +1224,86 @@
 </div>
 
 <div id="mapWorkspace">
+    <section id="voyageAgendaPanel" class="voyage-agenda-panel" aria-label="Agenda voyages">
+        <div class="voyage-agenda-panel__header">
+            <div>
+                <div id="voyageAgendaTitle" class="voyage-agenda-panel__eyebrow">Agenda voyages</div>
+                <h1 id="voyageAgendaHeading" class="voyage-agenda-panel__title">Planning partagé des navigations</h1>
+                <p id="voyageAgendaSubtitle" class="voyage-agenda-panel__subtitle">Regroupe les routes par voyage, suit les départs et détecte les retards potentiels.</p>
+            </div>
+            <div class="voyage-agenda-panel__actions">
+                <button id="voyageAgendaOpenRoutesBtn" type="button">Ouvrir routes</button>
+                <button id="voyageAgendaRefreshBtn" type="button">Rafraîchir agenda</button>
+                <button id="voyageLlmPromptBtn" type="button">Prompt LLM</button>
+                <button id="exportVoyagePdfBtn" type="button">Exporter PDF voyage</button>
+                <button id="emailVoyagePdfBtn" type="button">PDF + email équipage</button>
+            </div>
+        </div>
+        <div class="voyage-agenda-builder">
+            <div class="voyage-agenda-builder__card">
+                <div id="voyageBuilderCardTitle" class="route-voyage-card__title">Créer / éditer un voyage</div>
+                <div id="voyagePlanActiveDisplay" class="route-voyage-summary">Aucun voyage actif</div>
+                <label for="voyagePlanNameInput" class="route-voyage-label">Nom du voyage:</label>
+                <input id="voyagePlanNameInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: BCN > Minorca">
+                <label for="voyagePlanDescriptionInput" class="route-voyage-label">Description:</label>
+                <textarea id="voyagePlanDescriptionInput" rows="3" class="polar-json-input route-voyage-notes" placeholder="Ex: convoyage de printemps avec escales tranquilles"></textarea>
+                <div class="button-row">
+                    <button id="voyagePlanSaveBtn" type="button" style="flex:1;">Enregistrer voyage</button>
+                    <button id="voyagePlanNewBtn" type="button" style="flex:1;">Nouveau</button>
+                    <button id="voyagePlanDuplicateBtn" type="button" style="flex:1;">Dupliquer</button>
+                    <button id="voyagePlanDeleteBtn" type="button" style="flex:1;">Supprimer</button>
+                </div>
+                <div id="voyagePlanStatus" class="route-voyage-summary">Sélectionne ou crée un voyage pour construire le calendrier.</div>
+            </div>
+            <div class="voyage-agenda-builder__card">
+                <div id="voyageBuilderLegTitle" class="route-voyage-card__title">Ajouter une route existante</div>
+                <label for="voyagePlanRouteSelectInput" class="route-voyage-label">Route disponible:</label>
+                <select id="voyagePlanRouteSelectInput" class="cloud-input"></select>
+                <label for="voyagePlanRouteDepartureInput" class="route-voyage-label">Départ pour cette étape:</label>
+                <input id="voyagePlanRouteDepartureInput" type="datetime-local" class="route-search-input route-voyage-input">
+                <div class="button-row">
+                    <button id="voyagePlanAddRouteBtn" type="button" style="flex:1;">Ajouter route</button>
+                    <button id="voyagePlanOpenRouteBtn" type="button" style="flex:1;">Ouvrir route</button>
+                </div>
+                <label for="voyagePlanWaypointSelectInput" class="route-voyage-label">Waypoint existant:</label>
+                <select id="voyagePlanWaypointSelectInput" class="cloud-input"></select>
+                <label for="voyagePlanStopNameInput" class="route-voyage-label">Mouillage / escale:</label>
+                <input id="voyagePlanStopNameInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: Port Mahon">
+                <label for="voyagePlanStopDurationInput" class="route-voyage-label">Durée mouillage (jours):</label>
+                <input id="voyagePlanStopDurationInput" type="number" min="0.5" step="0.5" class="route-search-input route-voyage-input" placeholder="Ex: 2">
+                <div class="button-row">
+                    <button id="voyagePlanAddStopBtn" type="button" style="flex:1;">Ajouter mouillage</button>
+                </div>
+            </div>
+            <div class="voyage-agenda-builder__card">
+                <div id="voyageBuilderCrewTitle" class="route-voyage-card__title">Équipage du voyage</div>
+                <label for="voyageCrewDirectorySelectInput" class="route-voyage-label">Annuaire équipage:</label>
+                <select id="voyageCrewDirectorySelectInput" class="cloud-input"></select>
+                <div class="button-row">
+                    <button id="voyagePlanAddCrewBtn" type="button" style="flex:1;">Affecter au voyage</button>
+                    <button id="voyageCrewNewBtn" type="button" style="flex:1;">Nouveau</button>
+                </div>
+                <label for="voyageCrewFirstNameInput" class="route-voyage-label">Prénom:</label>
+                <input id="voyageCrewFirstNameInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: Luc">
+                <label for="voyageCrewLastNameInput" class="route-voyage-label">Nom:</label>
+                <input id="voyageCrewLastNameInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: Martin">
+                <label for="voyageCrewEmailInput" class="route-voyage-label">Email:</label>
+                <input id="voyageCrewEmailInput" type="email" class="route-search-input route-voyage-input" placeholder="Ex: luc@example.com">
+                <label for="voyageCrewPhoneInput" class="route-voyage-label">Téléphone:</label>
+                <input id="voyageCrewPhoneInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: +33 6 00 00 00 00">
+                <label for="voyageCrewCommentInput" class="route-voyage-label">Commentaire:</label>
+                <textarea id="voyageCrewCommentInput" rows="3" class="polar-json-input route-voyage-notes" placeholder="Ex: veille de nuit, régime, préférences..."></textarea>
+                <div class="button-row">
+                    <button id="voyageCrewSaveBtn" type="button" style="flex:1;">Enregistrer équipier</button>
+                    <button id="voyageCrewDeleteBtn" type="button" style="flex:1;">Supprimer équipier</button>
+                </div>
+                <div id="voyagePlanCrewList" class="voyage-crew-list"></div>
+                <div id="voyageCrewStatus" class="route-voyage-summary">Sélectionne ou crée un équipier puis affecte-le au voyage.</div>
+            </div>
+        </div>
+        <div id="voyageAgendaContent" class="voyage-agenda-content"></div>
+    </section>
+
     <div id="map">
         <button id="locatePreciseBtn" type="button" title="Forcer GPS précis" aria-label="Forcer GPS précis">➤</button>
         <div id="mapWeatherOverlayLegend"></div>
@@ -1238,6 +1328,12 @@
                 <div id="documentRagDockSources" class="document-rag-sources"></div>
             </details>
         </div>
+    </aside>
+    <aside id="aiRouteDockPanel" class="waypoint-dock-panel">
+        <div id="aiRouteDockTitle" class="waypoint-dock-panel__title">Matrice départ + météo</div>
+        <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Analyse route + météo: en attente</div>
+        <div id="aiRouteSuggestions" class="waypoint-dock-panel__list"></div>
+        <div id="aiRouteMatrixTooltip" class="ai-route-matrix-tooltip" hidden></div>
     </aside>
 </div>
 <div id="maintenanceMapPanel" style="display:none;">
@@ -1667,7 +1763,22 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=20260329-41-joyfix1"></script>
+<div id="voyageLlmPromptModal" class="google-photos-modal" style="display:none;">
+    <div class="google-photos-modal__card voyage-llm-prompt-modal__card">
+        <div class="google-photos-modal__header">
+            <strong id="voyageLlmPromptModalTitle">Prompt touristique du voyage</strong>
+            <button id="voyageLlmPromptCloseBtn" type="button">Fermer</button>
+        </div>
+        <div id="voyageLlmPromptStatus" class="google-photos-modal__status">Le prompt sera généré à partir du voyage actif.</div>
+        <textarea id="voyageLlmPromptTextarea" class="voyage-llm-prompt-modal__textarea" spellcheck="false"></textarea>
+        <div class="button-row">
+            <button id="voyageLlmPromptCopyBtn" type="button" style="flex:1;">Copier le prompt</button>
+            <button id="voyageLlmPromptRefreshBtn" type="button" style="flex:1;">Régénérer</button>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="app.js?v=20260425-anchorage-waypoint-fix2"></script>
 
 </body>
 </html>

@@ -4,6 +4,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
 const APP_BUILD_VERSION = '20260329-41';
+const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
+const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
+const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -31,13 +34,28 @@ let baseLayerControl;
 let routePoints = [];
 let markers = [];
 let routeLayer = null;
+let voyagePreviewMap = null;
+let voyagePreviewOverlayLayer = null;
+let voyagePreviewMapContainer = null;
+let activeVoyageMapItemId = '';
+let isVoyageMapExpanded = false;
+let isVoyageCalendarVisible = true;
+let isVoyageWeatherVisible = false;
+let draggedVoyageCalendarItemId = '';
+let activeVoyageCalendarResize = null;
+let voyageAgendaWeatherHydrationToken = 0;
 let windLayer = null;
 const nowLocal = new Date();
-let departureDate = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
-let departureTime = `${String(nowLocal.getHours()).padStart(2, '0')}:00`;
+const initialSuggestedDeparture = getNextSuggestedDepartureDateTime(nowLocal);
+let departureDate = `${initialSuggestedDeparture.getFullYear()}-${String(initialSuggestedDeparture.getMonth() + 1).padStart(2, '0')}-${String(initialSuggestedDeparture.getDate()).padStart(2, '0')}`;
+let departureTime = `${String(initialSuggestedDeparture.getHours()).padStart(2, '0')}:${String(initialSuggestedDeparture.getMinutes()).padStart(2, '0')}`;
 let tackingTimeHours = 0.5;
 let sailMode = 'auto';
 const weatherCache = new Map();
+const weatherDailyCache = new Map();
+const weatherDailyInFlight = new Map();
+const weatherRequestQueue = [];
+let activeWeatherRequestCount = 0;
 let lastWeatherUpdateAt = null;
 let waypointWindDirectionLayers = [];
 let waveDirectionSegmentLayers = [];
@@ -53,7 +71,6 @@ let lastComputedReportData = null;
 let forecastWindowDays = 3;
 let arrivalPoiMarkers = [];
 let arrivalAnalysisEntries = [];
-let lastDepartureSuggestion = null;
 let selectedUserWaypointIndex = -1;
 let currentLoadedRouteIndex = -1;
 let waypointPhotoEntries = [];
@@ -85,6 +102,15 @@ let waypointPhotoInputProcessing = false;
 const MOTOR_WIND_THRESHOLD_KN = 5;
 const MOTOR_SPEED_KN = 7;
 const RECOMMENDED_MAX_WIND_KN = 20;
+const AI_ROUTE_ANALYSIS_WINDOW_DAYS = 5;
+const AI_ROUTE_MAX_DURATION_HOURS = 96;
+const AI_ROUTE_DEPARTURE_STEP_HOURS = 3;
+const AI_ROUTE_DAYTIME_START_HOUR = 5;
+const AI_ROUTE_DAYTIME_END_HOUR = 22;
+const AI_ROUTE_MATRIX_HOURS = [8, 12, 18];
+const AI_ROUTE_MATRIX_USE_MOCK = false;
+const WEATHER_REQUEST_MAX_CONCURRENT = 2;
+const WEATHER_NEARBY_CACHE_STEP_DEG = 0.1;
 const AUTO_TACK_TIME_CANDIDATES_HOURS = [0.2, 0.25, 0.33, 0.4, 0.5, 0.66, 0.75, 1, 1.25, 1.5];
 const OVERPASS_URLS = [
     'https://overpass.kumi.systems/api/interpreter',
@@ -111,6 +137,8 @@ const POLAR_PROFILES_STORAGE_KEY = 'ceiboPolarProfilesV1';
 const ACTIVE_POLAR_PROFILE_STORAGE_KEY = 'ceiboActivePolarProfileV1';
 const POLAR_AUTO_PROFILE_ID = '__auto__';
 const POLAR_IMPORTED_DUFOUR56_STORAGE_KEY = 'ceiboPolarImportedDufour56V1';
+const VOYAGE_PLANS_STORAGE_KEY = 'ceiboVoyagePlansV1';
+const CREW_DIRECTORY_STORAGE_KEY = 'ceiboCrewDirectoryV1';
 const NAV_CHECKLIST_STORAGE_KEY = 'ceiboNavChecklistV1';
 const NAV_SWELL_PROFILE_STORAGE_KEY = 'ceiboNavSwellProfileV1';
 const NAV_LOG_LAYOUT_STORAGE_KEY = 'ceiboNavLogLayoutV1';
@@ -119,6 +147,10 @@ const CLOUD_ROUTES_TABLE = 'routes';
 const CLOUD_ROUTE_POINTS_TABLE = 'route_points';
 const CLOUD_WAYPOINT_PHOTOS_TABLE = 'waypoint_photos';
 const CLOUD_ARRIVAL_ANALYSES_TABLE = 'arrival_analyses';
+const CLOUD_VOYAGE_PLANS_TABLE = 'voyage_plans';
+const CLOUD_VOYAGE_PLAN_ITEMS_TABLE = 'voyage_plan_items';
+const CLOUD_CREW_TABLE = 'equipage';
+const CLOUD_VOYAGE_CREW_TABLE = 'voyage_equipage';
 const CLOUD_DOCUMENTS_TABLE = 'document_files';
 const CLOUD_DOCUMENTS_BUCKET = 'ceibo-documents';
 const CLOUD_MAINTENANCE_SCHEMAS_TABLE = 'maintenance_schemas';
@@ -133,6 +165,7 @@ const CLOUD_ALLOWED_USERS_TABLE = 'allowed_users';
 const CLOUD_PROJECTS_TABLE = 'projects';
 const CLOUD_TELEGRAM_PROXY_FUNCTION = 'telegram-proxy';
 const CLOUD_AIS_PROXY_FUNCTION = 'ais-proxy';
+const CLOUD_VOYAGE_PDF_EMAIL_FUNCTION = 'voyage-pdf-email';
 const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
 const CLOUD_AUTO_PULL_INTERVAL_MS = 45000;
 const CLOUD_LOGBOOK_PUSH_DEBOUNCE_MS = 1800;
@@ -190,6 +223,10 @@ let cloudAllowedUsersHasTelegramAlertsEnabledColumn = true;
 let cloudNavLogHasTraceSamplesColumn = true;
 let routesCloudDirty = false;
 let arrivalAnalysesCloudDirty = false;
+let voyagePlansCloudDirty = false;
+let voyagePlansCloudRevision = 0;
+let crewDirectoryCloudDirty = false;
+let crewDirectoryCloudRevision = 0;
 let cloudResolvedProjectIdUuid = '';
 let cloudAuthSubscription = null;
 let cloudAutoPullTimer = null;
@@ -225,6 +262,10 @@ let navGpsSessionStartEntryIndex = 0;
 let navGpsSessionStartSampleIndex = 0;
 let navGpsSessionHasSample = false;
 let navGpsSessionSamples = [];
+let lastAiRouteCandidates = [];
+let lastAiRouteMatrixCache = null;
+let isAiRouteMatrixVisible = false;
+let lastAiRouteTooltipIndex = -1;
 let navAutoLogArmingFix = null;
 let navAutoLogStartPending = false;
 let navGpsTraceLayerGroup = null;
@@ -308,7 +349,6 @@ let maintenanceSignalKStats = {
 };
 let dashboardThresholdConfig = null;
 let logWorkspaceMode = 'none';
-let lastAiRouteCandidates = [];
 let aiTrafficEntries = [];
 let aiTrafficAutoHideTimer = null;
 let aisRefreshTimerId = null;
@@ -370,6 +410,12 @@ let selectedPolarProfileEditorId = '';
 let polarEditorMode = 'grid'; // 'grid' | 'json'
 let routesSortOrder = 'asc';
 let routesSearchTerm = '';
+let voyageAgendaSearchTerm = '';
+let voyagePlans = [];
+let selectedVoyagePlanId = '';
+let crewDirectory = [];
+let selectedCrewMemberId = '';
+let crewEditorDraftState = null;
 let waypointSearchTerm = '';
 let waypointMapSearchResults = [];
 let waypointMapSearchInFlight = false;
@@ -397,6 +443,7 @@ let overpassPreferredEndpoint = OVERPASS_URLS[0];
 const MAP_STYLE_STORAGE_KEY = 'ceiboMapStyle';
 const MAP_VIEW_STORAGE_KEY = 'ceiboMapView';
 const APP_LANGUAGE_STORAGE_KEY = 'ceiboAppLanguage';
+const ROUTING_DEPARTURE_DATETIME_STORAGE_KEY = 'ceiboRoutingDepartureDateTimeV1';
 const NIGHT_MODE_STORAGE_KEY = 'ceiboNightModeV1';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'ceiboSidebarCollapsedV1';
 const TRANSPARENT_TILE_DATA_URI = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
@@ -434,8 +481,9 @@ const COASTAL_CLEARANCE_NM = 5;
 const AUTO_WP_MIN_SPACING_NM = 10;
 const AUTO_WP_MAX_INTERMEDIATE = 24;
 const AUTO_WEATHER_SPLIT_MAX_HOURS = 2;
-const AUTO_WEATHER_SPLIT_UPWIND_MAX_HOURS = 4;
+const AUTO_WEATHER_SPLIT_UPWIND_MAX_HOURS = 1;
 const AUTO_WEATHER_SPLIT_MAX_SUBSEGMENTS = 8;
+const ROUTE_SCHEDULE_REFERENCE_SPEED_KN = 6.5;
 let autoWpMinSpacingNm = null;
 let currentLanguage = 'fr';
 let isSidebarCollapsed = false;
@@ -463,18 +511,2078 @@ function normalizeHourTime(timeValue) {
     return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+function getNextSuggestedDepartureDateTime(referenceDateTime = new Date()) {
+    const base = referenceDateTime instanceof Date && !Number.isNaN(referenceDateTime.getTime())
+        ? new Date(referenceDateTime.getTime())
+        : new Date();
+    const candidateHours = [8, 12, 18];
+
+    for (const hour of candidateHours) {
+        const candidate = new Date(base.getTime());
+        candidate.setHours(hour, 0, 0, 0);
+        if (candidate.getTime() > base.getTime()) {
+            return candidate;
+        }
+    }
+
+    const fallback = new Date(base.getTime());
+    fallback.setDate(fallback.getDate() + 1);
+    fallback.setHours(candidateHours[0], 0, 0, 0);
+    return fallback;
+}
+
+function getAnchorageEndDateTime(startDateTime, durationDays) {
+    if (!(startDateTime instanceof Date) || Number.isNaN(startDateTime.getTime())) return null;
+    const safeDurationDays = Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, Number(durationDays || 1) || 1);
+    const rawEnd = new Date(startDateTime.getTime() + safeDurationDays * 24 * 60 * 60 * 1000);
+    return getNextSuggestedDepartureDateTime(rawEnd);
+}
+
+function getVoyagePlanNextDepartureDateTime(plan) {
+    const timeline = plan ? computeVoyagePlanTimeline(plan) : [];
+    return [...timeline].reverse().find(entry => entry.arrival)?.arrival || null;
+}
+
+function getEditableVoyageRouteItemId(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    return String(safePlan.items.find(item => item.type === 'route')?.id || '');
+}
+
+function normalizeVoyagePlanScheduleOverrides(plan, fallbackIndex = 0) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, fallbackIndex);
+    let firstRouteSeen = false;
+    return {
+        ...safePlan,
+        items: safePlan.items.map((item, index) => {
+            if (item.type === 'route') {
+                const normalizedRoute = sanitizeVoyagePlanItem({
+                    ...item,
+                    departureDateTime: firstRouteSeen ? '' : item.departureDateTime
+                }, index);
+                firstRouteSeen = true;
+                return normalizedRoute;
+            }
+            return sanitizeVoyagePlanItem({
+                ...item,
+                startDateTime: ''
+            }, index);
+        })
+    };
+}
+
+function getDerivedVoyagePlanItemStartDateTime(plan, itemId) {
+    if (!plan || !itemId) return null;
+    const planClone = sanitizeVoyagePlan(plan, 0);
+    planClone.items = planClone.items.map(item => {
+        if (item.id !== itemId) return item;
+        if (item.type === 'route') return sanitizeVoyagePlanItem({ ...item, departureDateTime: '' });
+        if (item.type === 'stop') return sanitizeVoyagePlanItem({ ...item, startDateTime: '' });
+        return item;
+    });
+    const entry = computeVoyagePlanTimeline(planClone).find(timelineEntry => timelineEntry.id === itemId);
+    return entry?.departure || null;
+}
+
+function getDerivedRouteDepartureDateTime(plan, itemId) {
+    return getDerivedVoyagePlanItemStartDateTime(plan, itemId);
+}
+
+function snapDateTimeToAgendaSlot(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const next = new Date(date.getTime());
+    next.setSeconds(0, 0);
+    const minutes = next.getMinutes();
+    const snappedMinutes = Math.round(minutes / VOYAGE_AGENDA_TIME_STEP_MINUTES) * VOYAGE_AGENDA_TIME_STEP_MINUTES;
+    next.setMinutes(snappedMinutes);
+    return next;
+}
+
+function getDateTimeFromVoyageCalendarDropTarget(dropZone, clientX) {
+    const weekStartRaw = String(dropZone?.getAttribute('data-voyage-week-start') || '');
+    if (!weekStartRaw) return null;
+    const weekStart = parseDateTimeLocalValue(`${weekStartRaw}T00:00`);
+    if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime())) return null;
+
+    const rect = dropZone.getBoundingClientRect();
+    if (!rect.width) return null;
+
+    const boundedOffset = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    const ratio = Math.min(Math.max(boundedOffset / rect.width, 0), 0.9999);
+    const droppedDate = new Date(weekStart.getTime() + ratio * 7 * 24 * 60 * 60 * 1000);
+    return snapDateTimeToAgendaSlot(droppedDate);
+}
+
+function getVoyageCalendarDurationDaysFromPointer(startDateTime, dropZone, clientX) {
+    const endDateTime = getDateTimeFromVoyageCalendarDropTarget(dropZone, clientX);
+    if (!(startDateTime instanceof Date) || Number.isNaN(startDateTime.getTime()) || !(endDateTime instanceof Date) || Number.isNaN(endDateTime.getTime())) {
+        return null;
+    }
+
+    const minEndDateTime = new Date(startDateTime.getTime() + VOYAGE_STOP_MIN_DURATION_DAYS * 24 * 60 * 60 * 1000);
+    const boundedEndDateTime = endDateTime > minEndDateTime ? endDateTime : minEndDateTime;
+    const durationDays = (boundedEndDateTime.getTime() - startDateTime.getTime()) / (24 * 60 * 60 * 1000);
+    const stepCount = Math.round(durationDays / VOYAGE_STOP_DURATION_STEP_DAYS);
+    return Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, stepCount * VOYAGE_STOP_DURATION_STEP_DAYS);
+}
+
+function getVoyageCalendarResizeTargetDateTime(startDateTime, dropZone, clientX) {
+    const durationDays = getVoyageCalendarDurationDaysFromPointer(startDateTime, dropZone, clientX);
+    if (!(startDateTime instanceof Date) || Number.isNaN(startDateTime.getTime()) || !Number.isFinite(durationDays)) return null;
+    return new Date(startDateTime.getTime() + durationDays * 24 * 60 * 60 * 1000);
+}
+
+function getVoyageCalendarResizeWidthPct(startDateTime, durationDays, dropZone) {
+    const weekStartRaw = String(dropZone?.getAttribute('data-voyage-week-start') || '');
+    if (!weekStartRaw || !(startDateTime instanceof Date) || Number.isNaN(startDateTime.getTime())) return null;
+    const weekStart = parseDateTimeLocalValue(`${weekStartRaw}T00:00`);
+    if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime())) return null;
+    const weekDurationMs = 7 * 24 * 60 * 60 * 1000;
+    const effectiveEnd = new Date(startDateTime.getTime() + durationDays * 24 * 60 * 60 * 1000);
+    const clippedStart = startDateTime > weekStart ? startDateTime : weekStart;
+    const clippedEnd = effectiveEnd < addDays(weekStart, 7) ? effectiveEnd : addDays(weekStart, 7);
+    return Math.max(((clippedEnd.getTime() - clippedStart.getTime()) / weekDurationMs) * 100, 2.2);
+}
+
+function clearWeatherForecastCache() {
+    weatherCache.clear();
+    weatherDailyCache.clear();
+    weatherDailyInFlight.clear();
+    lastWeatherUpdateAt = null;
+}
+
 function updateDepartureDateTimeInput() {
     const input = document.getElementById('departureDateTimeInput');
     if (!input) return;
     input.value = `${departureDate}T${normalizeHourTime(departureTime)}`;
 }
 
-function setDepartureFromDateTimeInput(rawValue) {
+function normalizeDateTimeLocalValue(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) {
+        return raw;
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return '';
+
+    return [
+        String(parsed.getFullYear()).padStart(4, '0'),
+        String(parsed.getMonth() + 1).padStart(2, '0'),
+        String(parsed.getDate()).padStart(2, '0')
+    ].join('-') + `T${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+}
+
+function parseOptionalCoordinate(value, min, max) {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return null;
+    if (Number.isFinite(min) && numeric < min) return null;
+    if (Number.isFinite(max) && numeric > max) return null;
+    return numeric;
+}
+
+function parseDateTimeLocalValue(value) {
+    const normalized = normalizeDateTimeLocalValue(value);
+    if (!normalized) return null;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateTimeLocalLabel(value) {
+    const parsed = value instanceof Date ? value : parseDateTimeLocalValue(value);
+    if (!parsed) return t('Non planifié', 'Sin planificar', 'Unscheduled');
+    return parsed.toLocaleString(getCurrentLocale(), {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function formatDateTimeLocalInputValue(value) {
+    const parsed = value instanceof Date ? value : parseDateTimeLocalValue(value);
+    if (!parsed) return '';
+    return [
+        String(parsed.getFullYear()).padStart(4, '0'),
+        String(parsed.getMonth() + 1).padStart(2, '0'),
+        String(parsed.getDate()).padStart(2, '0')
+    ].join('-') + `T${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+}
+
+function sanitizeSharedWithValue(value) {
+    return String(value || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean)
+        .join(', ');
+}
+
+function calculateRouteDistanceFromPoints(points) {
+    const safePoints = Array.isArray(points) ? points : [];
+    let totalDistanceNm = 0;
+    for (let index = 0; index < safePoints.length - 1; index += 1) {
+        const start = safePoints[index];
+        const end = safePoints[index + 1];
+        totalDistanceNm += distanceNm(
+            Number(start?.lat),
+            Number(start?.lon ?? start?.lng),
+            Number(end?.lat),
+            Number(end?.lon ?? end?.lng)
+        );
+    }
+    return totalDistanceNm;
+}
+
+function getDraftRouteDistanceNm() {
+    if (Number.isFinite(lastComputedReportData?.metrics?.totalDistanceNm)) {
+        return Number(lastComputedReportData.metrics.totalDistanceNm);
+    }
+    if (routePoints.length > 1) {
+        return calculateRouteDistanceFromPoints(routePoints.map(point => ({
+            lat: Number(point?.lat),
+            lon: Number(point?.lng ?? point?.lon)
+        })));
+    }
+    return null;
+}
+
+function getSavedRouteDistanceNm(route) {
+    const storedDistance = Number(route?.totalDistanceNm);
+    if (Number.isFinite(storedDistance)) return storedDistance;
+    const points = Array.isArray(route?.points) ? route.points : [];
+    if (points.length < 2) return null;
+    return calculateRouteDistanceFromPoints(points);
+}
+
+function getRoutePlanningFormValues() {
+    return {
+        voyageName: String(document.getElementById('voyageNameInput')?.value || '').trim(),
+        voyageLeg: String(document.getElementById('voyageLegInput')?.value || '').trim(),
+        agendaDepartureDateTime: normalizeDateTimeLocalValue(document.getElementById('voyageDepartureInput')?.value),
+        agendaArrivalDateTime: normalizeDateTimeLocalValue(document.getElementById('voyageArrivalInput')?.value),
+        sharedWith: sanitizeSharedWithValue(document.getElementById('voyageSharedWithInput')?.value),
+        agendaNotes: String(document.getElementById('voyageNotesInput')?.value || '').trim()
+    };
+}
+
+function applyRoutePlanningForm(route) {
+    const safeRoute = route || {};
+    const voyageNameInput = document.getElementById('voyageNameInput');
+    const voyageLegInput = document.getElementById('voyageLegInput');
+    const voyageDepartureInput = document.getElementById('voyageDepartureInput');
+    const voyageArrivalInput = document.getElementById('voyageArrivalInput');
+    const voyageSharedWithInput = document.getElementById('voyageSharedWithInput');
+    const voyageNotesInput = document.getElementById('voyageNotesInput');
+
+    if (voyageNameInput) voyageNameInput.value = String(safeRoute.voyageName || '');
+    if (voyageLegInput) voyageLegInput.value = String(safeRoute.voyageLeg || '');
+    if (voyageDepartureInput) voyageDepartureInput.value = normalizeDateTimeLocalValue(safeRoute.agendaDepartureDateTime || '');
+    if (voyageArrivalInput) voyageArrivalInput.value = normalizeDateTimeLocalValue(safeRoute.agendaArrivalDateTime || '');
+    if (voyageSharedWithInput) voyageSharedWithInput.value = String(safeRoute.sharedWith || '');
+    if (voyageNotesInput) voyageNotesInput.value = String(safeRoute.agendaNotes || '');
+}
+
+function formatSignedDurationHours(totalHours) {
+    if (!Number.isFinite(totalHours)) return 'N/A';
+    const sign = totalHours < 0 ? '-' : '+';
+    return `${sign}${formatDurationHours(Math.abs(totalHours))}`;
+}
+
+function computeRoutePlanningSnapshot(route, referenceDateTime = new Date()) {
+    const safeRoute = route || {};
+    const departure = parseDateTimeLocalValue(safeRoute.agendaDepartureDateTime || '');
+    const arrival = parseDateTimeLocalValue(safeRoute.agendaArrivalDateTime || '');
+    const distanceNm = getSavedRouteDistanceNm(safeRoute);
+    const baselineSpeedKn = Number.isFinite(navLatestSpeedKn) && navLatestSpeedKn >= 4
+        ? navLatestSpeedKn
+        : ROUTE_SCHEDULE_REFERENCE_SPEED_KN;
+    const estimatedHours = Number.isFinite(distanceNm)
+        ? distanceNm / Math.max(4.5, baselineSpeedKn)
+        : null;
+    const plannedDurationHours = departure && arrival
+        ? Math.max(0, (arrival.getTime() - departure.getTime()) / (60 * 60 * 1000))
+        : null;
+    const slackHours = Number.isFinite(plannedDurationHours) && Number.isFinite(estimatedHours)
+        ? plannedDurationHours - estimatedHours
+        : null;
+    const recommendedDeparture = arrival && Number.isFinite(estimatedHours)
+        ? new Date(arrival.getTime() - estimatedHours * 60 * 60 * 1000)
+        : null;
+    const deltaToRecommendedDepartureHours = recommendedDeparture
+        ? (recommendedDeparture.getTime() - referenceDateTime.getTime()) / (60 * 60 * 1000)
+        : null;
+
+    let statusKey = 'idle';
+    let statusLabel = t('Agenda libre', 'Agenda libre', 'Open schedule');
+
+    if (recommendedDeparture && Number.isFinite(deltaToRecommendedDepartureHours)) {
+        if (deltaToRecommendedDepartureHours < -0.5) {
+            statusKey = 'late';
+            statusLabel = t('Retard potentiel', 'Retraso potencial', 'Potential delay');
+        } else if (deltaToRecommendedDepartureHours <= 12) {
+            statusKey = 'warning';
+            statusLabel = t('Fenêtre proche', 'Ventana próxima', 'Upcoming window');
+        } else {
+            statusKey = 'ok';
+            statusLabel = t('Marge planning', 'Margen de planning', 'Schedule margin');
+        }
+    } else if (departure || arrival) {
+        statusKey = 'warning';
+        statusLabel = t('Agenda partiel', 'Agenda parcial', 'Partial schedule');
+    }
+
+    const detailParts = [];
+    if (departure) detailParts.push(`${t('Départ', 'Salida', 'Departure')}: ${formatDateTimeLocalLabel(departure)}`);
+    if (arrival) detailParts.push(`${t('Arrivée', 'Llegada', 'Arrival')}: ${formatDateTimeLocalLabel(arrival)}`);
+    if (Number.isFinite(estimatedHours)) detailParts.push(`${t('Route estimée', 'Ruta estimada', 'Estimated route')}: ${formatDurationHours(estimatedHours)}`);
+    if (Number.isFinite(slackHours)) detailParts.push(`${t('Marge', 'Margen', 'Buffer')}: ${formatSignedDurationHours(slackHours)}`);
+    if (recommendedDeparture) {
+        const leadText = Number.isFinite(deltaToRecommendedDepartureHours)
+            ? (deltaToRecommendedDepartureHours < 0
+                ? `${t('dépassé de', 'superado por', 'missed by')} ${formatDurationHours(Math.abs(deltaToRecommendedDepartureHours))}`
+                : `${t('dans', 'en', 'in')} ${formatDurationHours(deltaToRecommendedDepartureHours)}`)
+            : '';
+        detailParts.push(`${t('Départ conseillé', 'Salida recomendada', 'Recommended departure')}: ${formatDateTimeLocalLabel(recommendedDeparture)}${leadText ? ` (${leadText})` : ''}`);
+    }
+
+    return {
+        departure,
+        arrival,
+        estimatedHours,
+        slackHours,
+        recommendedDeparture,
+        deltaToRecommendedDepartureHours,
+        statusKey,
+        statusLabel,
+        detailLabel: detailParts.join(' · ')
+    };
+}
+
+function updateVoyagePlanningSummary(routeOverride = null) {
+    const summaryNode = document.getElementById('voyagePlanningSummary');
+    if (!summaryNode) return;
+
+    const planningValues = getRoutePlanningFormValues();
+    const routeDraft = routeOverride || {
+        ...planningValues,
+        date: departureDate,
+        time: departureTime,
+        agendaDepartureDateTime: planningValues.agendaDepartureDateTime || `${departureDate}T${normalizeHourTime(departureTime)}`,
+        totalDistanceNm: getDraftRouteDistanceNm(),
+        points: routePoints.map(point => ({ lat: point.lat, lon: point.lng ?? point.lon }))
+    };
+    const planning = computeRoutePlanningSnapshot(routeDraft);
+
+    summaryNode.classList.remove('is-late', 'is-warning', 'is-ok');
+    if (planning.statusKey === 'late') summaryNode.classList.add('is-late');
+    if (planning.statusKey === 'warning') summaryNode.classList.add('is-warning');
+    if (planning.statusKey === 'ok') summaryNode.classList.add('is-ok');
+
+    const headerBits = [planning.statusLabel];
+    if (routeDraft.voyageName) headerBits.push(String(routeDraft.voyageName));
+    if (routeDraft.sharedWith) headerBits.push(`${t('Partagé', 'Compartido', 'Shared')}: ${String(routeDraft.sharedWith)}`);
+
+    summaryNode.textContent = [headerBits.join(' · '), planning.detailLabel]
+        .filter(Boolean)
+        .join(' — ');
+}
+
+function sanitizeVoyagePlanItem(item, fallbackIndex = 0) {
+    const type = item?.type === 'stop' ? 'stop' : 'route';
+    const waypointLat = type === 'stop' ? parseOptionalCoordinate(item?.waypointLat, -90, 90) : null;
+    const waypointLng = type === 'stop' ? parseOptionalCoordinate(item?.waypointLng, -180, 180) : null;
+    return {
+        id: String(item?.id || generateClientUuid()),
+        type,
+        routeId: type === 'route' ? String(item?.routeId || '').trim() : '',
+        departureDateTime: type === 'route' ? normalizeDateTimeLocalValue(item?.departureDateTime || '') : '',
+        startDateTime: type === 'stop' ? normalizeDateTimeLocalValue(item?.startDateTime || '') : '',
+        stopDepartureDateTime: type === 'stop' ? normalizeDateTimeLocalValue(item?.stopDepartureDateTime || '') : '',
+        stopName: type === 'stop' ? String(item?.stopName || `${t('Mouillage', 'Fondeo', 'Anchorage')} ${fallbackIndex + 1}`).trim() : '',
+        durationDays: type === 'stop' ? Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, Number(item?.durationDays || 1) || 1) : 0,
+        waypointPhotoId: type === 'stop' ? String(item?.waypointPhotoId || '').trim() : '',
+        waypointLat,
+        waypointLng,
+        notes: String(item?.notes || '').trim()
+    };
+}
+
+function sanitizeCrewMember(entry, fallbackIndex = 0) {
+    const firstName = String(entry?.prenom || entry?.firstName || '').trim();
+    const lastName = String(entry?.nom || entry?.lastName || '').trim();
+    const normalizedEmail = normalizeEmailForCompare(entry?.email || '');
+    const nowIso = new Date().toISOString();
+
+    return {
+        id: String(entry?.id || generateClientUuid()),
+        nom: lastName,
+        prenom: firstName,
+        email: normalizedEmail,
+        telephone: normalizePhoneValue(entry?.telephone || entry?.phone || ''),
+        commentaire: String(entry?.commentaire || entry?.comment || '').trim(),
+        creatorEmail: normalizeEmailForCompare(entry?.creatorEmail || ''),
+        creatorName: String(entry?.creatorName || '').trim(),
+        createdAt: String(entry?.createdAt || nowIso),
+        updatedAt: String(entry?.updatedAt || nowIso),
+        sortLabel: `${lastName} ${firstName}`.trim() || normalizedEmail || `${t('Équipier', 'Tripulante', 'Crew member')} ${fallbackIndex + 1}`
+    };
+}
+
+function getCrewMemberDisplayName(entry) {
+    const safeEntry = sanitizeCrewMember(entry || {}, 0);
+    const fullName = `${safeEntry.prenom} ${safeEntry.nom}`.trim();
+    return fullName || safeEntry.email || t('Équipier sans nom', 'Tripulante sin nombre', 'Unnamed crew member');
+}
+
+function sanitizeVoyagePlan(plan, fallbackIndex = 0) {
+    const nowIso = new Date().toISOString();
+    const crewMemberIds = Array.isArray(plan?.crewMemberIds)
+        ? Array.from(new Set(plan.crewMemberIds.map(value => String(value || '').trim()).filter(Boolean)))
+        : [];
+    return {
+        id: String(plan?.id || generateClientUuid()),
+        name: String(plan?.name || `${t('Voyage', 'Viaje', 'Trip')} ${fallbackIndex + 1}`).trim(),
+        description: String(plan?.description || '').trim(),
+        crewMemberIds,
+        items: Array.isArray(plan?.items) ? plan.items.map((item, index) => sanitizeVoyagePlanItem(item, index)) : [],
+        createdAt: String(plan?.createdAt || nowIso),
+        updatedAt: String(plan?.updatedAt || nowIso)
+    };
+}
+
+function loadCrewDirectory() {
+    try {
+        crewDirectory = loadArrayFromStorage(CREW_DIRECTORY_STORAGE_KEY)
+            .map((entry, index) => sanitizeCrewMember(entry, index))
+            .sort((a, b) => a.sortLabel.localeCompare(b.sortLabel));
+    } catch (_error) {
+        crewDirectory = [];
+    }
+
+    if (isCrewEditorDraftActive() && !selectedCrewMemberId) {
+        return;
+    }
+
+    if (!selectedCrewMemberId || !crewDirectory.some(entry => entry.id === selectedCrewMemberId)) {
+        selectedCrewMemberId = String(crewDirectory[0]?.id || '');
+    }
+}
+
+function setCrewDirectory(list, { persistLocal = true, markCloudDirty = false } = {}) {
+    crewDirectory = (Array.isArray(list) ? list : [])
+        .map((entry, index) => sanitizeCrewMember(entry, index))
+        .sort((a, b) => a.sortLabel.localeCompare(b.sortLabel));
+
+    if (isCrewEditorDraftActive() && !selectedCrewMemberId) {
+        // Preserve new-member draft mode during background refreshes.
+    } else if (!selectedCrewMemberId || !crewDirectory.some(entry => entry.id === selectedCrewMemberId)) {
+        selectedCrewMemberId = String(crewDirectory[0]?.id || '');
+    }
+
+    if (persistLocal) {
+        saveArrayToStorage(CREW_DIRECTORY_STORAGE_KEY, crewDirectory);
+    }
+    if (markCloudDirty) {
+        crewDirectoryCloudDirty = true;
+        crewDirectoryCloudRevision += 1;
+        tryFlushPendingCloudDataPush();
+    }
+}
+
+function getSelectedCrewMember() {
+    return crewDirectory.find(entry => entry.id === selectedCrewMemberId) || null;
+}
+
+function loadVoyagePlans() {
+    try {
+        voyagePlans = loadArrayFromStorage(VOYAGE_PLANS_STORAGE_KEY).map((plan, index) => normalizeVoyagePlanScheduleOverrides(plan, index));
+    } catch (_error) {
+        voyagePlans = [];
+    }
+    if (!selectedVoyagePlanId || !voyagePlans.some(plan => plan.id === selectedVoyagePlanId)) {
+        selectedVoyagePlanId = String(voyagePlans[0]?.id || '');
+    }
+}
+
+function setVoyagePlans(list, { persistLocal = true, markCloudDirty = false } = {}) {
+    voyagePlans = (Array.isArray(list) ? list : []).map((plan, index) => normalizeVoyagePlanScheduleOverrides(plan, index));
+    if (!selectedVoyagePlanId || !voyagePlans.some(plan => plan.id === selectedVoyagePlanId)) {
+        selectedVoyagePlanId = String(voyagePlans[0]?.id || '');
+    }
+    if (persistLocal) {
+        saveArrayToStorage(VOYAGE_PLANS_STORAGE_KEY, voyagePlans);
+    }
+    if (markCloudDirty) {
+        voyagePlansCloudDirty = true;
+        voyagePlansCloudRevision += 1;
+        tryFlushPendingCloudDataPush();
+    }
+}
+
+function getSelectedVoyagePlan() {
+    return voyagePlans.find(plan => plan.id === selectedVoyagePlanId) || null;
+}
+
+function setVoyagePlanStatus(message, isError = false) {
+    const node = document.getElementById('voyagePlanStatus');
+    if (!node) return;
+    node.textContent = String(message || '');
+    node.classList.toggle('is-late', !!isError);
+    node.classList.toggle('is-ok', !isError && !!message);
+}
+
+function setVoyageCrewStatus(message, isError = false) {
+    const node = document.getElementById('voyageCrewStatus');
+    if (!node) return;
+    node.textContent = String(message || '');
+    node.classList.toggle('is-late', !!isError);
+    node.classList.toggle('is-ok', !isError && !!message);
+}
+
+function clearCrewEditorDraft() {
+    crewEditorDraftState = null;
+}
+
+function isCrewEditorDraftActive() {
+    return !!crewEditorDraftState;
+}
+
+function isVoyageCrewEditorFocused() {
+    const panel = document.getElementById('voyageAgendaPanel');
+    const activeElement = document.activeElement;
+    if (!panel || !activeElement) return false;
+    if (!(activeElement instanceof HTMLElement)) return false;
+    return panel.contains(activeElement) && (
+        activeElement.id === 'voyageCrewDirectorySelectInput'
+        || activeElement.id === 'voyageCrewFirstNameInput'
+        || activeElement.id === 'voyageCrewLastNameInput'
+        || activeElement.id === 'voyageCrewEmailInput'
+        || activeElement.id === 'voyageCrewPhoneInput'
+        || activeElement.id === 'voyageCrewCommentInput'
+    );
+}
+
+function captureCrewEditorDraftFromInputs() {
+    crewEditorDraftState = {
+        memberId: String(selectedCrewMemberId || ''),
+        values: {
+            prenom: String(document.getElementById('voyageCrewFirstNameInput')?.value || ''),
+            nom: String(document.getElementById('voyageCrewLastNameInput')?.value || ''),
+            email: String(document.getElementById('voyageCrewEmailInput')?.value || ''),
+            telephone: String(document.getElementById('voyageCrewPhoneInput')?.value || ''),
+            commentaire: String(document.getElementById('voyageCrewCommentInput')?.value || '')
+        }
+    };
+}
+
+function refreshVoyageCrewEditorUi({ rerenderAgenda = false } = {}) {
+    syncCrewDirectorySelectOptions();
+    syncCrewEditorUi();
+    renderVoyageAssignedCrewList(getSelectedVoyagePlan());
+    if (rerenderAgenda) {
+        renderVoyageAgendaPanel();
+    }
+}
+
+function getVoyageAssignedCrewMembers(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    return safePlan.crewMemberIds
+        .map(id => crewDirectory.find(entry => entry.id === id) || null)
+        .filter(Boolean);
+}
+
+function syncCrewDirectorySelectOptions() {
+    const select = document.getElementById('voyageCrewDirectorySelectInput');
+    if (!select) return;
+
+    const previousValue = String(selectedCrewMemberId || select.value || '').trim();
+    const placeholderOptions = isCrewEditorDraftActive()
+        ? [`<option value="">${escapeHtml(t('Nouvel équipier en cours', 'Nuevo tripulante en curso', 'New crew member in progress'))}</option>`]
+        : [];
+    select.innerHTML = crewDirectory.length
+        ? placeholderOptions.concat(crewDirectory.map(entry => `<option value="${escapeHtml(entry.id)}">${escapeHtml(getCrewMemberDisplayName(entry))}${entry.email ? ` · ${escapeHtml(entry.email)}` : ''}</option>`)).join('')
+        : `<option value="">${escapeHtml(isCrewEditorDraftActive() ? t('Nouvel équipier en cours', 'Nuevo tripulante en curso', 'New crew member in progress') : t('Aucun équipier enregistré', 'Ningún tripulante guardado', 'No saved crew member'))}</option>`;
+
+    if (isCrewEditorDraftActive() && !selectedCrewMemberId) {
+        select.value = '';
+    } else if (previousValue && crewDirectory.some(entry => entry.id === previousValue)) {
+        select.value = previousValue;
+        selectedCrewMemberId = previousValue;
+    } else if (crewDirectory.length > 0) {
+        selectedCrewMemberId = crewDirectory[0].id;
+        select.value = selectedCrewMemberId;
+    }
+}
+
+function renderVoyageAssignedCrewList(plan) {
+    const container = document.getElementById('voyagePlanCrewList');
+    if (!container) return;
+
+    const assigned = getVoyageAssignedCrewMembers(plan);
+    if (!assigned.length) {
+        container.innerHTML = `<div class="voyage-crew-empty">${escapeHtml(t('Aucun équipier affecté à ce voyage.', 'Ningún tripulante asignado a este viaje.', 'No crew assigned to this trip.'))}</div>`;
+        return;
+    }
+
+    container.innerHTML = assigned.map(entry => `
+        <div class="voyage-crew-chip">
+            <div>
+                <strong>${escapeHtml(getCrewMemberDisplayName(entry))}</strong>
+                <div class="voyage-crew-chip__meta">${escapeHtml(entry.email || entry.telephone || t('Sans contact', 'Sin contacto', 'No contact'))}</div>
+            </div>
+            <div class="voyage-crew-chip__actions">
+                <button type="button" data-voyage-crew-action="edit-member" data-crew-member-id="${escapeHtml(entry.id)}">${escapeHtml(t('Éditer', 'Editar', 'Edit'))}</button>
+                <button type="button" data-voyage-crew-action="remove-member" data-crew-member-id="${escapeHtml(entry.id)}" data-voyage-plan-id="${escapeHtml(String(plan?.id || ''))}">${escapeHtml(t('Retirer', 'Retirar', 'Remove'))}</button>
+            </div>
+        </div>`).join('');
+}
+
+function syncCrewEditorUi() {
+    const draftValues = crewEditorDraftState?.values || null;
+    const selected = draftValues ? null : getSelectedCrewMember();
+    const firstNameInput = document.getElementById('voyageCrewFirstNameInput');
+    const lastNameInput = document.getElementById('voyageCrewLastNameInput');
+    const emailInput = document.getElementById('voyageCrewEmailInput');
+    const phoneInput = document.getElementById('voyageCrewPhoneInput');
+    const commentInput = document.getElementById('voyageCrewCommentInput');
+
+    if (firstNameInput) firstNameInput.value = String((draftValues?.prenom ?? selected?.prenom) || '');
+    if (lastNameInput) lastNameInput.value = String((draftValues?.nom ?? selected?.nom) || '');
+    if (emailInput) emailInput.value = String((draftValues?.email ?? selected?.email) || '');
+    if (phoneInput) phoneInput.value = String((draftValues?.telephone ?? selected?.telephone) || '');
+    if (commentInput) commentInput.value = String((draftValues?.commentaire ?? selected?.commentaire) || '');
+}
+
+function formatVoyageWaypointOptionLabel(entry) {
+    const safeEntry = normalizeWaypointPhotoEntry(entry);
+    if (!safeEntry) return '';
+    const title = String(safeEntry.placeName || t('Mouillage sans nom', 'Fondeo sin nombre', 'Unnamed anchorage')).trim();
+    return `${title} · ${safeEntry.lat.toFixed(4)}, ${safeEntry.lng.toFixed(4)}`;
+}
+
+function syncVoyagePlanWaypointSelectOptions() {
+    const waypointSelect = document.getElementById('voyagePlanWaypointSelectInput');
+    if (!waypointSelect) return;
+
+    const previousValue = String(waypointSelect.value || '').trim();
+    const safeEntries = waypointPhotoEntries
+        .map(normalizeWaypointPhotoEntry)
+        .filter(Boolean);
+
+    waypointSelect.innerHTML = safeEntries.length
+        ? [`<option value="">${escapeHtml(t('Choisir un waypoint enregistré', 'Elegir un waypoint guardado', 'Choose a saved waypoint'))}</option>`]
+            .concat(safeEntries.map(entry => `<option value="${escapeHtml(entry.id)}">${escapeHtml(formatVoyageWaypointOptionLabel(entry))}</option>`))
+            .join('')
+        : `<option value="">${escapeHtml(t('Aucun waypoint enregistré', 'No hay waypoints guardados', 'No saved waypoints'))}</option>`;
+
+    if (previousValue && safeEntries.some(entry => entry.id === previousValue)) {
+        waypointSelect.value = previousValue;
+    }
+}
+
+function applySelectedVoyageWaypointToStopDraft() {
+    const waypointSelect = document.getElementById('voyagePlanWaypointSelectInput');
+    const stopNameInput = document.getElementById('voyagePlanStopNameInput');
+    if (!waypointSelect || !stopNameInput) return;
+
+    const waypointId = String(waypointSelect.value || '').trim();
+    if (!waypointId) return;
+
+    const selectedWaypoint = waypointPhotoEntries.find(entry => String(entry?.id || '') === waypointId) || null;
+    if (!selectedWaypoint) return;
+
+    stopNameInput.value = String(selectedWaypoint.placeName || '').trim()
+        || `${selectedWaypoint.lat.toFixed(4)}, ${selectedWaypoint.lng.toFixed(4)}`;
+}
+
+function syncVoyagePlanEditorUi() {
+    const nameInput = document.getElementById('voyagePlanNameInput');
+    const descriptionInput = document.getElementById('voyagePlanDescriptionInput');
+    const routeSelect = document.getElementById('voyagePlanRouteSelectInput');
+    const waypointSelect = document.getElementById('voyagePlanWaypointSelectInput');
+    const activeDisplay = document.getElementById('voyagePlanActiveDisplay');
+
+    const selectedPlan = getSelectedVoyagePlan();
+    if (nameInput) nameInput.value = String(selectedPlan?.name || '');
+    if (descriptionInput) descriptionInput.value = String(selectedPlan?.description || '');
+    if (activeDisplay) {
+        activeDisplay.textContent = selectedPlan
+            ? `${t('Voyage actif', 'Viaje activo', 'Active trip')}: ${selectedPlan.name}`
+            : t('Aucun voyage actif', 'Ningún viaje activo', 'No active trip');
+    }
+
+    const routeDepartureInput = document.getElementById('voyagePlanRouteDepartureInput');
+    if (routeDepartureInput) {
+        const nextStart = getVoyagePlanNextDepartureDateTime(selectedPlan);
+        routeDepartureInput.value = formatDateTimeLocalInputValue(nextStart);
+    }
+
+    if (routeSelect) {
+        const routes = getSavedRoutes();
+        routeSelect.innerHTML = routes.length
+            ? routes.map(route => `<option value="${escapeHtml(route.id)}">${escapeHtml(route.name)}${Number.isFinite(getSavedRouteDistanceNm(route)) ? ` · ${escapeHtml(getSavedRouteDistanceNm(route).toFixed(1))} NM` : ''}</option>`).join('')
+            : `<option value="">${escapeHtml(t('Aucune route sauvegardée', 'No hay rutas guardadas', 'No saved routes'))}</option>`;
+    }
+
+    if (waypointSelect) {
+        syncVoyagePlanWaypointSelectOptions();
+    }
+
+    syncCrewDirectorySelectOptions();
+    syncCrewEditorUi();
+    renderVoyageAssignedCrewList(selectedPlan);
+}
+
+function renderVoyagesSidebar(planEntries) {
+    const container = document.getElementById('voyagesSidebarList');
+    if (!container) return;
+
+    if (!planEntries.length) {
+        container.innerHTML = `<div class="voyage-agenda-empty" style="min-height:120px;">${escapeHtml(t('Aucun voyage créé pour le moment.', 'No hay viajes creados por ahora.', 'No trips created yet.'))}</div>`;
+        return;
+    }
+
+    container.innerHTML = planEntries.map(({ plan, timeline }) => {
+        const nextDeparture = timeline.find(entry => entry.departure)?.departure || null;
+        const totalStops = timeline.filter(entry => entry.type === 'stop').length;
+        const totalCrew = sanitizeVoyagePlan(plan, 0).crewMemberIds.length;
+        const isActive = plan.id === selectedVoyagePlanId;
+        return `
+            <button type="button" class="voyages-sidebar-item ${isActive ? 'is-active' : ''}" data-voyage-plan-action="select" data-voyage-plan-id="${escapeHtml(plan.id)}">
+                <div class="voyages-sidebar-item__title">${escapeHtml(plan.name)}</div>
+                <div class="voyages-sidebar-item__meta">${timeline.length} ${escapeHtml(t('étape(s)', 'etapa(s)', 'item(s)'))} · ${totalStops} ${escapeHtml(t('mouillage(s)', 'fondeo(s)', 'stop(s)'))} · ${totalCrew} ${escapeHtml(t('équipier(s)', 'tripulante(s)', 'crew'))}</div>
+                <div class="voyages-sidebar-item__meta">${escapeHtml(nextDeparture ? formatDateTimeLocalLabel(nextDeparture) : t('Aucune date de départ', 'Sin fecha de salida', 'No departure date'))}</div>
+            </button>`;
+    }).join('');
+}
+
+function computeVoyagePlanTimeline(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const routesById = new Map(getSavedRoutes().map(route => [String(route.id || ''), route]));
+    const editableRouteItemId = getEditableVoyageRouteItemId(safePlan);
+    let cursor = null;
+
+    return safePlan.items.map((item, index) => {
+        if (item.type === 'route') {
+            const route = routesById.get(item.routeId) || null;
+            const distanceNm = route ? (getSavedRouteDistanceNm(route) || 0) : 0;
+            const estimatedHours = Number.isFinite(distanceNm) && distanceNm > 0
+                ? distanceNm / Math.max(4.5, Number.isFinite(navLatestSpeedKn) && navLatestSpeedKn >= 4 ? navLatestSpeedKn : ROUTE_SCHEDULE_REFERENCE_SPEED_KN)
+                : null;
+            const explicitDeparture = item.id === editableRouteItemId ? parseDateTimeLocalValue(item.departureDateTime || '') : null;
+            const departure = explicitDeparture || cursor;
+            const arrival = departure && Number.isFinite(estimatedHours)
+                ? new Date(departure.getTime() + estimatedHours * 60 * 60 * 1000)
+                : null;
+            cursor = arrival || cursor;
+            return {
+                id: item.id,
+                type: 'route',
+                item,
+                route,
+                routeIndex: getSavedRoutes().findIndex(savedRoute => String(savedRoute.id || '') === String(route?.id || '')),
+                title: route?.voyageLeg || route?.name || t('Route manquante', 'Ruta faltante', 'Missing route'),
+                subtitle: route?.name || t('Route supprimée ou indisponible', 'Ruta eliminada o no disponible', 'Deleted or unavailable route'),
+                departure,
+                arrival,
+                distanceNm,
+                estimatedHours,
+                timelineLabel: departure && arrival
+                    ? `${formatDateTimeLocalLabel(departure)} -> ${formatDateTimeLocalLabel(arrival)}`
+                    : t('Départ à fixer pour calculer l\'arrivée.', 'Fijar salida para calcular la llegada.', 'Set departure to calculate arrival.'),
+                statusLabel: arrival ? t('ETA calculée', 'ETA calculada', 'ETA computed') : t('À planifier', 'Por planificar', 'To plan'),
+                statusKey: arrival ? 'ok' : 'warning'
+            };
+        }
+
+        const start = cursor;
+        const explicitDeparture = parseDateTimeLocalValue(item.stopDepartureDateTime || '');
+        const computedDurationDays = Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, Number(item.durationDays || 1) || 1);
+        const end = start
+            ? (explicitDeparture && explicitDeparture.getTime() > start.getTime()
+                ? explicitDeparture
+                : getAnchorageEndDateTime(start, computedDurationDays))
+            : null;
+        const durationDays = start && end
+            ? Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, (end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))
+            : computedDurationDays;
+        cursor = end || cursor;
+        return {
+            id: item.id,
+            type: 'stop',
+            item,
+            title: item.stopName || t('Mouillage', 'Fondeo', 'Anchorage'),
+            subtitle: t('Étape mouillage', 'Etapa fondeo', 'Anchorage leg'),
+            departure: start,
+            arrival: end,
+            durationDays,
+            timelineLabel: start && end
+                ? `${formatDateTimeLocalLabel(start)} -> ${formatDateTimeLocalLabel(end)}`
+                : t('Se cale après la dernière route datée.', 'Se coloca después de la última ruta fechada.', 'Fits after the last dated route.'),
+            statusLabel: `${durationDays.toFixed(1)} ${t('jour(s)', 'día(s)', 'day(s)')}`,
+            statusKey: end ? 'ok' : 'warning'
+        };
+    });
+}
+
+function startOfLocalDay(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const next = new Date(date.getTime());
+    next.setHours(0, 0, 0, 0);
+    return next;
+}
+
+function addDays(date, days) {
+    const next = new Date(date.getTime());
+    next.setDate(next.getDate() + days);
+    return next;
+}
+
+function getStartOfLocalWeek(date) {
+    const base = startOfLocalDay(date);
+    if (!base) return null;
+    const dayIndex = base.getDay();
+    const mondayOffset = dayIndex === 0 ? -6 : 1 - dayIndex;
+    return addDays(base, mondayOffset);
+}
+
+function formatVoyageAgendaDayLabel(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString(getCurrentLocale(), {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short'
+    });
+}
+
+function formatVoyageAgendaWeekLabel(weekStart) {
+    if (!(weekStart instanceof Date) || Number.isNaN(weekStart.getTime())) return '';
+    const weekEnd = addDays(weekStart, 6);
+    return `${weekStart.toLocaleDateString(getCurrentLocale(), { day: '2-digit', month: 'short' })} - ${weekEnd.toLocaleDateString(getCurrentLocale(), { day: '2-digit', month: 'short' })}`;
+}
+
+function formatVoyageAgendaTimeLabel(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString(getCurrentLocale(), {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function updateVoyageCalendarHandleLabel(handleNode, date) {
+    if (!handleNode) return;
+    const timeLabel = formatVoyageAgendaTimeLabel(date) || '--:--';
+    handleNode.textContent = timeLabel;
+    handleNode.setAttribute('data-handle-time', timeLabel);
+}
+
+function buildVoyageAgendaWeeks(timeline, editableItemId = '') {
+    const scheduledEntries = (timeline || []).filter(entry => entry.departure instanceof Date && entry.arrival instanceof Date);
+    if (!scheduledEntries.length) return [];
+
+    const firstDeparture = scheduledEntries.reduce((minValue, entry) => !minValue || entry.departure < minValue ? entry.departure : minValue, null);
+    const lastArrival = scheduledEntries.reduce((maxValue, entry) => !maxValue || entry.arrival > maxValue ? entry.arrival : maxValue, null);
+    const firstWeekStart = getStartOfLocalWeek(firstDeparture);
+    const lastWeekStart = getStartOfLocalWeek(lastArrival);
+    const weeks = [];
+    const weekDurationMs = 7 * 24 * 60 * 60 * 1000;
+
+    for (let weekStart = firstWeekStart; weekStart && lastWeekStart && weekStart <= lastWeekStart; weekStart = addDays(weekStart, 7)) {
+        const weekEnd = addDays(weekStart, 7);
+        const days = Array.from({ length: 7 }, (_, dayOffset) => addDays(weekStart, dayOffset));
+        const items = scheduledEntries
+            .filter(entry => entry.arrival > weekStart && entry.departure < weekEnd)
+            .map(entry => {
+                const clippedStart = entry.departure > weekStart ? entry.departure : weekStart;
+                const clippedEnd = entry.arrival < weekEnd ? entry.arrival : weekEnd;
+                const leftPct = ((clippedStart.getTime() - weekStart.getTime()) / weekDurationMs) * 100;
+                const widthPct = Math.max(((clippedEnd.getTime() - clippedStart.getTime()) / weekDurationMs) * 100, 2.2);
+                return {
+                    id: entry.id,
+                    type: entry.type,
+                    title: entry.title,
+                    subtitle: entry.subtitle,
+                    isDerived: entry.type !== 'route' || !entry.item?.departureDateTime,
+                    isScheduleEditable: entry.id === editableItemId,
+                    canResizeDeparture: entry.type === 'stop' && entry.arrival >= weekStart && entry.arrival < weekEnd,
+                    startLabel: formatVoyageAgendaTimeLabel(entry.departure),
+                    endLabel: formatVoyageAgendaTimeLabel(entry.arrival),
+                    dragHandleLabel: formatVoyageAgendaTimeLabel(entry.departure),
+                    resizeHandleLabel: formatVoyageAgendaTimeLabel(entry.arrival),
+                    leftPct,
+                    widthPct
+                };
+            });
+
+        weeks.push({
+            weekStart,
+            label: formatVoyageAgendaWeekLabel(weekStart),
+            days,
+            items
+        });
+    }
+
+    return weeks;
+}
+
+function renderVoyageScheduleCalendar(timeline, editableItemId = '') {
+    const weeks = buildVoyageAgendaWeeks(timeline, editableItemId);
+    if (!weeks.length) {
+        return `
+            <section class="voyage-calendar-card">
+                <div class="voyage-calendar-card__header">
+                    <div>
+                        <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Agenda du voyage', 'Agenda del viaje', 'Trip agenda'))}</div>
+                        <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('La vue calendrier s’active dès qu’au moins une étape est datée.', 'La vista calendario aparece cuando al menos una etapa tiene fecha.', 'The calendar view appears once at least one leg is dated.'))}</div>
+                    </div>
+                </div>
+                <div class="voyage-calendar-card__empty">${escapeHtml(t('Ajoute une date de départ pour voir le voyage comme un agenda.', 'Añade una fecha de salida para ver el viaje como agenda.', 'Add a departure date to see the trip as a calendar.'))}</div>
+            </section>`;
+    }
+
+    return `
+        <section class="voyage-calendar-card">
+            <div class="voyage-calendar-card__header">
+                <div>
+                    <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Agenda du voyage', 'Agenda del viaje', 'Trip agenda'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Vue semaine inspirée d’un calendrier pour lire rapidement routes et mouillages.', 'Vista semanal inspirada en un calendario para leer rápido rutas y fondeos.', 'Week view inspired by a calendar for quickly reading routes and anchorages.'))}</div>
+                </div>
+            </div>
+            <div class="voyage-calendar-weeks">
+                ${weeks.map(week => `
+                    <section class="voyage-calendar-week">
+                        <div class="voyage-calendar-week__title">${escapeHtml(week.label)}</div>
+                        <div class="voyage-calendar-week__header">
+                            ${week.days.map(day => `<div class="voyage-calendar-week__day">${escapeHtml(formatVoyageAgendaDayLabel(day))}</div>`).join('')}
+                        </div>
+                        <div class="voyage-calendar-week__body" data-voyage-week-start="${escapeHtml(formatDateTimeLocalInputValue(week.weekStart).slice(0, 10))}">
+                            <div class="voyage-calendar-grid">
+                                ${Array.from({ length: 7 }, (_, index) => `<div class="voyage-calendar-grid__col" style="left:${(index / 7) * 100}%; width:${100 / 7}%;"></div>`).join('')}
+                            </div>
+                            <div class="voyage-calendar-items">
+                                ${week.items.map(item => `
+                                    <div class="voyage-calendar-row">
+                                        <article class="voyage-calendar-item voyage-calendar-item--${escapeHtml(item.type)}${item.isDerived ? ' is-derived' : ''}${item.isScheduleEditable ? ' is-schedule-editable' : ''}${activeVoyageMapItemId === item.id ? ' is-active' : ''}" data-voyage-map-item-id="${escapeHtml(item.id)}"${item.isScheduleEditable ? ' draggable="true"' : ''} style="left:${escapeHtml(item.leftPct.toFixed(2))}%; width:${escapeHtml(item.widthPct.toFixed(2))}%;">
+                                            ${item.isScheduleEditable ? `<div class="voyage-calendar-item__drag-handle" title="${escapeHtml(t('Glisser pour déplacer le départ', 'Arrastra para mover la salida', 'Drag to move departure'))}" data-handle-time="${escapeHtml(item.dragHandleLabel || '--:--')}">${escapeHtml(item.dragHandleLabel || '--:--')}</div>` : ''}
+                                            <div class="voyage-calendar-item__title">${escapeHtml(item.title)}</div>
+                                            <div class="voyage-calendar-item__meta">${escapeHtml(item.startLabel)} - ${escapeHtml(item.endLabel)}</div>
+                                            ${item.canResizeDeparture ? `<button type="button" class="voyage-calendar-item__resize-handle" data-voyage-resize-handle="true" aria-label="${escapeHtml(t('Modifier le départ du mouillage', 'Modificar salida del fondeo', 'Adjust anchorage departure'))}" title="${escapeHtml(t('Tirer pour modifier le départ du mouillage', 'Tira para modificar la salida del fondeo', 'Drag to adjust anchorage departure'))}" data-handle-time="${escapeHtml(item.resizeHandleLabel || '--:--')}">${escapeHtml(item.resizeHandleLabel || '--:--')}</button>` : ''}
+                                        </article>
+                                    </div>`).join('')}
+                            </div>
+                        </div>
+                    </section>`).join('')}
+            </div>
+        </section>`;
+}
+
+function getVoyageWeatherIcon(weatherCode) {
+    const safeCode = Number(weatherCode);
+    if (!Number.isFinite(safeCode)) return '◌';
+    if (safeCode >= 95) return '⛈';
+    if (safeCode >= 80) return '🌦';
+    if (safeCode >= 71) return '❄️';
+    if (safeCode >= 61) return '🌧';
+    if (safeCode >= 45) return '🌫';
+    if (safeCode === 0) return '☀️';
+    if (safeCode <= 3) return '⛅';
+    return '☁️';
+}
+
+function formatVoyageAgendaHalfDayLabel(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    const label = date.getHours() < 12
+        ? t('Matin', 'Mañana', 'Morning')
+        : t('Après-midi', 'Tarde', 'Afternoon');
+    return `${formatVoyageAgendaDayLabel(date)} · ${label}`;
+}
+
+function buildVoyageAgendaWeatherSlots(timeline) {
+    const scheduledEntries = (timeline || []).filter(entry => entry.departure instanceof Date && entry.arrival instanceof Date);
+    if (!scheduledEntries.length) return [];
+
+    const anchors = new Map();
+    let lastKnownAnchor = null;
+    scheduledEntries.forEach(entry => {
+        if (entry.type === 'route') {
+            const anchor = getVoyageEntryAnchorPoint(entry);
+            if (anchor) {
+                lastKnownAnchor = anchor;
+            }
+        }
+        if (lastKnownAnchor) {
+            anchors.set(entry.id, lastKnownAnchor);
+        }
+    });
+
+    const firstDeparture = scheduledEntries.reduce((minValue, entry) => !minValue || entry.departure < minValue ? entry.departure : minValue, null);
+    const lastArrival = scheduledEntries.reduce((maxValue, entry) => !maxValue || entry.arrival > maxValue ? entry.arrival : maxValue, null);
+    const firstDay = startOfLocalDay(firstDeparture);
+    const lastDay = startOfLocalDay(lastArrival);
+    if (!firstDay || !lastDay) return [];
+
+    const slots = [];
+    for (let dayCursor = new Date(firstDay.getTime()); dayCursor <= lastDay; dayCursor = addDays(dayCursor, 1)) {
+        [8, 16].forEach(hour => {
+            const slotDate = new Date(dayCursor.getTime());
+            slotDate.setHours(hour, 0, 0, 0);
+            if (slotDate < firstDeparture || slotDate > lastArrival) return;
+
+            const activeEntry = scheduledEntries.find(entry => slotDate >= entry.departure && slotDate < entry.arrival)
+                || [...scheduledEntries].reverse().find(entry => slotDate >= entry.departure)
+                || scheduledEntries[0];
+            const anchor = activeEntry ? anchors.get(activeEntry.id) || null : null;
+            if (!anchor) return;
+
+            slots.push({
+                key: `${slotDate.toISOString()}|${activeEntry.id}`,
+                label: formatVoyageAgendaHalfDayLabel(slotDate),
+                slotDate,
+                entryId: activeEntry.id,
+                entryTitle: activeEntry.title,
+                anchor
+            });
+        });
+    }
+
+    return slots;
+}
+
+function renderVoyageWeatherCardHtml(slot, weather, options = {}) {
+    const { error = null, loading = false } = options;
+    if (loading) {
+        return `
+            <article class="voyage-weather-card is-loading" data-voyage-weather-slot="${escapeHtml(slot.key)}">
+                <div class="voyage-weather-card__topline">${escapeHtml(slot.label)}</div>
+                <div class="voyage-weather-card__body">
+                    <div class="voyage-weather-card__icon">…</div>
+                    <div>
+                        <div class="voyage-weather-card__title">${escapeHtml(slot.entryTitle)}</div>
+                        <div class="voyage-weather-card__meta">${escapeHtml(t('Chargement météo…', 'Cargando meteo…', 'Loading weather…'))}</div>
+                    </div>
+                </div>
+            </article>`;
+    }
+
+    if (error || !weather) {
+        return `
+            <article class="voyage-weather-card voyage-weather-card--unavailable" data-voyage-weather-slot="${escapeHtml(slot.key)}">
+                <div class="voyage-weather-card__topline">${escapeHtml(slot.label)}</div>
+                <div class="voyage-weather-card__body">
+                    <div class="voyage-weather-card__icon">◌</div>
+                    <div>
+                        <div class="voyage-weather-card__title">${escapeHtml(slot.entryTitle)}</div>
+                        <div class="voyage-weather-card__meta">${escapeHtml(t('Prévision indisponible', 'Previsión no disponible', 'Forecast unavailable'))}</div>
+                    </div>
+                </div>
+            </article>`;
+    }
+
+    const impact = computeWeatherImpactLabel(weather);
+    const impactClassName = String(impact.className || '').replace(/\bweather-card\b/g, '').trim();
+    const windLabel = Number.isFinite(weather.windSpeed) ? `${weather.windSpeed.toFixed(0)} kn` : 'N/A';
+    const waveLabel = Number.isFinite(weather.waveHeight) ? `${weather.waveHeight.toFixed(1)} m` : 'N/A';
+    const tempLabel = Number.isFinite(weather.temperature) ? `${weather.temperature.toFixed(0)}°C` : 'N/A';
+    const rainLabel = Number.isFinite(weather.precipitation) ? `${weather.precipitation.toFixed(1)} mm` : 'N/A';
+    const directionLabel = Number.isFinite(weather.windDirection) ? `${Math.round(weather.windDirection)}° ${degreesToCardinalFr(weather.windDirection)}` : 'N/A';
+    const summaryLabel = weatherCodeToLabel(weather.weatherCode);
+
+    return `
+        <article class="voyage-weather-card ${escapeHtml(impactClassName)}" data-voyage-weather-slot="${escapeHtml(slot.key)}">
+            <div class="voyage-weather-card__topline">${escapeHtml(slot.label)}</div>
+            <div class="voyage-weather-card__body">
+                <div class="voyage-weather-card__icon">${escapeHtml(getVoyageWeatherIcon(weather.weatherCode))}</div>
+                <div>
+                    <div class="voyage-weather-card__title">${escapeHtml(slot.entryTitle)}</div>
+                    <div class="voyage-weather-card__meta">${escapeHtml(summaryLabel)} · ${escapeHtml(impact.text)} · ${escapeHtml(directionLabel)}</div>
+                </div>
+            </div>
+            <div class="voyage-weather-card__metrics">
+                <span>${escapeHtml(t('Vent', 'Viento', 'Wind'))}: <strong>${escapeHtml(windLabel)}</strong></span>
+                <span>${escapeHtml(t('Vagues', 'Olas', 'Waves'))}: <strong>${escapeHtml(waveLabel)}</strong></span>
+                <span>${escapeHtml(t('Air', 'Aire', 'Air'))}: <strong>${escapeHtml(tempLabel)}</strong></span>
+                <span>${escapeHtml(t('Pluie', 'Lluvia', 'Rain'))}: <strong>${escapeHtml(rainLabel)}</strong></span>
+            </div>
+        </article>`;
+}
+
+function renderVoyageAgendaWeatherSummary(timeline) {
+    const slots = buildVoyageAgendaWeatherSlots(timeline);
+    if (!slots.length) return '';
+
+    return `
+        <section class="voyage-weather-summary-card">
+            <div class="voyage-weather-summary-card__header">
+                <div>
+                    <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Météo du voyage', 'Meteo del viaje', 'Trip weather'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Résumé prévu par demi-journée le long du voyage.', 'Resumen previsto por medias jornadas a lo largo del viaje.', 'Half-day forecast summary along the trip.'))}</div>
+                </div>
+            </div>
+            <div id="voyageAgendaWeatherSummary" class="voyage-weather-summary-grid">
+                ${slots.map(slot => renderVoyageWeatherCardHtml(slot, null, { loading: true })).join('')}
+            </div>
+        </section>`;
+}
+
+async function hydrateVoyageAgendaWeatherSummary(timeline, hydrationToken) {
+    const container = document.getElementById('voyageAgendaWeatherSummary');
+    if (!container) return;
+
+    const slots = buildVoyageAgendaWeatherSlots(timeline);
+    if (!slots.length) return;
+
+    const results = await Promise.all(slots.map(async slot => {
+        try {
+            const date = `${slot.slotDate.getFullYear()}-${String(slot.slotDate.getMonth() + 1).padStart(2, '0')}-${String(slot.slotDate.getDate()).padStart(2, '0')}`;
+            const hour = `${String(slot.slotDate.getHours()).padStart(2, '0')}:00`;
+            const weather = await getWeatherAtDateHour(slot.anchor.lat, slot.anchor.lng, date, hour);
+            return { slot, weather, error: null };
+        } catch (error) {
+            return { slot, weather: null, error };
+        }
+    }));
+
+    if (hydrationToken !== voyageAgendaWeatherHydrationToken) return;
+    container.innerHTML = results.map(result => renderVoyageWeatherCardHtml(result.slot, result.weather, { error: result.error })).join('');
+}
+
+function getVoyageEntryAnchorPoint(entry) {
+    if (entry?.type === 'stop') {
+        const lat = parseOptionalCoordinate(entry?.item?.waypointLat, -90, 90);
+        const lng = parseOptionalCoordinate(entry?.item?.waypointLng, -180, 180);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            return { lat, lng };
+        }
+    }
+    if (entry?.type === 'route') {
+        const points = Array.isArray(entry?.route?.points) ? entry.route.points : [];
+        const lastPoint = points[points.length - 1];
+        const lat = Number(lastPoint?.lat);
+        const lng = Number(lastPoint?.lon ?? lastPoint?.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            return { lat, lng };
+        }
+    }
+    return null;
+}
+
+function buildVoyagePreviewGeometry(timeline) {
+    const segments = [];
+    const markers = [];
+    let previousAnchor = null;
+
+    timeline.forEach((entry, index) => {
+        if (entry.type === 'route') {
+            const points = Array.isArray(entry?.route?.points) ? entry.route.points : [];
+            const latlngs = points
+                .map(point => {
+                    const lat = Number(point?.lat);
+                    const lng = Number(point?.lon ?? point?.lng);
+                    return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+                })
+                .filter(Boolean);
+
+            if (latlngs.length >= 2) {
+                const arrivalLabel = entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : '';
+                segments.push({
+                    latlngs,
+                    title: entry.title,
+                    detailLabel: arrivalLabel,
+                    type: 'route',
+                    itemId: entry.id,
+                    isDerived: !entry.item?.departureDateTime
+                });
+                if (index === 0) {
+                    markers.push({
+                        latlng: latlngs[0],
+                        label: `D1`,
+                        title: entry.title,
+                        detailLabel: entry.departure ? formatDateTimeLocalLabel(entry.departure) : '',
+                        itemId: entry.id,
+                        kind: 'departure'
+                    });
+                }
+                const endPoint = latlngs[latlngs.length - 1];
+                markers.push({
+                    latlng: endPoint,
+                    label: `E${index + 1}`,
+                    title: entry.title,
+                    detailLabel: arrivalLabel,
+                    itemId: entry.id,
+                    kind: 'arrival'
+                });
+                previousAnchor = { lat: endPoint[0], lng: endPoint[1] };
+            }
+            return;
+        }
+
+        if (previousAnchor) {
+            markers.push({
+                latlng: [previousAnchor.lat, previousAnchor.lng],
+                label: `M${index + 1}`,
+                title: entry.title,
+                detailLabel: entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : '',
+                itemId: entry.id,
+                kind: 'stop'
+            });
+        }
+    });
+
+    return { segments, markers };
+}
+
+function renderVoyagePreviewMap(timeline) {
+    const mapNode = document.getElementById('voyageAgendaMap');
+    const emptyNode = document.getElementById('voyageAgendaMapEmpty');
+    if (!mapNode || !emptyNode) return;
+
+    const geometry = buildVoyagePreviewGeometry(timeline || []);
+    const hasGeometry = geometry.segments.length > 0 || geometry.markers.length > 0;
+    emptyNode.style.display = hasGeometry ? 'none' : 'flex';
+
+    if (!hasGeometry) {
+        if (voyagePreviewOverlayLayer && voyagePreviewMap) {
+            voyagePreviewMap.removeLayer(voyagePreviewOverlayLayer);
+            voyagePreviewOverlayLayer = null;
+        }
+        return;
+    }
+
+    if (voyagePreviewMap && voyagePreviewMapContainer !== mapNode) {
+        voyagePreviewMap.remove();
+        voyagePreviewMap = null;
+        voyagePreviewOverlayLayer = null;
+        voyagePreviewMapContainer = null;
+    }
+
+    if (!voyagePreviewMap) {
+        voyagePreviewMap = L.map(mapNode, {
+            zoomControl: true,
+            attributionControl: false
+        }).setView([39.5, 2.8], 6);
+        voyagePreviewMapContainer = mapNode;
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap',
+            crossOrigin: true
+        }).addTo(voyagePreviewMap);
+    }
+
+    if (voyagePreviewOverlayLayer && voyagePreviewMap.hasLayer(voyagePreviewOverlayLayer)) {
+        voyagePreviewMap.removeLayer(voyagePreviewOverlayLayer);
+    }
+
+    const layers = [];
+    const focusLayers = [];
+    geometry.segments.forEach(segment => {
+        const isFocused = activeVoyageMapItemId && segment.itemId === activeVoyageMapItemId;
+        const routeTooltip = segment.detailLabel ? `${segment.title} · ${segment.detailLabel}` : segment.title;
+        const routeLayer = L.polyline(segment.latlngs, {
+            color: isFocused ? '#fff1a6' : (segment.isDerived ? '#f6c66e' : '#8fe7ff'),
+            weight: isFocused ? 6 : (segment.isDerived ? 3 : 4),
+            opacity: 0.9,
+            dashArray: segment.isDerived ? '8 6' : null
+        }).bindTooltip(routeTooltip, {
+            permanent: true,
+            direction: 'center',
+            className: 'voyage-map-route-tooltip'
+        });
+        layers.push(routeLayer);
+        if (isFocused) focusLayers.push(routeLayer);
+    });
+
+    geometry.markers.forEach(marker => {
+        const isFocused = activeVoyageMapItemId && marker.itemId === activeVoyageMapItemId;
+        const fillColor = marker.kind === 'stop'
+            ? '#ff9a3a'
+            : (marker.kind === 'departure' ? '#6ee7a8' : '#7cc9ff');
+        const markerTooltip = marker.detailLabel
+            ? `${marker.label} · ${marker.title} · ${marker.detailLabel}`
+            : `${marker.label} · ${marker.title}`;
+        const markerLayer = L.circleMarker(marker.latlng, {
+            radius: isFocused ? 9 : 7,
+            color: isFocused ? '#fff1a6' : '#ffffff',
+            weight: isFocused ? 3 : 2,
+            fillColor,
+            fillOpacity: 0.95
+        }).bindTooltip(markerTooltip, {
+            permanent: true,
+            direction: marker.kind === 'stop' ? 'top' : 'right',
+            className: marker.kind === 'stop' ? 'voyage-map-stop-tooltip' : 'voyage-map-marker-tooltip'
+        });
+        layers.push(markerLayer);
+        if (isFocused) focusLayers.push(markerLayer);
+    });
+
+    voyagePreviewOverlayLayer = L.layerGroup(layers).addTo(voyagePreviewMap);
+
+    if (focusLayers.length > 0) {
+        const focusBounds = L.latLngBounds([]);
+        focusLayers.forEach(layer => {
+            if (typeof layer.getBounds === 'function') {
+                focusBounds.extend(layer.getBounds());
+                return;
+            }
+            if (typeof layer.getLatLng === 'function') {
+                focusBounds.extend(layer.getLatLng());
+            }
+        });
+        if (focusBounds.isValid()) {
+            voyagePreviewMap.fitBounds(focusBounds, { padding: [36, 36], maxZoom: 11 });
+        }
+    } else {
+        const boundsPoints = [];
+        geometry.segments.forEach(segment => boundsPoints.push(...segment.latlngs));
+        geometry.markers.forEach(marker => boundsPoints.push(marker.latlng));
+        if (boundsPoints.length > 0) {
+            voyagePreviewMap.fitBounds(boundsPoints, { padding: [24, 24] });
+        }
+    }
+
+    window.setTimeout(() => {
+        try {
+            voyagePreviewMap.invalidateSize();
+        } catch (_error) {
+            // Ignore transient map sizing errors during rerender.
+        }
+    }, 0);
+}
+
+function renderVoyageAgendaPanel() {
+    const contentNode = document.getElementById('voyageAgendaContent');
+    const panelNode = document.getElementById('voyageAgendaPanel');
+    if (!contentNode) return;
+
+    if (panelNode) {
+        panelNode.classList.toggle('voyage-agenda-panel--map-focus', isVoyageMapExpanded);
+    }
+
+    syncVoyagePlanEditorUi();
+
+    const planEntries = voyagePlans.map(plan => ({
+        plan,
+        timeline: computeVoyagePlanTimeline(plan)
+    }));
+
+    const filteredPlanEntries = planEntries.filter(({ plan, timeline }) => {
+        const crewNames = getVoyageAssignedCrewMembers(plan).map(entry => getCrewMemberDisplayName(entry)).join(' ');
+        const haystack = [
+            plan.name,
+            plan.description,
+            crewNames,
+            ...timeline.map(entry => `${entry.title} ${entry.subtitle} ${entry.item?.notes || ''}`)
+        ].join(' ').toLowerCase();
+        return !voyageAgendaSearchTerm.trim() || haystack.includes(voyageAgendaSearchTerm.toLowerCase().trim());
+    });
+
+    renderVoyagesSidebar(filteredPlanEntries);
+
+    const activePlanEntry = filteredPlanEntries.find(entry => entry.plan.id === selectedVoyagePlanId)
+        || filteredPlanEntries[0]
+        || null;
+
+    if (!activePlanEntry) {
+        contentNode.innerHTML = `<div class="voyage-agenda-empty">${escapeHtml(t('Crée un voyage, puis ajoute une route déjà sauvegardée et une date de départ.', 'Crea un viaje y luego añade una ruta guardada con una fecha de salida.', 'Create a trip, then add a saved route and a departure date.'))}</div>`;
+        return;
+    }
+
+    contentNode.innerHTML = (() => {
+        const { plan, timeline } = activePlanEntry;
+        if (timeline.length > 0 && !timeline.some(entry => entry.id === activeVoyageMapItemId)) {
+            activeVoyageMapItemId = timeline[0].id;
+        }
+        const editableRouteItemId = timeline.find(entry => entry.type === 'route')?.id || '';
+        const totalDistance = timeline.filter(entry => entry.type === 'route').reduce((sum, entry) => sum + (entry.distanceNm || 0), 0);
+        const endDate = [...timeline].reverse().find(entry => entry.arrival)?.arrival || null;
+        const assignedCrew = getVoyageAssignedCrewMembers(plan);
+        const isSelected = plan.id === selectedVoyagePlanId;
+        return `
+            <section class="voyage-agenda-voyage" data-voyage-plan-id="${escapeHtml(plan.id)}">
+                <header class="voyage-agenda-voyage__header">
+                    <div>
+                        <div class="voyage-agenda-voyage__meta">${escapeHtml(t('Voyage', 'Viaje', 'Trip'))}${isSelected ? ` · ${escapeHtml(t('actif', 'activo', 'active'))}` : ''}</div>
+                        <div class="voyage-agenda-voyage__title">${escapeHtml(plan.name)}</div>
+                        <div class="voyage-agenda-voyage__desc">${escapeHtml(plan.description || t('Aucune description pour ce voyage.', 'Sin descripción para este viaje.', 'No description for this trip.'))}</div>
+                        <div class="voyage-agenda-voyage__timeline-note">${assignedCrew.length ? escapeHtml(`${t('Équipage', 'Tripulación', 'Crew')}: ${assignedCrew.map(entry => getCrewMemberDisplayName(entry)).join(', ')}`) : escapeHtml(t('Équipage non défini.', 'Tripulación no definida.', 'Crew not defined.'))}</div>
+                    </div>
+                    <div>
+                        <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Éléments', 'Elementos', 'Items'))}</div>
+                        <div class="voyage-agenda-voyage__stat-value">${timeline.length}</div>
+                    </div>
+                    <div>
+                        <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Distance', 'Distancia', 'Distance'))}</div>
+                        <div class="voyage-agenda-voyage__stat-value">${escapeHtml(totalDistance.toFixed(1))}<span style="font-size:12px; margin-left:4px;">NM</span></div>
+                    </div>
+                    <div>
+                        <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Fin', 'Fin', 'End'))}</div>
+                        <div class="voyage-agenda-voyage__stat-value" style="font-size:15px; line-height:1.35;">${escapeHtml(endDate ? formatDateTimeLocalLabel(endDate) : t('Non planifiée', 'Sin planificar', 'Unscheduled'))}</div>
+                    </div>
+                </header>
+                <div class="voyage-agenda-display-toolbar">
+                    <button type="button" class="voyage-agenda-display-toolbar__btn${isVoyageCalendarVisible ? ' is-active' : ''}" data-voyage-map-action="toggle-calendar">${escapeHtml(isVoyageCalendarVisible ? t('Masquer agenda', 'Ocultar agenda', 'Hide agenda') : t('Afficher agenda', 'Mostrar agenda', 'Show agenda'))}</button>
+                    <button type="button" class="voyage-agenda-display-toolbar__btn${isVoyageWeatherVisible ? ' is-active' : ''}" data-voyage-map-action="toggle-weather">${escapeHtml(isVoyageWeatherVisible ? t('Masquer météo', 'Ocultar meteo', 'Hide weather') : t('Afficher météo', 'Mostrar meteo', 'Show weather'))}</button>
+                </div>
+                <div class="voyage-agenda-map-card">
+                    <div class="voyage-agenda-map-card__header">
+                        <div>
+                            <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Carte du voyage', 'Mapa del viaje', 'Trip map'))}</div>
+                            <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Routes tracées + mouillages positionnés sur les arrivées.', 'Rutas trazadas + fondeos posicionados en las llegadas.', 'Routes drawn + anchorages positioned on arrivals.'))}</div>
+                        </div>
+                        <button type="button" class="voyage-agenda-map-card__toggle" data-voyage-map-action="toggle-expand">${escapeHtml(isVoyageMapExpanded ? t('Réduire', 'Reducir', 'Collapse') : t('Ouvrir en grand', 'Abrir grande', 'Open large'))}</button>
+                        <div class="voyage-agenda-map-legend">
+                            <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--route"></span>${escapeHtml(t('Route datée', 'Ruta fechada', 'Dated route'))}</span>
+                            <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--derived"></span>${escapeHtml(t('Route enchaînée', 'Ruta encadenada', 'Chained route'))}</span>
+                            <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--stop"></span>${escapeHtml(t('Mouillage', 'Fondeo', 'Anchorage'))}</span>
+                        </div>
+                    </div>
+                    <div class="voyage-agenda-map-shell${isVoyageMapExpanded ? ' is-expanded' : ''}">
+                        <button type="button" class="voyage-agenda-map-shell__close" data-voyage-map-action="toggle-expand">${escapeHtml(t('Fermer la carte', 'Cerrar mapa', 'Close map'))}</button>
+                        <div id="voyageAgendaMap"></div>
+                        <div id="voyageAgendaMapEmpty" class="voyage-agenda-map-empty">${escapeHtml(t('Ajoute une route avec des waypoints pour afficher la carte.', 'Añade una ruta con waypoints para mostrar el mapa.', 'Add a route with waypoints to display the map.'))}</div>
+                    </div>
+                </div>
+                ${isVoyageCalendarVisible ? renderVoyageScheduleCalendar(timeline, editableRouteItemId) : ''}
+                ${isVoyageWeatherVisible ? renderVoyageAgendaWeatherSummary(timeline) : ''}
+                <div class="voyage-agenda-legs">
+                    ${timeline.map((entry, entryIndex) => {
+                        const chipClass = entry.statusKey === 'warning'
+                            ? 'voyage-agenda-chip voyage-agenda-chip--warning'
+                            : (entry.statusKey === 'ok' ? 'voyage-agenda-chip voyage-agenda-chip--ok' : 'voyage-agenda-chip');
+                        if (entry.type === 'route') {
+                            const isEditableRoute = entry.id === editableRouteItemId;
+                            return `
+                                <article class="voyage-agenda-leg ${activeVoyageMapItemId === entry.id ? 'is-active' : ''}" data-voyage-map-item-id="${escapeHtml(entry.id)}">
+                                    <div>
+                                        <div class="voyage-agenda-leg__title">${escapeHtml(entry.title)}</div>
+                                        <div class="voyage-agenda-leg__route">${escapeHtml(entry.subtitle)}</div>
+                                        <div class="voyage-agenda-leg__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                                        ${entry.item.notes ? `<div class="voyage-agenda-leg__notes">${escapeHtml(entry.item.notes)}</div>` : ''}
+                                    </div>
+                                    <div>
+                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Départ', 'Salida', 'Departure'))}</div>
+                                        <input type="datetime-local" class="voyage-agenda-leg__inline-input" data-voyage-item-field="departureDateTime" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(entry.item.departureDateTime || formatDateTimeLocalInputValue(entry.departure))}" ${isEditableRoute ? '' : 'disabled'}>
+                                        ${isEditableRoute ? '' : `<div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Départ automatique = arrivée de l\'étape précédente.', 'Salida automática = llegada de la etapa anterior.', 'Automatic departure = previous leg arrival.'))}</div>`}
+                                    </div>
+                                    <div>
+                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Arrivée approx.', 'Llegada aprox.', 'Approx. arrival'))}</div>
+                                        <div class="voyage-agenda-leg__value">${escapeHtml(entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : t('En attente du départ', 'En espera de salida', 'Waiting for departure'))}</div>
+                                    </div>
+                                    <div>
+                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Route', 'Ruta', 'Route'))}</div>
+                                        <div class="voyage-agenda-leg__value">${escapeHtml((entry.distanceNm || 0).toFixed(1))} NM<br>${escapeHtml(Number.isFinite(entry.estimatedHours) ? formatDurationHours(entry.estimatedHours) : t('Durée n/a', 'Duración n/a', 'No ETA'))}</div>
+                                    </div>
+                                    <div>
+                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Statut', 'Estado', 'Status'))}</div>
+                                        <div class="voyage-agenda-leg__value"><span class="${chipClass}">${escapeHtml(entry.statusLabel)}</span></div>
+                                        <div class="voyage-agenda-leg__actions">
+                                            <button type="button" data-voyage-item-action="move-up" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('Monter', 'Subir', 'Up'))}</button>
+                                            <button type="button" data-voyage-item-action="move-down" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === timeline.length - 1 ? 'disabled' : ''}>${escapeHtml(t('Descendre', 'Bajar', 'Down'))}</button>
+                                            <button type="button" data-voyage-action="open-route" data-route-index="${entry.routeIndex}">${escapeHtml(t('Charger', 'Cargar', 'Load'))}</button>
+                                            <button type="button" data-voyage-action="open-routing" data-route-index="${entry.routeIndex}">${escapeHtml(t('Routage', 'Routing', 'Routing'))}</button>
+                                            <button type="button" data-voyage-item-action="delete" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
+                                        </div>
+                                    </div>
+                                </article>`;
+                        }
+
+                        return `
+                            <article class="voyage-agenda-leg voyage-agenda-leg--stop ${activeVoyageMapItemId === entry.id ? 'is-active' : ''}" data-voyage-map-item-id="${escapeHtml(entry.id)}">
+                                <div>
+                                    <div class="voyage-agenda-leg__title">${escapeHtml(entry.title)}</div>
+                                    <div class="voyage-agenda-leg__route">${escapeHtml(entry.subtitle)}</div>
+                                    <div class="voyage-agenda-leg__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                                    <input type="text" class="voyage-agenda-leg__inline-input" data-voyage-item-field="stopName" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(entry.item.stopName || '')}">
+                                    ${entry.item.notes ? `<div class="voyage-agenda-leg__notes">${escapeHtml(entry.item.notes)}</div>` : ''}
+                                </div>
+                                <div>
+                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Départ', 'Salida', 'Departure'))}</div>
+                                    <div class="voyage-agenda-leg__value">${escapeHtml(entry.departure ? formatDateTimeLocalLabel(entry.departure) : t('Après la route précédente', 'Después de la ruta anterior', 'After previous route'))}</div>
+                                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Début automatique = arrivée de l\'étape précédente.', 'Inicio automático = llegada de la etapa anterior.', 'Automatic start = previous leg arrival.'))}</div>
+                                </div>
+                                <div>
+                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Arrivée approx.', 'Llegada aprox.', 'Approx. arrival'))}</div>
+                                    <div class="voyage-agenda-leg__value">${escapeHtml(entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : t('Après une route datée', 'Tras una ruta fechada', 'After a dated route'))}</div>
+                                </div>
+                                <div>
+                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Route', 'Ruta', 'Route'))}</div>
+                                    <div class="voyage-agenda-leg__value">0.0 NM<br>${escapeHtml(entry.statusLabel)}</div>
+                                    <input type="number" min="${escapeHtml(String(VOYAGE_STOP_MIN_DURATION_DAYS))}" step="${escapeHtml(String(VOYAGE_STOP_DURATION_STEP_DAYS))}" class="voyage-agenda-leg__inline-number" data-voyage-item-field="durationDays" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(String(entry.durationDays || 1))}">
+                                </div>
+                                <div>
+                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Statut', 'Estado', 'Status'))}</div>
+                                    <div class="voyage-agenda-leg__value"><span class="${chipClass}">${escapeHtml(entry.arrival ? t('Étape calée', 'Etapa colocada', 'Leg scheduled') : t('À raccorder', 'Por enlazar', 'Needs previous leg'))}</span></div>
+                                    <div class="voyage-agenda-leg__actions">
+                                        <button type="button" data-voyage-item-action="move-up" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('Monter', 'Subir', 'Up'))}</button>
+                                        <button type="button" data-voyage-item-action="move-down" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === timeline.length - 1 ? 'disabled' : ''}>${escapeHtml(t('Descendre', 'Bajar', 'Down'))}</button>
+                                        <button type="button" data-voyage-item-action="save-stop-waypoint" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Enregistrer en WP', 'Guardar como WP', 'Save as WP'))}</button>
+                                        <button type="button" data-voyage-item-action="delete" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
+                                    </div>
+                                </div>
+                            </article>`;
+                    }).join('')}
+                </div>
+            </section>`;
+    })();
+
+    renderVoyagePreviewMap(activePlanEntry.timeline);
+    voyageAgendaWeatherHydrationToken += 1;
+    if (isVoyageWeatherVisible) {
+        void hydrateVoyageAgendaWeatherSummary(activePlanEntry.timeline, voyageAgendaWeatherHydrationToken);
+    }
+}
+
+function upsertSelectedVoyagePlanFromEditor() {
+    const nameInput = document.getElementById('voyagePlanNameInput');
+    const descriptionInput = document.getElementById('voyagePlanDescriptionInput');
+    const name = String(nameInput?.value || '').trim();
+    const description = String(descriptionInput?.value || '').trim();
+    if (!name) {
+        setVoyagePlanStatus(t('Le nom du voyage est obligatoire.', 'El nombre del viaje es obligatorio.', 'Trip name is required.'), true);
+        return false;
+    }
+
+    const existing = getSelectedVoyagePlan();
+    const nextPlan = sanitizeVoyagePlan({
+        id: existing?.id || generateClientUuid(),
+        name,
+        description,
+        crewMemberIds: existing?.crewMemberIds || [],
+        items: existing?.items || [],
+        createdAt: existing?.createdAt,
+        updatedAt: new Date().toISOString()
+    });
+
+    const nextPlans = existing
+        ? voyagePlans.map(plan => (plan.id === existing.id ? nextPlan : plan))
+        : [...voyagePlans, nextPlan];
+    selectedVoyagePlanId = nextPlan.id;
+    setVoyagePlans(nextPlans, { markCloudDirty: true });
+    renderVoyageAgendaPanel();
+    setVoyagePlanStatus(t('Voyage enregistré.', 'Viaje guardado.', 'Trip saved.'));
+    return true;
+}
+
+function buildDuplicatedVoyagePlanName(baseName) {
+    const safeBaseName = String(baseName || '').trim() || t('Voyage', 'Viaje', 'Trip');
+    const copyLabel = t('copie', 'copia', 'copy');
+    const escapedCopyLabel = copyLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const duplicateMatch = safeBaseName.match(new RegExp(`^(.*) \\(${escapedCopyLabel}(?: (\\d+))?\\)$`, 'i'));
+    if (duplicateMatch) {
+        const originalName = String(duplicateMatch[1] || '').trim() || safeBaseName;
+        const currentNumber = Number.parseInt(duplicateMatch[2] || '1', 10);
+        return `${originalName} (${copyLabel} ${Number.isFinite(currentNumber) ? currentNumber + 1 : 2})`;
+    }
+    return `${safeBaseName} (${copyLabel})`;
+}
+
+function cloneSavedRoutesForDuplicatedVoyage(plan, duplicatedPlanName) {
+    const sourcePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const savedRoutes = getSavedRoutes();
+    const routeById = new Map(savedRoutes.map(route => [String(route?.id || '').trim(), route]));
+    const routeIdMap = new Map();
+    const clonedRoutes = [];
+    const creator = getCreatorPatch();
+    const nowIso = new Date().toISOString();
+
+    sourcePlan.items.forEach((item, index) => {
+        if (item?.type !== 'route') return;
+        const sourceRouteId = String(item.routeId || '').trim();
+        if (!sourceRouteId || routeIdMap.has(sourceRouteId)) return;
+
+        const sourceRoute = routeById.get(sourceRouteId);
+        if (!sourceRoute) return;
+
+        const duplicatedRoute = sanitizeSavedRoute({
+            ...sourceRoute,
+            id: generateClientUuid(),
+            name: buildDuplicatedVoyagePlanName(sourceRoute.name),
+            voyageName: duplicatedPlanName || sourceRoute.voyageName || '',
+            creatorEmail: creator.creatorEmail || sourceRoute.creatorEmail || '',
+            creatorName: creator.creatorName || sourceRoute.creatorName || '',
+            createdAt: nowIso,
+            updatedAt: nowIso
+        }, savedRoutes.length + clonedRoutes.length + index);
+
+        routeIdMap.set(sourceRouteId, duplicatedRoute.id);
+        clonedRoutes.push(duplicatedRoute);
+    });
+
+    return { clonedRoutes, routeIdMap };
+}
+
+function duplicateSelectedVoyagePlan() {
+    const existing = getSelectedVoyagePlan();
+    if (!existing) {
+        setVoyagePlanStatus(t('Aucun voyage sélectionné.', 'Ningún viaje seleccionado.', 'No trip selected.'), true);
+        return false;
+    }
+
+    const duplicatedPlanName = buildDuplicatedVoyagePlanName(existing.name);
+    const { clonedRoutes, routeIdMap } = cloneSavedRoutesForDuplicatedVoyage(existing, duplicatedPlanName);
+
+    if (clonedRoutes.length) {
+        setSavedRoutes(getSavedRoutes().concat(clonedRoutes));
+        routesCloudDirty = true;
+        updateCloudDataSourceStatus('local (non synchronisé)', getSavedRoutes().length, waypointPhotoEntries.length);
+        tryFlushPendingCloudDataPush();
+        refreshSavedList();
+    }
+
+    const duplicatedPlan = sanitizeVoyagePlan({
+        ...existing,
+        id: generateClientUuid(),
+        name: duplicatedPlanName,
+        items: (existing.items || []).map(item => ({
+            ...item,
+            id: generateClientUuid(),
+            routeId: item?.type === 'route'
+                ? (routeIdMap.get(String(item.routeId || '').trim()) || item.routeId)
+                : item.routeId
+        })),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    }, voyagePlans.length);
+
+    selectedVoyagePlanId = duplicatedPlan.id;
+    setVoyagePlans(voyagePlans.concat(duplicatedPlan), { markCloudDirty: true });
+    syncVoyagePlanEditorUi();
+    renderVoyageAgendaPanel();
+    setVoyagePlanStatus(t('Voyage dupliqué.', 'Viaje duplicado.', 'Trip duplicated.'));
+    return true;
+}
+
+function resetCrewEditor() {
+    selectedCrewMemberId = '';
+    crewEditorDraftState = {
+        memberId: '',
+        values: {
+            prenom: '',
+            nom: '',
+            email: '',
+            telephone: '',
+            commentaire: ''
+        }
+    };
+    refreshVoyageCrewEditorUi();
+    setVoyageCrewStatus(t('Nouvel équipier prêt.', 'Nuevo tripulante listo.', 'New crew member ready.'));
+}
+
+function upsertCrewMemberFromEditor() {
+    const firstName = String(document.getElementById('voyageCrewFirstNameInput')?.value || '').trim();
+    const lastName = String(document.getElementById('voyageCrewLastNameInput')?.value || '').trim();
+    const email = normalizeEmailForCompare(document.getElementById('voyageCrewEmailInput')?.value || '');
+    const telephone = normalizePhoneValue(document.getElementById('voyageCrewPhoneInput')?.value || '');
+    const commentaire = String(document.getElementById('voyageCrewCommentInput')?.value || '').trim();
+
+    if (!firstName && !lastName && !email) {
+        setVoyageCrewStatus(t('Renseigne au moins un nom ou un email.', 'Indica al menos un nombre o un email.', 'Enter at least a name or an email.'), true);
+        return false;
+    }
+
+    const existing = getSelectedCrewMember();
+    const nextMember = sanitizeCrewMember({
+        id: existing?.id || generateClientUuid(),
+        prenom: firstName,
+        nom: lastName,
+        email,
+        telephone,
+        commentaire,
+        createdAt: existing?.createdAt,
+        updatedAt: new Date().toISOString()
+    });
+
+    const nextList = existing
+        ? crewDirectory.map(entry => (entry.id === existing.id ? nextMember : entry))
+        : crewDirectory.concat(nextMember);
+    selectedCrewMemberId = nextMember.id;
+
+    try {
+        setCrewDirectory(nextList, { markCloudDirty: true });
+    } catch (error) {
+        setVoyageCrewStatus(t('Impossible d\'enregistrer l\'équipier sur cet appareil.', 'No se pudo guardar el tripulante en este dispositivo.', 'Unable to save the crew member on this device.'), true);
+        console.error('Unable to save crew member locally:', error);
+        return false;
+    }
+
+    clearCrewEditorDraft();
+    refreshVoyageCrewEditorUi();
+    setVoyageCrewStatus(t('Équipier enregistré.', 'Tripulante guardado.', 'Crew member saved.'));
+    return true;
+}
+
+function deleteSelectedCrewMember() {
+    const selected = getSelectedCrewMember();
+    if (!selected) {
+        setVoyageCrewStatus(t('Aucun équipier sélectionné.', 'Ningún tripulante seleccionado.', 'No crew member selected.'), true);
+        return;
+    }
+
+    const wasAssignedToAnyVoyage = voyagePlans.some(plan => Array.isArray(plan?.crewMemberIds) && plan.crewMemberIds.includes(selected.id));
+
+    clearCrewEditorDraft();
+    setCrewDirectory(crewDirectory.filter(entry => entry.id !== selected.id), { markCloudDirty: true });
+    setVoyagePlans(voyagePlans.map(plan => sanitizeVoyagePlan({
+        ...plan,
+        crewMemberIds: (plan.crewMemberIds || []).filter(id => id !== selected.id),
+        updatedAt: new Date().toISOString()
+    })), { markCloudDirty: true });
+    refreshVoyageCrewEditorUi({ rerenderAgenda: wasAssignedToAnyVoyage });
+    setVoyageCrewStatus(t('Équipier supprimé.', 'Tripulante eliminado.', 'Crew member deleted.'));
+}
+
+function assignSelectedCrewMemberToVoyage() {
+    if (!ensureActiveVoyagePlanForMutation()) return;
+    const selected = getSelectedCrewMember();
+    if (!selected) {
+        setVoyageCrewStatus(t('Choisis d\'abord un équipier.', 'Elige primero un tripulante.', 'Choose a crew member first.'), true);
+        return;
+    }
+
+    const nextPlans = voyagePlans.map(plan => {
+        if (plan.id !== selectedVoyagePlanId) return plan;
+        const crewMemberIds = Array.from(new Set([...(plan.crewMemberIds || []), selected.id]));
+        return sanitizeVoyagePlan({ ...plan, crewMemberIds, updatedAt: new Date().toISOString() });
+    });
+    setVoyagePlans(nextPlans, { markCloudDirty: true });
+    syncVoyagePlanEditorUi();
+    renderVoyageAgendaPanel();
+    setVoyageCrewStatus(t('Équipier affecté au voyage.', 'Tripulante asignado al viaje.', 'Crew member assigned to trip.'));
+}
+
+function removeCrewMemberFromVoyage(planId, crewMemberId) {
+    const nextPlans = voyagePlans.map(plan => {
+        if (plan.id !== planId) return plan;
+        return sanitizeVoyagePlan({
+            ...plan,
+            crewMemberIds: (plan.crewMemberIds || []).filter(id => id !== crewMemberId),
+            updatedAt: new Date().toISOString()
+        });
+    });
+    setVoyagePlans(nextPlans, { markCloudDirty: true });
+    syncVoyagePlanEditorUi();
+    renderVoyageAgendaPanel();
+    setVoyageCrewStatus(t('Équipier retiré du voyage.', 'Tripulante retirado del viaje.', 'Crew member removed from trip.'));
+}
+
+function resetVoyagePlanEditor() {
+    selectedVoyagePlanId = '';
+    syncVoyagePlanEditorUi();
+    renderVoyageAgendaPanel();
+    setVoyagePlanStatus(t('Nouveau voyage prêt.', 'Nuevo viaje listo.', 'New trip ready.'));
+}
+
+function deleteSelectedVoyagePlan() {
+    if (!selectedVoyagePlanId) {
+        setVoyagePlanStatus(t('Aucun voyage sélectionné.', 'Ningún viaje seleccionado.', 'No trip selected.'), true);
+        return;
+    }
+    setVoyagePlans(voyagePlans.filter(plan => plan.id !== selectedVoyagePlanId), { markCloudDirty: true });
+    selectedVoyagePlanId = String(voyagePlans[0]?.id || '');
+    renderVoyageAgendaPanel();
+    setVoyagePlanStatus(t('Voyage supprimé.', 'Viaje eliminado.', 'Trip deleted.'));
+}
+
+function updateVoyagePlanItems(planId, updater) {
+    const nextPlans = voyagePlans.map(plan => {
+        if (plan.id !== planId) return plan;
+        const nextItems = typeof updater === 'function' ? updater(plan.items.map(item => ({ ...item }))) : plan.items;
+        return sanitizeVoyagePlan({
+            ...plan,
+            items: nextItems,
+            updatedAt: new Date().toISOString()
+        });
+    });
+    setVoyagePlans(nextPlans, { markCloudDirty: true });
+    renderVoyageAgendaPanel();
+}
+
+function ensureActiveVoyagePlanForMutation() {
+    if (selectedVoyagePlanId && getSelectedVoyagePlan()) {
+        return true;
+    }
+
+    const nameInput = document.getElementById('voyagePlanNameInput');
+    const draftName = String(nameInput?.value || '').trim();
+    if (draftName) {
+        return upsertSelectedVoyagePlanFromEditor();
+    }
+
+    if (voyagePlans.length > 0) {
+        selectedVoyagePlanId = String(voyagePlans[0].id || '');
+        syncVoyagePlanEditorUi();
+        renderVoyageAgendaPanel();
+        return true;
+    }
+
+    setVoyagePlanStatus(t('Crée d\'abord un voyage.', 'Crea primero un viaje.', 'Create a trip first.'), true);
+    return false;
+}
+
+function addRouteToSelectedVoyagePlan() {
+    if (!ensureActiveVoyagePlanForMutation()) return;
+    const routeSelect = document.getElementById('voyagePlanRouteSelectInput');
+    const departureInput = document.getElementById('voyagePlanRouteDepartureInput');
+    const selectedPlan = getSelectedVoyagePlan();
+    const routeId = String(routeSelect?.value || '').trim();
+    if (!routeId) {
+        setVoyagePlanStatus(t('Choisis d\'abord une route sauvegardée.', 'Elige primero una ruta guardada.', 'Choose a saved route first.'), true);
+        return;
+    }
+    const suggestedDeparture = formatDateTimeLocalInputValue(getVoyagePlanNextDepartureDateTime(selectedPlan));
+    const rawDepartureValue = normalizeDateTimeLocalValue(String(departureInput?.value || '').trim());
+    const canStoreExplicitDeparture = !selectedPlan?.items?.some(item => item.type === 'route');
+    updateVoyagePlanItems(selectedVoyagePlanId, items => items.concat(sanitizeVoyagePlanItem({
+        type: 'route',
+        routeId,
+        departureDateTime: canStoreExplicitDeparture && rawDepartureValue && rawDepartureValue !== suggestedDeparture ? rawDepartureValue : ''
+    }, items.length)));
+    if (departureInput) departureInput.value = '';
+    setVoyagePlanStatus(t('Route ajoutée au voyage.', 'Ruta añadida al viaje.', 'Route added to trip.'));
+}
+
+function addStopToSelectedVoyagePlan() {
+    if (!ensureActiveVoyagePlanForMutation()) return;
+    const stopNameInput = document.getElementById('voyagePlanStopNameInput');
+    const stopDurationInput = document.getElementById('voyagePlanStopDurationInput');
+    const waypointSelect = document.getElementById('voyagePlanWaypointSelectInput');
+    const selectedWaypointId = String(waypointSelect?.value || '').trim();
+    const selectedWaypoint = waypointPhotoEntries.find(entry => String(entry?.id || '') === selectedWaypointId) || null;
+    const stopName = String(stopNameInput?.value || '').trim() || String(selectedWaypoint?.placeName || '').trim();
+    const durationDays = Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, Number(stopDurationInput?.value || 1) || 1);
+    if (!stopName) {
+        setVoyagePlanStatus(t('Donne un nom au mouillage.', 'Pon un nombre al fondeo.', 'Give the stop a name.'), true);
+        return;
+    }
+    updateVoyagePlanItems(selectedVoyagePlanId, items => items.concat(sanitizeVoyagePlanItem({
+        type: 'stop',
+        stopName,
+        durationDays,
+        waypointPhotoId: selectedWaypointId,
+        waypointLat: selectedWaypoint?.lat,
+        waypointLng: selectedWaypoint?.lng,
+        notes: selectedWaypoint?.comment || ''
+    }, items.length)));
+    if (stopNameInput) stopNameInput.value = '';
+    if (stopDurationInput) stopDurationInput.value = '';
+    if (waypointSelect) waypointSelect.value = '';
+    setVoyagePlanStatus(t('Mouillage ajouté au voyage.', 'Fondeo añadido al viaje.', 'Stop added to trip.'));
+}
+
+function addWaypointEntryToSelectedVoyagePlan(entry) {
+    const waypointEntry = normalizeWaypointPhotoEntry(entry);
+    if (!waypointEntry) {
+        setVoyagePlanStatus(t('Waypoint introuvable ou invalide.', 'Waypoint no encontrado o inválido.', 'Waypoint not found or invalid.'), true);
+        return;
+    }
+    if (!ensureActiveVoyagePlanForMutation()) return;
+
+    updateVoyagePlanItems(selectedVoyagePlanId, items => items.concat(sanitizeVoyagePlanItem({
+        type: 'stop',
+        stopName: waypointEntry.placeName || t('Mouillage', 'Fondeo', 'Anchorage'),
+        durationDays: VOYAGE_STOP_MIN_DURATION_DAYS,
+        waypointPhotoId: waypointEntry.id,
+        waypointLat: waypointEntry.lat,
+        waypointLng: waypointEntry.lng,
+        notes: String(waypointEntry.comment || '').trim()
+    }, items.length)));
+
+    setVoyagePlanStatus(t('Waypoint ajouté comme mouillage au voyage.', 'Waypoint añadido como fondeo al viaje.', 'Waypoint added to trip as anchorage.'));
+}
+
+function getVoyageTimelineEntryAnchorPoint(timeline, itemId) {
+    let previousAnchor = null;
+
+    for (const entry of Array.isArray(timeline) ? timeline : []) {
+        const directAnchor = getVoyageEntryAnchorPoint(entry);
+        if (entry.id === itemId) {
+            return directAnchor || previousAnchor || null;
+        }
+        if (directAnchor) {
+            previousAnchor = directAnchor;
+        }
+    }
+
+    return null;
+}
+
+function saveVoyageStopAsWaypoint(planId, itemId) {
+    const plan = voyagePlans.find(entry => entry.id === planId) || null;
+    if (!plan) {
+        setVoyagePlanStatus(t('Voyage introuvable.', 'Viaje no encontrado.', 'Trip not found.'), true);
+        return;
+    }
+
+    const stopItem = Array.isArray(plan.items)
+        ? plan.items.find(item => item.id === itemId && item.type === 'stop')
+        : null;
+    if (!stopItem) {
+        setVoyagePlanStatus(t('Mouillage introuvable.', 'Fondeo no encontrado.', 'Anchorage not found.'), true);
+        return;
+    }
+
+    const timeline = computeVoyagePlanTimeline(plan);
+    const anchorPoint = getVoyageTimelineEntryAnchorPoint(timeline, itemId);
+    if (!anchorPoint || !Number.isFinite(anchorPoint.lat) || !Number.isFinite(anchorPoint.lng)) {
+        setVoyagePlanStatus(t('Impossible de déterminer la position du mouillage.', 'No se puede determinar la posición del fondeo.', 'Unable to determine anchorage position.'), true);
+        return;
+    }
+
+    const existingEntryIndex = waypointPhotoEntries.findIndex(entry => String(entry.id) === String(stopItem.waypointPhotoId || ''));
+    const existingEntry = existingEntryIndex >= 0 ? waypointPhotoEntries[existingEntryIndex] : null;
+    const nowIso = new Date().toISOString();
+    const waypointEntry = normalizeWaypointPhotoEntry({
+        ...existingEntry,
+        id: stopItem.waypointPhotoId || generateClientUuid(),
+        lat: anchorPoint.lat,
+        lng: anchorPoint.lng,
+        placeName: stopItem.stopName || t('Mouillage', 'Fondeo', 'Anchorage'),
+        imageDataUrl: existingEntry?.imageDataUrl || '',
+        comment: stopItem.notes || '',
+        rating: existingEntry?.rating ?? 3,
+        cleanliness: existingEntry?.cleanliness ?? 3,
+        protection: existingEntry?.protection || [],
+        depthMeters: existingEntry?.depthMeters ?? 10,
+        bottomType: existingEntry?.bottomType || '',
+        creatorEmail: existingEntry?.creatorEmail || getCreatorPatch().creatorEmail,
+        creatorName: existingEntry?.creatorName || getCreatorPatch().creatorName,
+        createdAt: existingEntry?.createdAt || nowIso,
+        updatedAt: nowIso
+    });
+    if (!waypointEntry) {
+        setVoyagePlanStatus(t('Impossible de préparer le waypoint.', 'No se puede preparar el waypoint.', 'Unable to prepare waypoint.'), true);
+        return;
+    }
+
+    const nextEntries = [...waypointPhotoEntries];
+    if (existingEntryIndex >= 0) {
+        nextEntries[existingEntryIndex] = waypointEntry;
+    } else {
+        nextEntries.unshift(waypointEntry);
+    }
+    setWaypointPhotoEntries(nextEntries, { persistLocal: true, refreshUi: true });
+    routesCloudDirty = true;
+    if (isCloudReady()) {
+        void syncWaypointPhotosToCloud()
+            .then(() => setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`))
+            .catch(error => setCloudStatus(t(`Enregistrement local OK, synchro cloud échouée: ${formatCloudError(error)}`, `Guardado local OK, sincronización nube fallida: ${formatCloudError(error)}`), true));
+    }
+
+    const existingWaypointIndex = findUserWaypointIndexByCoordinates(waypointEntry.lat, waypointEntry.lng);
+    if (existingWaypointIndex >= 0) {
+        const existingMarker = markers[existingWaypointIndex] || null;
+        if (existingMarker) {
+            selectUserWaypoint(existingMarker);
+        }
+    } else if (map) {
+        addUserWaypoint(L.latLng(waypointEntry.lat, waypointEntry.lng), { select: true, invalidate: true });
+        updateRoutingTabAvailability();
+    }
+
+    updateVoyagePlanItems(planId, items => items.map(item => item.id === itemId
+        ? sanitizeVoyagePlanItem({
+            ...item,
+            waypointPhotoId: waypointEntry.id,
+            waypointLat: waypointEntry.lat,
+            waypointLng: waypointEntry.lng
+        })
+        : item));
+
+    setVoyagePlanStatus(t('Mouillage enregistré comme waypoint avec GPS.', 'Fondeo guardado como waypoint con GPS.', 'Anchorage saved as waypoint with GPS.'));
+}
+
+function updateVoyagePlanItemField(planId, itemId, field, value) {
+    const existingPlan = voyagePlans.find(plan => plan.id === planId) || null;
+    const editableRouteItemId = getEditableVoyageRouteItemId(existingPlan);
+    const normalizedValue = field === 'departureDateTime' || field === 'startDateTime' || field === 'stopDepartureDateTime'
+        ? normalizeDateTimeLocalValue(value || '')
+        : value;
+    const derivedDeparture = field === 'departureDateTime' || field === 'startDateTime' || field === 'stopDepartureDateTime'
+        ? normalizeDateTimeLocalValue(formatDateTimeLocalInputValue(getDerivedVoyagePlanItemStartDateTime(existingPlan, itemId)))
+        : '';
+    if (field === 'startDateTime') return;
+    if (field === 'departureDateTime' && itemId !== editableRouteItemId) return;
+    updateVoyagePlanItems(planId, items => items.map(item => {
+        if (item.id !== itemId) return item;
+        const nextItem = { ...item };
+        if (field === 'departureDateTime') nextItem.departureDateTime = normalizedValue && normalizedValue !== derivedDeparture ? normalizedValue : '';
+        if (field === 'stopDepartureDateTime') nextItem.stopDepartureDateTime = normalizedValue && normalizedValue !== derivedDeparture ? normalizedValue : '';
+        if (field === 'stopName') nextItem.stopName = String(value || '').trim();
+        if (field === 'durationDays') {
+            nextItem.durationDays = Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, Number(value || 1) || 1);
+            nextItem.stopDepartureDateTime = '';
+        }
+        return sanitizeVoyagePlanItem(nextItem);
+    }));
+}
+
+function deleteVoyagePlanItem(planId, itemId) {
+    updateVoyagePlanItems(planId, items => items.filter(item => item.id !== itemId));
+    setVoyagePlanStatus(t('Élément supprimé.', 'Elemento eliminado.', 'Item deleted.'));
+}
+
+function moveVoyagePlanItem(planId, itemId, direction) {
+    updateVoyagePlanItems(planId, items => {
+        const currentIndex = items.findIndex(item => item.id === itemId);
+        if (currentIndex < 0) return items;
+
+        const targetIndex = direction === 'up'
+            ? currentIndex - 1
+            : currentIndex + 1;
+        if (targetIndex < 0 || targetIndex >= items.length) return items;
+
+        const reordered = [...items];
+        const [movedItem] = reordered.splice(currentIndex, 1);
+        reordered.splice(targetIndex, 0, movedItem);
+        return reordered;
+    });
+    setVoyagePlanStatus(
+        direction === 'up'
+            ? t('Étape déplacée vers le haut.', 'Etapa movida hacia arriba.', 'Item moved up.')
+            : t('Étape déplacée vers le bas.', 'Etapa movida hacia abajo.', 'Item moved down.')
+    );
+}
+
+function saveDepartureDateTimeToStorage() {
+    try {
+        localStorage.setItem(ROUTING_DEPARTURE_DATETIME_STORAGE_KEY, `${departureDate}T${normalizeHourTime(departureTime)}`);
+    } catch (_error) {
+        // Ignore storage failures and keep in-memory state.
+    }
+}
+
+function restoreDepartureDateTimeFromStorage() {
+    try {
+        const rawValue = String(localStorage.getItem(ROUTING_DEPARTURE_DATETIME_STORAGE_KEY) || '').trim();
+        if (!rawValue || !rawValue.includes('T')) return false;
+
+        const [datePart, timePart] = rawValue.split('T');
+        if (!datePart) return false;
+
+        const restoredDateTime = new Date(`${datePart}T${timePart || '12:00'}:00`);
+        if (Number.isNaN(restoredDateTime.getTime())) return false;
+
+        departureDate = datePart;
+        departureTime = normalizeHourTime(timePart || '12:00');
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function setDepartureFromDateTimeInput(rawValue, options = {}) {
     if (!rawValue || !rawValue.includes('T')) return;
     const [datePart, timePart] = rawValue.split('T');
     if (datePart) departureDate = datePart;
     departureTime = normalizeHourTime(timePart || '12:00');
     updateDepartureDateTimeInput();
+    saveDepartureDateTimeToStorage();
+    if (!options?.suppressAiInvalidation) {
+        invalidateAiRouteAnalysisState(t('Analyse route + météo: date changée, clique Rafraîchir pour recalculer.', 'Analisis ruta + meteo: fecha cambiada, pulsa Actualizar para recalcular.'));
+    }
 }
 
 function normalizeMapStyle(value) {
@@ -603,22 +2711,80 @@ function applyLanguageToUi() {
     setElementText('#appTitle', 'CEIBO crm');
     setElementText('#cloudTabBtn', t('Cloud', 'Nube'));
     setElementText('#routesTabBtn', t('Routes', 'Rutas'));
+    setElementText('#voyagesTabBtn', t('Voyages', 'Viajes', 'Trips'));
     setElementText('#routingTabBtn', t('Routage', 'Navegación'));
     setElementText('#navLogTabBtn', t('Journal nav', 'Diario nav'));
     setElementText('#documentTabBtn', t('Document', 'Documento'));
     setElementText('#arrivalTabBtn', t('Arrivée', 'Llegada'));
     setElementText('#waypointTabBtn', t('Waypoint', 'Waypoint'));
     setElementText('#maintenanceTabBtn', t('Maintenance', 'Mantenimiento'));
+    setElementText('#voyageAgendaTitle', t('Agenda voyages', 'Agenda viajes', 'Trips agenda'));
+    setElementText('#voyageAgendaHeading', '');
+    setElementText('#voyageAgendaSubtitle', '');
+    setElementText('#voyagesTabIntro', t('Le planning détaillé s\'affiche dans la partie principale, à la place de la carte.', 'La planificación detallada se muestra en la parte principal, en lugar del mapa.', 'The detailed schedule is shown in the main area, in place of the map.'));
+    setElementText('#voyagesSidebarNewBtn', t('Nouveau voyage', 'Nuevo viaje', 'New trip'));
+    setElementText('#voyageAgendaOpenRoutesBtn', t('Ouvrir routes', 'Abrir rutas', 'Open routes'));
+    setElementText('#voyageAgendaRefreshBtn', t('Rafraîchir agenda', 'Actualizar agenda', 'Refresh agenda'));
+    setElementText('#voyageLlmPromptBtn', t('Prompt LLM', 'Prompt LLM', 'LLM prompt'));
+    setElementPlaceholder('#voyageAgendaSearchInput', t('Rechercher un voyage, une étape, un équipier...', 'Buscar un viaje, una etapa, un tripulante...', 'Search for a trip, a leg, a crew member...'));
+    setElementText('#voyageBuilderCardTitle', t('Créer / éditer un voyage', 'Crear / editar un viaje', 'Create / edit a trip'));
+    setElementText('#voyageBuilderLegTitle', t('Ajouter une route existante', 'Añadir una ruta existente', 'Add an existing route'));
+    setElementText('#voyageBuilderCrewTitle', t('Équipage du voyage', 'Tripulación del viaje', 'Trip crew'));
+    setElementText('label[for="voyagePlanNameInput"]', t('Nom du voyage:', 'Nombre del viaje:', 'Trip name:'));
+    setElementText('label[for="voyagePlanDescriptionInput"]', t('Description:', 'Descripción:', 'Description:'));
+    setElementText('#voyagePlanSaveBtn', t('Enregistrer voyage', 'Guardar viaje', 'Save trip'));
+    setElementText('#voyagePlanNewBtn', t('Nouveau', 'Nuevo', 'New'));
+    setElementText('#voyagePlanDuplicateBtn', t('Dupliquer', 'Duplicar', 'Duplicate'));
+    setElementText('#voyagePlanDeleteBtn', t('Supprimer', 'Eliminar', 'Delete'));
+    setElementText('label[for="voyagePlanRouteSelectInput"]', t('Route disponible:', 'Ruta disponible:', 'Available route:'));
+    setElementText('label[for="voyagePlanRouteDepartureInput"]', t('Départ pour cette étape:', 'Salida para esta etapa:', 'Departure for this leg:'));
+    setElementText('#voyagePlanAddRouteBtn', t('Ajouter route', 'Añadir ruta', 'Add route'));
+    setElementText('#voyagePlanOpenRouteBtn', t('Ouvrir route', 'Abrir ruta', 'Open route'));
+    setElementText('label[for="voyagePlanWaypointSelectInput"]', t('Waypoint existant:', 'Waypoint existente:', 'Existing waypoint:'));
+    setElementText('label[for="voyagePlanStopNameInput"]', t('Mouillage / escale:', 'Fondeo / escala:', 'Stop / anchorage:'));
+    setElementText('label[for="voyagePlanStopDurationInput"]', t('Durée mouillage (jours):', 'Duración fondeo (días):', 'Stop duration (days):'));
+    setElementText('#voyagePlanAddStopBtn', t('Ajouter mouillage', 'Añadir fondeo', 'Add stop'));
+    setElementText('label[for="voyageCrewDirectorySelectInput"]', t('Annuaire équipage:', 'Directorio tripulación:', 'Crew directory:'));
+    setElementText('#voyagePlanAddCrewBtn', t('Affecter au voyage', 'Asignar al viaje', 'Assign to trip'));
+    setElementText('#voyageCrewNewBtn', t('Nouveau', 'Nuevo', 'New'));
+    setElementText('label[for="voyageCrewFirstNameInput"]', t('Prénom:', 'Nombre:', 'First name:'));
+    setElementText('label[for="voyageCrewLastNameInput"]', t('Nom:', 'Apellido:', 'Last name:'));
+    setElementText('label[for="voyageCrewEmailInput"]', t('Email:', 'Email:', 'Email:'));
+    setElementText('label[for="voyageCrewPhoneInput"]', t('Téléphone:', 'Teléfono:', 'Phone:'));
+    setElementText('label[for="voyageCrewCommentInput"]', t('Commentaire:', 'Comentario:', 'Comment:'));
+    setElementText('#voyageCrewSaveBtn', t('Enregistrer équipier', 'Guardar tripulante', 'Save crew member'));
+    setElementText('#voyageCrewDeleteBtn', t('Supprimer équipier', 'Eliminar tripulante', 'Delete crew member'));
+    setElementText('#voyageLlmPromptModalTitle', t('Prompt touristique du voyage', 'Prompt turístico del viaje', 'Trip tourism prompt'));
+    setElementText('#voyageLlmPromptCloseBtn', t('Fermer', 'Cerrar', 'Close'));
+    setElementText('#voyageLlmPromptCopyBtn', t('Copier le prompt', 'Copiar prompt', 'Copy prompt'));
+    setElementText('#voyageLlmPromptRefreshBtn', t('Régénérer', 'Regenerar', 'Regenerate'));
+    setElementPlaceholder('#voyagePlanNameInput', t('Ex: BCN > Minorca', 'Ej: BCN > Menorca', 'Ex: BCN > Minorca'));
+    setElementPlaceholder('#voyagePlanDescriptionInput', t('Ex: convoyage de printemps avec escales tranquilles', 'Ej: travesía de primavera con escalas tranquilas', 'Ex: spring delivery with calm stops'));
+    setElementPlaceholder('#voyagePlanStopNameInput', t('Ex: Port Mahon', 'Ej: Port Mahon', 'Ex: Port Mahon'));
+    setElementPlaceholder('#voyagePlanStopDurationInput', t('Ex: 2', 'Ej: 2', 'Ex: 2'));
+    syncVoyagePlanWaypointSelectOptions();
     renderNightModeToggleUi();
 
     setElementText('label[for="routeNameInput"]', t('Nom de la route:', 'Nombre de la ruta:'));
     setElementPlaceholder('#routeNameInput', t('Nom de la route', 'Nombre de la ruta'));
+    setElementText('.route-voyage-card__title', t('Voyage / agenda', 'Viaje / agenda', 'Trip / schedule'));
+    setElementText('label[for="voyageNameInput"]', t('Nom du voyage:', 'Nombre del viaje:', 'Trip name:'));
+    setElementText('label[for="voyageLegInput"]', t('Étape:', 'Etapa:', 'Leg:'));
+    setElementText('label[for="voyageDepartureInput"]', t('Départ planifié:', 'Salida planificada:', 'Planned departure:'));
+    setElementText('label[for="voyageArrivalInput"]', t('Arrivée cible:', 'Llegada objetivo:', 'Target arrival:'));
+    setElementText('label[for="voyageSharedWithInput"]', t('Partagé avec:', 'Compartido con:', 'Shared with:'));
+    setElementText('label[for="voyageNotesInput"]', t('Notes agenda:', 'Notas agenda:', 'Schedule notes:'));
+    setElementPlaceholder('#voyageNameInput', t('Ex: Mai 2026 · Barcelone > Baléares', 'Ej: Mayo 2026 · Barcelona > Baleares', 'Ex: May 2026 · Barcelona > Balearics'));
+    setElementPlaceholder('#voyageLegInput', t('Ex: Minorque > Antibes', 'Ej: Menorca > Antibes', 'Ex: Menorca > Antibes'));
+    setElementPlaceholder('#voyageSharedWithInput', t('Ex: Marc, Claire, Hugo', 'Ej: Marc, Claire, Hugo', 'Ex: Marc, Claire, Hugo'));
+    setElementPlaceholder('#voyageNotesInput', t('Ex: escale à Mahon avant le convoyage vers Antibes', 'Ej: escala en Mahón antes del traslado a Antibes', 'Ex: stop in Mahon before the transfer to Antibes'));
     setElementText('#saveRouteBtn', t('Sauvegarder', 'Guardar'));
     setElementText('#exportRouteBtn', t('Exporter JSON', 'Exportar JSON'));
     setElementText('#exportRouteGpxBtn', t('Exporter GPX', 'Exportar GPX'));
     setElementText('#resetBtn', t('Reset', 'Reiniciar'));
     setElementText('#reverseRouteBtn', t('Route retour', 'Ruta retorno'));
-    setElementText('#exportVoyagePdfBtn', t('Exporter rapport PDF', 'Exportar informe PDF'));
+    setElementText('#exportVoyagePdfBtn', t('Exporter PDF voyage', 'Exportar PDF viaje', 'Export trip PDF'));
+    setElementText('#emailVoyagePdfBtn', t('PDF + email équipage', 'PDF + email tripulación', 'PDF + crew email'));
     setElementText('#savedRoutesListLabel', t('Routes sauvegardées:', 'Rutas guardadas:'));
     const routeSearchInput = document.getElementById('routeSearchInput');
     if (routeSearchInput) routeSearchInput.placeholder = t('Rechercher une route...', 'Buscar una ruta...');
@@ -647,16 +2813,16 @@ function applyLanguageToUi() {
     setElementText('#deleteSelectedWpBtn', t('Supprimer WP', 'Eliminar WP'));
     setElementText('#recenterBtn', t('Recentrer route', 'Centrar ruta'));
     setElementText('#routingActiveRouteLabel', t('Route active:', 'Ruta activa:', 'Active route:'));
-    setElementText('#suggestDepartureBtn', t('Conseiller départ météo (≤ 20 kn)', 'Sugerir salida meteo (≤ 20 kn)'));
     setElementText('#openWeatherFromRoutingBtn', t('Ouvrir météo routage', 'Abrir meteo de navegación'));
     setElementText('#routingWeatherHint', t('Météo est accessible depuis Routage.', 'Meteo accesible desde Navegación.'));
-    setElementText('#suggestAiRoutesBtn', t('Proposer routes IA (safe / perf)', 'Proponer rutas IA (safe / perf)'));
+    setElementText('#suggestAiRoutesBtn', t('Calculer matrice départ (5 j)', 'Calcular matriz de salida (5 d)'));
+    setElementText('#refreshAiRoutesBtn', t('Rafraîchir', 'Actualizar'));
     setElementText('label[for="departureDateTimeInput"]', t('Départ (date + heure):', 'Salida (fecha + hora):'));
     setElementText('#routingPolarProfileSelectLabel', t('Polaire / gréement:', 'Polar / aparejo:', 'Polar / rig:'));
     setElementText('label[for="autoWpSpacingInput"]', t('Contournement côte:', 'Rodeo costa:'));
     setElementText('label[for="forecastWindowDaysSelect"]', t('Fenêtre analyse:', 'Ventana análisis:'));
-    setElementText('#departureSuggestionInfo', t('Suggestion départ: en attente', 'Sugerencia salida: en espera'));
-    setElementText('#aiRouteSuggestionInfo', t('Routes IA: en attente', 'Rutas IA: en espera'));
+    setElementText('#aiRouteDockTitle', t('Matrice départ + météo', 'Matriz salida + meteo'));
+    setElementText('#aiRouteSuggestionInfo', t('Analyse route + météo: en attente', 'Analisis ruta + meteo: en espera'));
 
     setElementText('#autoWpSpacingInput option[value="off"]', t('Désactivé', 'Desactivado'));
     setElementText('#forecastWindowDaysSelect option[value="2"]', t('2 jours', '2 días'));
@@ -664,6 +2830,7 @@ function applyLanguageToUi() {
     setElementText('#forecastWindowDaysSelect option[value="5"]', t('5 jours', '5 días'));
     setElementText('#forecastWindowDaysSelect option[value="7"]', t('7 jours', '7 días'));
     updateRoutingActiveRouteDisplay();
+    updateVoyagePlanningSummary();
     updateRoutingPolarProfileUi();
     setElementPlaceholder('#watchCrewInput', t('Ex: Max + Ana', 'Ej: Max + Ana'));
     setElementPlaceholder('#watchHeadingInput', t('Ex: 235', 'Ej: 235'));
@@ -698,6 +2865,7 @@ function applyLanguageToUi() {
     setElementPlaceholder('#documentSearchInput', t('Titre, catégorie, tags', 'Título, categoría, tags'));
     setElementText('#documentListNote', t('La liste des documents est affichée dans le panneau de droite.', 'La lista de documentos se muestra en el panel derecho.'));
     setElementText('#documentDockPanelTitle', t('Documents enregistrés:', 'Documentos guardados:'));
+    setElementText('#aiRouteDockTitle', t('Sélection route + météo', 'Seleccion ruta + meteo'));
     setElementText('#documentRagStatus', t('RAG: infrastructure locale prête.', 'RAG: infraestructura local lista.'));
     setElementText('#documentBuildRagBtn', t('Analyser / indexer les fichiers', 'Analizar / indexar archivos'));
     setElementText('#documentGeminiConfigSummary', t('Configuration Gemini', 'Configuración Gemini'));
@@ -1568,6 +3736,7 @@ function isAuthGateLocked() {
 function setProtectedTabsEnabled(enabled) {
     const protectedTabIds = [
         'routesTabBtn',
+        'voyagesTabBtn',
         'routingTabBtn',
         'navLogTabBtn',
         'documentTabBtn',
@@ -3448,13 +5617,6 @@ async function testOpenWeatherApiKey(appId) {
     }
 }
 
-function applyLastDepartureSuggestion() {
-    if (!lastDepartureSuggestion?.departureDateTime) return;
-    const inputValue = toLocalDateTimeInputValue(lastDepartureSuggestion.departureDateTime);
-    if (!inputValue) return;
-    setDepartureFromDateTimeInput(inputValue);
-}
-
 function estimateEffectiveSpeedForLegSplit(startPoint, endPoint, weather) {
     const windSpeed = Number.isFinite(weather?.windSpeed) ? weather.windSpeed : 10;
     const windDirection = Number.isFinite(weather?.windDirection) ? weather.windDirection : 0;
@@ -3504,9 +5666,9 @@ function getMaxDistanceForWeatherSplit(startPoint, endPoint, weather, effectiveS
         return Math.max(4, safeSpeed * AUTO_WEATHER_SPLIT_MAX_HOURS);
     }
 
-    const upwindChunkDistanceNm = Math.max(4, safeSpeed * AUTO_WEATHER_SPLIT_UPWIND_MAX_HOURS);
+    const upwindChunkDistanceNm = Math.max(2, safeSpeed * AUTO_WEATHER_SPLIT_UPWIND_MAX_HOURS);
     if (safeDirectDistance <= upwindChunkDistanceNm) {
-        return Math.max(4, safeDirectDistance + 1);
+        return Math.max(2, safeDirectDistance);
     }
 
     return upwindChunkDistanceNm;
@@ -3989,8 +6151,8 @@ function setWaypointPhotoStorageList(list) {
 }
 
 function normalizeWaypointPhotoEntry(entry) {
-    const lat = Number(entry?.lat);
-    const lng = Number(entry?.lng);
+    const lat = parseOptionalCoordinate(entry?.lat, -90, 90);
+    const lng = parseOptionalCoordinate(entry?.lng, -180, 180);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
     const creatorEmail = normalizeEmailForCompare(
@@ -4043,6 +6205,8 @@ function setWaypointPhotoEntries(list, { persistLocal = true, refreshUi = true }
         renderWaypointPhotoList();
         syncWaypointPhotoMarkersInView();
     }
+
+    syncVoyagePlanWaypointSelectOptions();
 }
 
 function persistWaypointPhotoEntries() {
@@ -4318,6 +6482,156 @@ function setGooglePhotosPickerStatus(message, isError = false) {
 function closeGooglePhotosPickerModal() {
     const modal = document.getElementById('googlePhotosPickerModal');
     if (modal) modal.style.display = 'none';
+}
+
+function setVoyageLlmPromptStatus(message, isError = false) {
+    const status = document.getElementById('voyageLlmPromptStatus');
+    if (!status) return;
+    status.textContent = String(message || '');
+    status.style.color = isError ? '#ffadad' : '';
+}
+
+function buildVoyageTourismPrompt(plan, timeline) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const safeTimeline = Array.isArray(timeline) ? timeline : [];
+    const routeLegs = safeTimeline.filter(entry => entry?.type === 'route');
+    const stopLegs = safeTimeline.filter(entry => entry?.type === 'stop');
+    const orderedStops = stopLegs.map((entry, index) => {
+        const start = entry?.departure instanceof Date ? formatDateTimeLocalLabel(entry.departure) : t('à préciser', 'por precisar', 'to be defined');
+        const end = entry?.arrival instanceof Date ? formatDateTimeLocalLabel(entry.arrival) : t('à préciser', 'por precisar', 'to be defined');
+        return `${index + 1}. ${entry.title} (${start} -> ${end})`;
+    });
+    const orderedRouteSummaries = routeLegs.map((entry, index) => {
+        const departure = entry?.departure instanceof Date ? formatDateTimeLocalLabel(entry.departure) : t('à préciser', 'por precisar', 'to be defined');
+        const arrival = entry?.arrival instanceof Date ? formatDateTimeLocalLabel(entry.arrival) : t('à préciser', 'por precisar', 'to be defined');
+        const distance = Number.isFinite(entry?.distanceNm) ? `${entry.distanceNm.toFixed(1)} NM` : 'N/A';
+        return `${index + 1}. ${entry.title} | ${entry.subtitle} | départ ${departure} | arrivée ${arrival} | distance ${distance}`;
+    });
+
+    const firstRoute = routeLegs[0] || null;
+    const lastEntry = safeTimeline[safeTimeline.length - 1] || null;
+    const tripStart = firstRoute?.title || firstRoute?.subtitle || safePlan.name;
+    const tripEnd = lastEntry?.title || safePlan.name;
+    const firstDeparture = firstRoute?.departure instanceof Date ? formatDateTimeLocalLabel(firstRoute.departure) : t('à préciser', 'por precisar', 'to be defined');
+    const finalArrival = lastEntry?.arrival instanceof Date ? formatDateTimeLocalLabel(lastEntry.arrival) : t('à préciser', 'por precisar', 'to be defined');
+    const totalDistance = routeLegs.reduce((sum, entry) => sum + (Number(entry?.distanceNm) || 0), 0);
+    const crewNames = getVoyageAssignedCrewMembers(safePlan).map(entry => getCrewMemberDisplayName(entry));
+
+    return [
+        'Tu es un assistant de voyage spécialisé dans le nautisme, les itinéraires côtiers et les escales en bateau.',
+        '',
+        'Je prépare un voyage en bateau et je veux récupérer des informations touristiques utiles, fiables, concrètes et directement exploitables pour les escales prévues.',
+        '',
+        'Données du voyage :',
+        `- Nom du voyage : ${safePlan.name || 'Voyage CEIBO'}`,
+        `- Départ : ${tripStart}`,
+        `- Arrivée : ${tripEnd}`,
+        `- Fenêtre estimée : du ${firstDeparture} au ${finalArrival}`,
+        `- Distance totale estimée : ${totalDistance > 0 ? `${totalDistance.toFixed(1)} NM` : 'à estimer'}`,
+        `- Description du voyage : ${safePlan.description || 'Non renseignée'}`,
+        `- Équipage : ${crewNames.length ? crewNames.join(', ') : 'Non précisé'}`,
+        '',
+        'Parcours détaillé dans l’ordre :',
+        orderedRouteSummaries.length ? orderedRouteSummaries.join('\n') : '- Aucun tronçon détaillé disponible',
+        '',
+        'Escales / mouillages / arrêts prévus :',
+        orderedStops.length ? orderedStops.join('\n') : '- Aucune escale détaillée disponible',
+        '',
+        'Ta mission :',
+        '1. Analyser le parcours dans l’ordre réel des escales.',
+        '2. Me proposer, pour chaque escale ou zone importante du trajet, les lieux touristiques à ne pas manquer.',
+        '3. Suggérer des idées d’activités réalistes pour un équipage en escale courte ou moyenne.',
+        '4. Donner de bonnes adresses de restaurants intéressants, locaux, typiques ou reconnus.',
+        '5. Signaler les points d’intérêt emblématiques, les villages, criques, marchés, promenades, panoramas, musées ou expériences locales.',
+        '6. Éviter les recommandations trop génériques ou éloignées du parcours réellement navigué.',
+        '7. Si tu n’es pas certain d’une adresse précise, indique-le clairement au lieu d’inventer.',
+        '',
+        'Format de réponse attendu :',
+        '- Commence par un résumé de 8 à 12 lignes du potentiel touristique global du voyage.',
+        '- Puis fais une section par escale ou zone traversée, dans l’ordre du voyage.',
+        '- Pour chaque escale, donne :',
+        '  - pourquoi s’y arrêter',
+        '  - 3 à 5 incontournables',
+        '  - 2 à 4 idées d’activités',
+        '  - 2 à 5 restaurants conseillés avec une justification courte',
+        '  - une ambiance ou un conseil local',
+        '- Termine par :',
+        '  - top 5 absolu du parcours',
+        '  - top 5 restaurants du voyage',
+        '  - 3 expériences à ne pas rater',
+        '  - 3 conseils pratiques pour profiter des escales',
+        '',
+        'Contraintes :',
+        '- Réponse en français.',
+        '- Style clair, concret, élégant, utile pour préparer un dossier de voyage.',
+        '- Pas de blabla.',
+        '- Pas d’invention.',
+        '- Privilégier des recommandations réalistes pour des navigateurs en escale.'
+    ].join('\n');
+}
+
+function fillVoyageLlmPromptTextarea() {
+    const textarea = document.getElementById('voyageLlmPromptTextarea');
+    if (!textarea) return false;
+
+    const plan = getSelectedVoyagePlan();
+    if (!plan) {
+        textarea.value = '';
+        setVoyageLlmPromptStatus(t('Sélectionne d\'abord un voyage.', 'Selecciona primero un viaje.', 'Select a trip first.'), true);
+        return false;
+    }
+
+    const timeline = computeVoyagePlanTimeline(plan);
+    if (!timeline.length) {
+        textarea.value = '';
+        setVoyageLlmPromptStatus(t('Ajoute au moins une étape au voyage pour générer le prompt.', 'Añade al menos una etapa al viaje para generar el prompt.', 'Add at least one leg to generate the prompt.'), true);
+        return false;
+    }
+
+    textarea.value = buildVoyageTourismPrompt(plan, timeline);
+    setVoyageLlmPromptStatus(t('Prompt généré pour le voyage actif.', 'Prompt generado para el viaje activo.', 'Prompt generated for the active trip.'));
+    return true;
+}
+
+function closeVoyageLlmPromptModal() {
+    const modal = document.getElementById('voyageLlmPromptModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function openVoyageLlmPromptModal() {
+    const modal = document.getElementById('voyageLlmPromptModal');
+    const textarea = document.getElementById('voyageLlmPromptTextarea');
+    if (!modal || !textarea) return;
+
+    modal.style.display = 'flex';
+    const ok = fillVoyageLlmPromptTextarea();
+    if (ok) {
+        textarea.focus();
+        textarea.select();
+    }
+}
+
+async function copyVoyageLlmPromptToClipboard() {
+    const textarea = document.getElementById('voyageLlmPromptTextarea');
+    if (!textarea || !textarea.value.trim()) {
+        setVoyageLlmPromptStatus(t('Aucun prompt à copier.', 'Ningún prompt para copiar.', 'No prompt to copy.'), true);
+        return;
+    }
+
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(textarea.value);
+        } else {
+            textarea.focus();
+            textarea.select();
+            document.execCommand('copy');
+        }
+        setVoyageLlmPromptStatus(t('Prompt copié dans le presse-papiers.', 'Prompt copiado al portapapeles.', 'Prompt copied to clipboard.'));
+    } catch (_error) {
+        textarea.focus();
+        textarea.select();
+        setVoyageLlmPromptStatus(t('Copie automatique impossible. Le prompt est sélectionné.', 'No se pudo copiar automáticamente. El prompt está seleccionado.', 'Automatic copy failed. The prompt is selected.'), true);
+    }
 }
 
 function renderGooglePhotosPickerGrid(items) {
@@ -4913,6 +7227,7 @@ function renderWaypointPhotoList() {
             <div class="button-row">
                 <button type="button" class="js-waypoint-photo-go" data-id="${escapeHtml(entry.id)}" style="flex:1;">${t('Y aller', 'Ir')}</button>
                 <button type="button" class="js-waypoint-photo-center" data-id="${escapeHtml(entry.id)}" style="flex:1;">${t('Voir sur carte', 'Ver en mapa')}</button>
+                <button type="button" class="js-waypoint-photo-add-to-voyage" data-id="${escapeHtml(entry.id)}" style="flex:1;">${t('Ajouter au voyage', 'Añadir al viaje', 'Add to trip')}</button>
                 ${canEdit ? `<button type="button" class="js-waypoint-photo-edit" data-id="${escapeHtml(entry.id)}" style="flex:1;">${t('Modifier', 'Editar')}</button>` : ''}
                 ${canDelete ? `<button type="button" class="js-waypoint-photo-delete" data-id="${escapeHtml(entry.id)}" style="flex:1;">${t('Supprimer', 'Eliminar')}</button>` : ''}
             </div>
@@ -4977,6 +7292,15 @@ function renderWaypointPhotoList() {
             syncWaypointPhotoMarkersInView();
             const marker = waypointPhotoMarkersById.get(id);
             if (marker) marker.openPopup();
+        });
+    });
+
+    container.querySelectorAll('.js-waypoint-photo-add-to-voyage').forEach(button => {
+        button.addEventListener('click', () => {
+            const id = String(button.getAttribute('data-id') || '');
+            const entry = waypointPhotoEntries.find(item => item.id === id);
+            if (!entry) return;
+            addWaypointEntryToSelectedVoyagePlan(entry);
         });
     });
 
@@ -5462,6 +7786,19 @@ function addUserWaypoint(latlng, options = {}) {
     }
 
     return marker;
+}
+
+function findUserWaypointIndexByCoordinates(lat, lng, tolerance = 0.000001) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return -1;
+
+    return routePoints.findIndex(point => {
+        const pointLat = Number(point?.lat);
+        const pointLng = Number(point?.lng ?? point?.lon);
+        return Number.isFinite(pointLat)
+            && Number.isFinite(pointLng)
+            && Math.abs(pointLat - lat) <= tolerance
+            && Math.abs(pointLng - lng) <= tolerance;
+    });
 }
 
 function getArrivalReferenceDateTime() {
@@ -6355,6 +8692,700 @@ function getWeatherFavorabilityPenalty(weather) {
     return penalty;
 }
 
+function isPreferredAiDepartureHour(dateTime) {
+    if (!(dateTime instanceof Date) || Number.isNaN(dateTime.getTime())) return true;
+    const hour = dateTime.getHours();
+    return hour >= AI_ROUTE_DAYTIME_START_HOUR && hour < AI_ROUTE_DAYTIME_END_HOUR;
+}
+
+function getAiDepartureHourPenalty(dateTime) {
+    return isPreferredAiDepartureHour(dateTime) ? 0 : 28;
+}
+
+function formatAiDurationCell(hours) {
+    return Number.isFinite(hours) ? formatDurationHours(hours) : 'N/A';
+}
+
+function buildAiRouteComment(item) {
+    const comments = [];
+
+    if (Number(item?.strongWindHours) >= 2) {
+        comments.push(t('vent fort présent', 'viento fuerte presente'));
+    } else if (Number(item?.maxWind) <= RECOMMENDED_MAX_WIND_KN) {
+        comments.push(t('vent contenu', 'viento contenido'));
+    }
+
+    if (Number(item?.calmHours) >= 2) {
+        comments.push(t('risque de pétole', 'riesgo de calma'));
+    } else if (Number(item?.lightWindHours) <= 1.5) {
+        comments.push(t('peu de molles', 'pocas encalmadas'));
+    }
+
+    if (Number(item?.motorSharePercent) >= 25) {
+        comments.push(t('moteur notable', 'motor notable'));
+    }
+
+    if (!isPreferredAiDepartureHour(item?.departureDateTime)) {
+        comments.push(t('départ nocturne', 'salida nocturna'));
+    }
+
+    if (Number(item?.totalTimeHours) > AI_ROUTE_MAX_DURATION_HOURS) {
+        comments.push(t('traversée trop longue', 'travesia demasiado larga'));
+    }
+
+    return comments.length ? comments.join(' · ') : t('équilibre météo favorable', 'equilibrio meteo favorable');
+}
+
+function buildAiRouteReason(item, index) {
+    const reasons = [];
+
+    if (index === 0) {
+        reasons.push(t('meilleure fenêtre globale', 'mejor ventana global'));
+    }
+
+    if (Number(item?.strongWindHours) <= 0.5 && Number(item?.maxWind) <= RECOMMENDED_MAX_WIND_KN) {
+        reasons.push(t('évite les coups de vent', 'evita los golpes de viento'));
+    } else if (Number(item?.strongWindHours) >= 2 || Number(item?.maxWind) > RECOMMENDED_MAX_WIND_KN) {
+        reasons.push(t('reste exposée au vent fort', 'sigue expuesta al viento fuerte'));
+    }
+
+    if (Number(item?.calmHours) <= 0.5 && Number(item?.motorSharePercent) <= 10) {
+        reasons.push(t('évite la pétole', 'evita la calma'));
+    } else if (Number(item?.calmHours) >= 2 || Number(item?.motorSharePercent) >= 25) {
+        reasons.push(t('risque de molles / moteur', 'riesgo de calmas / motor'));
+    }
+
+    if (isPreferredAiDepartureHour(item?.departureDateTime)) {
+        reasons.push(t('départ en horaire favorable', 'salida en horario favorable'));
+    } else {
+        reasons.push(t('départ de nuit moins favorable', 'salida nocturna menos favorable'));
+    }
+
+    if (Number(item?.totalTimeHours) <= 72) {
+        reasons.push(t('durée contenue', 'duracion contenida'));
+    } else if (Number(item?.totalTimeHours) > AI_ROUTE_MAX_DURATION_HOURS) {
+        reasons.push(t('durée limite dépassée', 'duracion limite superada'));
+    }
+
+    return reasons.slice(0, 3).join(' · ');
+}
+
+function getAiRouteStatusMeta(item, index) {
+    const strongWindHours = Number(item?.strongWindHours) || 0;
+    const calmHours = Number(item?.calmHours) || 0;
+    const motorSharePercent = Number(item?.motorSharePercent) || 0;
+    const maxWind = Number(item?.maxWind) || 0;
+    const totalTimeHours = Number(item?.totalTimeHours) || 0;
+    const preferredDeparture = isPreferredAiDepartureHour(item?.departureDateTime);
+    const isOverallBest = index === 0 || Number(item?.globalRank) === 0;
+
+    const isGood =
+        isOverallBest
+        || (
+            strongWindHours <= 0.5
+            && maxWind <= RECOMMENDED_MAX_WIND_KN
+            && calmHours <= 0.75
+            && motorSharePercent <= 15
+            && totalTimeHours <= 72
+            && preferredDeparture
+        );
+
+    if (isGood) {
+        return {
+            key: 'good',
+            label: t('Bon compromis', 'Buen compromiso')
+        };
+    }
+
+    const shouldAvoid =
+        strongWindHours >= 2
+        || maxWind > RECOMMENDED_MAX_WIND_KN + 4
+        || calmHours >= 2
+        || motorSharePercent >= 25
+        || totalTimeHours > AI_ROUTE_MAX_DURATION_HOURS;
+
+    if (shouldAvoid) {
+        return {
+            key: 'avoid',
+            label: t('A éviter', 'Evitar')
+        };
+    }
+
+    return {
+        key: 'acceptable',
+        label: t('Acceptable', 'Aceptable')
+    };
+}
+
+function updateAiRouteRefreshButtonState() {
+    const button = document.getElementById('refreshAiRoutesBtn');
+    if (!button) return;
+    button.disabled = !lastAiRouteMatrixCache;
+}
+
+function updateMapWorkspaceLayoutState() {
+    const mapContainer = document.getElementById('mapWorkspace');
+    const aiRouteDockPanel = document.getElementById('aiRouteDockPanel');
+    if (!mapContainer) return;
+
+    const shouldShowDocumentOnly = activeTabName === 'document';
+    const shouldShowAiMatrixOnly = activeTabName === 'routing' && isAiRouteMatrixVisible && !!lastAiRouteMatrixCache?.candidates?.length;
+    const shouldShowVoyagesOnly = activeTabName === 'voyages';
+
+    if (aiRouteDockPanel) {
+        aiRouteDockPanel.classList.toggle('is-visible', shouldShowAiMatrixOnly);
+    }
+
+    mapContainer.classList.toggle('map-workspace--document-only', shouldShowDocumentOnly);
+    mapContainer.classList.toggle('map-workspace--ai-matrix-only', shouldShowAiMatrixOnly && !shouldShowDocumentOnly);
+    mapContainer.classList.toggle('map-workspace--voyages-only', shouldShowVoyagesOnly);
+
+    if (!shouldShowAiMatrixOnly && lastAiRouteTooltipIndex >= 0) {
+        hideAiRouteTooltip();
+    }
+
+    if (map && activeTabName !== 'maintenance') {
+        window.setTimeout(() => {
+            map.invalidateSize();
+        }, 80);
+    }
+}
+
+function invalidateAiRouteAnalysisState(message = null) {
+    lastAiRouteCandidates = [];
+    lastAiRouteMatrixCache = null;
+    isAiRouteMatrixVisible = false;
+    updateAiRouteRefreshButtonState();
+
+    const info = document.getElementById('aiRouteSuggestionInfo');
+    const container = document.getElementById('aiRouteSuggestions');
+    if (info) {
+        info.textContent = message || t('Analyse route + météo: en attente', 'Analisis ruta + meteo: en espera');
+    }
+    if (container) {
+        container.innerHTML = '';
+    }
+    updateMapWorkspaceLayoutState();
+}
+
+function restoreAiRouteMatrixViewFromCache() {
+    if (!lastAiRouteMatrixCache?.candidates?.length) return false;
+    renderAiRouteCandidates(lastAiRouteMatrixCache, { fromCache: true });
+    return true;
+}
+
+function buildAiRouteCacheSignature() {
+    const pointsSignature = normalizeRouteScenarioPoints(routePoints)
+        .map(point => `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`)
+        .join('|');
+
+    return JSON.stringify({
+        departureDate,
+        tackingTimeHours: Number.isFinite(tackingTimeHours) ? Number(tackingTimeHours.toFixed(2)) : 0,
+        route: pointsSignature
+    });
+}
+
+function getAiRouteMatrixBaseDate() {
+    const dateOnly = new Date(`${departureDate}T00:00:00`);
+    if (!Number.isNaN(dateOnly.getTime())) return dateOnly;
+    const fallback = new Date();
+    fallback.setHours(0, 0, 0, 0);
+    return fallback;
+}
+
+function formatAiRouteMatrixDayLabel(dateTime) {
+    if (!(dateTime instanceof Date) || Number.isNaN(dateTime.getTime())) return 'N/A';
+    const locale = currentLanguage === 'es' ? 'es-ES' : 'fr-FR';
+    return new Intl.DateTimeFormat(locale, {
+        weekday: 'short',
+        day: '2-digit',
+        month: '2-digit'
+    }).format(dateTime);
+}
+
+function formatAiRouteMatrixHourLabel(hour) {
+    return `${String(hour).padStart(2, '0')}:00`;
+}
+
+function clampAiRouteScore(value) {
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function buildAiRouteDecisionScoreContext(candidates) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return null;
+    }
+
+    const aiScores = candidates
+        .map(item => Number(item?.aiScore))
+        .filter(Number.isFinite);
+
+    if (!aiScores.length) {
+        return null;
+    }
+
+    return {
+        minAiScore: Math.min(...aiScores),
+        maxAiScore: Math.max(...aiScores)
+    };
+}
+
+function getAiRouteDecisionScore(item, context = null) {
+    let score = 100;
+    const aiScore = Number(item?.aiScore);
+    const strongWindHours = Number(item?.strongWindHours) || 0;
+    const calmHours = Number(item?.calmHours) || 0;
+    const motorSharePercent = Number(item?.motorSharePercent) || 0;
+    const totalTimeHours = Number(item?.totalTimeHours) || 0;
+    const departureTwa = Number(item?.departureTwa);
+
+    score -= strongWindHours * 7;
+    score -= calmHours * 6;
+    score -= Math.max(0, motorSharePercent - 10) * 0.6;
+    score -= Math.max(0, totalTimeHours - 60) * 0.25;
+
+    if (Number.isFinite(departureTwa)) {
+        if (departureTwa >= 55 && departureTwa <= 140) score += 6;
+        else if (departureTwa < 35 || departureTwa > 165) score -= 8;
+        else if (departureTwa < 55 || departureTwa > 150) score -= 2;
+    }
+
+    if (Number.isFinite(aiScore) && context && Number.isFinite(context.minAiScore) && Number.isFinite(context.maxAiScore)) {
+        const spread = context.maxAiScore - context.minAiScore;
+        const relativeAiScore = spread > 0
+            ? ((context.maxAiScore - aiScore) / spread) * 100
+            : 100;
+        score = score * 0.7 + relativeAiScore * 0.3;
+    }
+
+    return clampAiRouteScore(score);
+}
+
+function applyAiRouteDecisionScores(candidates) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return;
+    const context = buildAiRouteDecisionScoreContext(candidates);
+    candidates.forEach(item => {
+        item.decisionScore = getAiRouteDecisionScore(item, context);
+    });
+}
+
+function describeAiRouteWindAngle(twa) {
+    if (!Number.isFinite(twa)) return t('angle inconnu', 'angulo desconocido');
+    if (twa < 35) return t('vent debout', 'viento de proa');
+    if (twa < 60) return t('près', 'ceñida');
+    if (twa <= 120) return t('travers', 'través');
+    if (twa <= 155) return t('portant', 'portante');
+    return t('vent arrière', 'popa');
+}
+
+function getAiRouteWindSummary(item) {
+    const windSpeed = Number(item?.departureWeather?.windSpeed);
+    const windDirection = Number(item?.departureWindDirection);
+    const twa = Number(item?.departureTwa);
+    const angleLabel = describeAiRouteWindAngle(twa);
+    const directionLabel = Number.isFinite(windDirection)
+        ? `${Math.round(windDirection)}° ${degreesToCardinalFr(windDirection)}`
+        : t('dir. N/A', 'dir. N/A');
+    const speedLabel = Number.isFinite(windSpeed) ? `${windSpeed.toFixed(0)} kn` : 'N/A';
+    return `${angleLabel} · ${speedLabel} · ${directionLabel}`;
+}
+
+function shortenAiRouteVariantLabel(label) {
+    const source = String(label || '').trim();
+    if (!source) return t('Route', 'Ruta');
+    if (source === t('Route actuelle', 'Ruta actual')) return t('Actuelle', 'Actual');
+    if (source === t('Contournement nord', 'Rodeo norte')) return t('Nord', 'Norte');
+    if (source === t('Contournement sud', 'Rodeo sur')) return t('Sud', 'Sur');
+    if (source === t('Directe départ-arrivée', 'Directa salida-llegada')) return t('Directe', 'Directa');
+    return source;
+}
+
+function isAiNightHour(dateTime) {
+    if (!(dateTime instanceof Date) || Number.isNaN(dateTime.getTime())) return false;
+    const hour = dateTime.getHours();
+    return hour < AI_ROUTE_DAYTIME_START_HOUR || hour >= AI_ROUTE_DAYTIME_END_HOUR;
+}
+
+function getAiTimelineSegmentStatusMeta(segment) {
+    const windSpeed = Number(segment?.windSpeed) || 0;
+    const waveHeight = Number(segment?.waveHeight) || 0;
+    const motorSharePercent = Number(segment?.motorSharePercent) || 0;
+    const twa = Number(segment?.twa);
+
+    if (
+        windSpeed > RECOMMENDED_MAX_WIND_KN + 3
+        || windSpeed < MOTOR_WIND_THRESHOLD_KN
+        || waveHeight >= 2.4
+        || motorSharePercent >= 50
+        || (Number.isFinite(twa) && (twa < 35 || twa > 165))
+    ) {
+        return { key: 'avoid', label: t('A éviter', 'Evitar') };
+    }
+
+    if (
+        windSpeed >= 9
+        && windSpeed <= RECOMMENDED_MAX_WIND_KN
+        && waveHeight <= 1.6
+        && motorSharePercent <= 20
+        && (!Number.isFinite(twa) || (twa >= 55 && twa <= 145))
+    ) {
+        return { key: 'good', label: t('Bon compromis', 'Buen compromiso') };
+    }
+
+    return { key: 'acceptable', label: t('Acceptable', 'Aceptable') };
+}
+
+function getAiTimelineSegmentScore(segment) {
+    let score = 100;
+    const windSpeed = Number(segment?.windSpeed) || 0;
+    const waveHeight = Number(segment?.waveHeight) || 0;
+    const motorSharePercent = Number(segment?.motorSharePercent) || 0;
+    const twa = Number(segment?.twa);
+
+    if (windSpeed < MOTOR_WIND_THRESHOLD_KN) score -= 28;
+    else score -= Math.abs(windSpeed - 14) * 2.4;
+    if (windSpeed > RECOMMENDED_MAX_WIND_KN) score -= (windSpeed - RECOMMENDED_MAX_WIND_KN) * 4.5;
+    score -= waveHeight * 10;
+    score -= motorSharePercent * 0.45;
+
+    if (Number.isFinite(twa)) {
+        if (twa >= 55 && twa <= 140) score += 6;
+        else if (twa < 35 || twa > 165) score -= 10;
+        else if (twa < 50 || twa > 150) score -= 3;
+    }
+
+    if (segment?.isNight) score -= 3;
+    return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function buildAiTimelineSegment(dateTime, partial) {
+    const segment = {
+        dateTime,
+        durationHours: Number(partial?.durationHours) || 0,
+        windSpeed: Number(partial?.windHours) > 0 ? partial.windWeighted / partial.windHours : null,
+        windGust: Number(partial?.gustHours) > 0 ? partial.gustWeighted / partial.gustHours : null,
+        waveHeight: Number(partial?.waveHours) > 0 ? partial.waveWeighted / partial.waveHours : null,
+        currentSpeed: Number(partial?.currentHours) > 0 ? partial.currentWeighted / partial.currentHours : null,
+        windDirection: Number(partial?.windDirectionHours) > 0 ? partial.windDirectionWeighted / partial.windDirectionHours : null,
+        bearing: Number(partial?.bearingHours) > 0 ? partial.bearingWeighted / partial.bearingHours : null,
+        twa: Number(partial?.twaHours) > 0 ? partial.twaWeighted / partial.twaHours : null,
+        motorSharePercent: Number(partial?.durationHours) > 0 ? Math.round((partial.motorHours / partial.durationHours) * 100) : 0,
+        isNight: isAiNightHour(dateTime)
+    };
+    segment.segmentScore = getAiTimelineSegmentScore(segment);
+    segment.status = getAiTimelineSegmentStatusMeta(segment);
+    return segment;
+}
+
+function buildAiRouteTimelineSegmentsFromBuckets(timelineBuckets, departureDateTime) {
+    const indexes = Array.from(timelineBuckets.keys()).sort((a, b) => a - b);
+    return indexes.map(index => {
+        const bucket = timelineBuckets.get(index);
+        const dateTime = new Date(departureDateTime.getTime() + index * AI_ROUTE_DEPARTURE_STEP_HOURS * 3600 * 1000);
+        return buildAiTimelineSegment(dateTime, bucket);
+    });
+}
+
+function formatAiTimelineHeader(offsetIndex) {
+    const totalHours = offsetIndex * AI_ROUTE_DEPARTURE_STEP_HOURS;
+    const dayOffset = Math.floor(totalHours / 24);
+    const hourOffset = totalHours % 24;
+    return dayOffset > 0
+        ? `J+${dayOffset} ${String(hourOffset).padStart(2, '0')}h`
+        : `H+${String(hourOffset).padStart(2, '0')}h`;
+}
+
+function selectTopAiRouteDeparturesPerDay(candidates, maxPerDay = 3) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
+    const grouped = new Map();
+    candidates.forEach(candidate => {
+        const dayIndex = Number(candidate?.matrixDayIndex);
+        if (!Number.isFinite(dayIndex)) return;
+        const list = grouped.get(dayIndex) || [];
+        list.push(candidate);
+        grouped.set(dayIndex, list);
+    });
+
+    const selected = [];
+    Array.from(grouped.keys()).sort((a, b) => a - b).forEach(dayIndex => {
+        const dayCandidates = grouped.get(dayIndex) || [];
+        dayCandidates.sort((a, b) => {
+            const scoreA = Number(a?.decisionScore) || 0;
+            const scoreB = Number(b?.decisionScore) || 0;
+            if (scoreA !== scoreB) return scoreB - scoreA;
+            return (Number(a?.aiScore) || 0) - (Number(b?.aiScore) || 0);
+        });
+        selected.push(...dayCandidates.slice(0, maxPerDay));
+    });
+
+    return selected;
+}
+
+function randomInRange(min, max) {
+    return min + Math.random() * (max - min);
+}
+
+function buildMockDepartureWeather(statusKey) {
+    const windDirection = Math.round(randomInRange(0, 359));
+    const waveHeight = statusKey === 'good'
+        ? randomInRange(0.4, 1.2)
+        : statusKey === 'acceptable'
+            ? randomInRange(0.9, 2.1)
+            : randomInRange(1.8, 3.3);
+    const windSpeed = statusKey === 'good'
+        ? randomInRange(9, 16)
+        : statusKey === 'acceptable'
+            ? randomInRange(6, 20)
+            : randomInRange(3, 28);
+
+    return {
+        windSpeed,
+        windGust: windSpeed + randomInRange(1, statusKey === 'avoid' ? 10 : 5),
+        windDirection,
+        waveHeight,
+        precipitation: statusKey === 'avoid' ? randomInRange(0.8, 4.2) : randomInRange(0, 1.4),
+        currentSpeedKnots: randomInRange(0.1, statusKey === 'avoid' ? 1.9 : 1.1)
+    };
+}
+
+function buildMockAiRouteCandidate(routeVariant, candidateDate, dayIndex, hour) {
+    const qualityRoll = Math.random();
+    const statusKey = qualityRoll < 0.36 ? 'good' : qualityRoll < 0.76 ? 'acceptable' : 'avoid';
+    const departureWeather = buildMockDepartureWeather(statusKey);
+    const baseBearing = Array.isArray(routeVariant?.points) && routeVariant.points.length >= 2
+        ? getBearing(
+            { lat: routeVariant.points[0].lat, lon: routeVariant.points[0].lng },
+            { lat: routeVariant.points[1].lat, lon: routeVariant.points[1].lng }
+        )
+        : 90;
+    const departureTwa = Math.max(20, Math.min(175,
+        statusKey === 'good'
+            ? randomInRange(55, 125)
+            : statusKey === 'acceptable'
+                ? randomInRange(38, 150)
+                : (Math.random() < 0.5 ? randomInRange(20, 38) : randomInRange(150, 175))
+    ));
+    const departureWindDirection = Number.isFinite(baseBearing)
+        ? (baseBearing + departureTwa + 360) % 360
+        : departureWeather.windDirection;
+    departureWeather.windDirection = departureWindDirection;
+
+    const totalTimeHours = statusKey === 'good'
+        ? randomInRange(42, 66)
+        : statusKey === 'acceptable'
+            ? randomInRange(54, 82)
+            : randomInRange(72, 104);
+    const calmHours = statusKey === 'good'
+        ? randomInRange(0, 0.8)
+        : statusKey === 'acceptable'
+            ? randomInRange(0.4, 2)
+            : randomInRange(1.8, 5.2);
+    const strongWindHours = statusKey === 'good'
+        ? randomInRange(0, 0.5)
+        : statusKey === 'acceptable'
+            ? randomInRange(0.2, 1.5)
+            : randomInRange(1.8, 6.5);
+    const motorSharePercent = statusKey === 'good'
+        ? Math.round(randomInRange(0, 12))
+        : statusKey === 'acceptable'
+            ? Math.round(randomInRange(8, 22))
+            : Math.round(randomInRange(18, 46));
+    const averageWind = statusKey === 'good'
+        ? randomInRange(11, 16)
+        : statusKey === 'acceptable'
+            ? randomInRange(9, 18)
+            : randomInRange(7, 20);
+    const maxWind = statusKey === 'good'
+        ? randomInRange(14, 19.5)
+        : statusKey === 'acceptable'
+            ? randomInRange(18, 24)
+            : randomInRange(23, 31);
+    const aiScore = statusKey === 'good'
+        ? randomInRange(18, 45)
+        : statusKey === 'acceptable'
+            ? randomInRange(44, 76)
+            : randomInRange(74, 126);
+    const arrivalDateTime = new Date(candidateDate.getTime() + totalTimeHours * 3600 * 1000);
+    const routePointCount = Array.isArray(routeVariant?.points) ? routeVariant.points.length : 2;
+    const timelineSegments = [];
+    const segmentCount = Math.max(1, Math.ceil(totalTimeHours / AI_ROUTE_DEPARTURE_STEP_HOURS));
+
+    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+        const segmentDateTime = new Date(candidateDate.getTime() + segmentIndex * AI_ROUTE_DEPARTURE_STEP_HOURS * 3600 * 1000);
+        const segmentStatusKey = statusKey === 'good'
+            ? (Math.random() < 0.72 ? 'good' : 'acceptable')
+            : statusKey === 'acceptable'
+                ? (Math.random() < 0.2 ? 'good' : Math.random() < 0.82 ? 'acceptable' : 'avoid')
+                : (Math.random() < 0.7 ? 'avoid' : 'acceptable');
+        const segmentWeather = buildMockDepartureWeather(segmentStatusKey);
+        const segmentTwa = Math.max(20, Math.min(175,
+            segmentStatusKey === 'good'
+                ? randomInRange(55, 130)
+                : segmentStatusKey === 'acceptable'
+                    ? randomInRange(38, 152)
+                    : (Math.random() < 0.5 ? randomInRange(20, 38) : randomInRange(152, 175))
+        ));
+        const segmentWindDirection = Number.isFinite(baseBearing)
+            ? (baseBearing + segmentTwa + 360) % 360
+            : segmentWeather.windDirection;
+        timelineSegments.push(buildAiTimelineSegment(segmentDateTime, {
+            durationHours: Math.min(AI_ROUTE_DEPARTURE_STEP_HOURS, Math.max(0.5, totalTimeHours - segmentIndex * AI_ROUTE_DEPARTURE_STEP_HOURS)),
+            windWeighted: segmentWeather.windSpeed,
+            windHours: 1,
+            gustWeighted: segmentWeather.windGust,
+            gustHours: 1,
+            waveWeighted: segmentWeather.waveHeight,
+            waveHours: 1,
+            currentWeighted: segmentWeather.currentSpeedKnots,
+            currentHours: 1,
+            windDirectionWeighted: segmentWindDirection,
+            windDirectionHours: 1,
+            bearingWeighted: baseBearing,
+            bearingHours: 1,
+            twaWeighted: segmentTwa,
+            twaHours: 1,
+            motorHours: segmentStatusKey === 'avoid' ? randomInRange(0.8, 2.4) : randomInRange(0, 0.8)
+        }));
+    }
+
+    return {
+        departureDateTime: candidateDate,
+        arrivalDateTime,
+        totalTimeHours,
+        maxWind,
+        maxGust: maxWind + randomInRange(1, statusKey === 'avoid' ? 8 : 4),
+        minWind: Math.max(1, averageWind - randomInRange(3, 7)),
+        hasMotorSegment: motorSharePercent > 0,
+        motorTimeHours: totalTimeHours * (motorSharePercent / 100),
+        motorSharePercent,
+        departureWeather,
+        arrivalWeather: buildMockDepartureWeather(statusKey === 'good' ? 'acceptable' : statusKey),
+        departureBearing: baseBearing,
+        departureWindDirection,
+        departureTwa,
+        score: aiScore,
+        aiScore,
+        averageWind,
+        averageCurrent: randomInRange(0.2, 1.3),
+        calmHours,
+        lightWindHours: calmHours + randomInRange(0.2, 1.6),
+        idealWindHours: Math.max(0, totalTimeHours - calmHours - strongWindHours - randomInRange(4, 12)),
+        strongWindHours,
+        strongGustHours: Math.max(0, strongWindHours - randomInRange(0, 0.8)),
+        maxWave: departureWeather.waveHeight,
+        isSafe: maxWind <= RECOMMENDED_MAX_WIND_KN,
+        isNoMotor: motorSharePercent <= 5,
+        routePointCount,
+        label: t('Simulation', 'Simulacion'),
+        sailMode: 'auto',
+        routeVariantLabel: routeVariant?.routeVariantLabel || t('Route actuelle', 'Ruta actual'),
+        routeScenarioPoints: Array.isArray(routeVariant?.points) ? routeVariant.points : [],
+        timelineSegments,
+        matrixDayIndex: dayIndex,
+        matrixHour: hour
+    };
+}
+
+function buildMockAiRouteMatrixCandidates(baseDateTime, routeVariants) {
+    const slotWinners = [];
+
+    for (let dayIndex = 0; dayIndex < AI_ROUTE_ANALYSIS_WINDOW_DAYS; dayIndex += 1) {
+        const dayDate = new Date(baseDateTime.getTime());
+        dayDate.setDate(baseDateTime.getDate() + dayIndex);
+        dayDate.setHours(0, 0, 0, 0);
+
+        for (const hour of AI_ROUTE_MATRIX_HOURS) {
+            const candidateDate = new Date(dayDate.getTime());
+            candidateDate.setHours(hour, 0, 0, 0);
+
+            const variantIndex = Math.floor(randomInRange(0, Math.max(1, routeVariants.length)));
+            const routeVariant = routeVariants[Math.min(routeVariants.length - 1, variantIndex)] || routeVariants[0];
+            const candidate = buildMockAiRouteCandidate(routeVariant, candidateDate, dayIndex, hour);
+            slotWinners.push(candidate);
+        }
+    }
+
+    const ranking = [...slotWinners].sort((a, b) => a.aiScore - b.aiScore);
+    applyAiRouteDecisionScores(slotWinners);
+    ranking.forEach((item, index) => {
+        item.globalRank = index;
+    });
+
+    return slotWinners;
+}
+
+function buildAiRouteTooltipHtml(item, segmentIndex = -1) {
+    if (!item) return '';
+
+    const routeName = shortenAiRouteVariantLabel(item?.routeVariantLabel);
+    const timelineSegments = Array.isArray(item?.timelineSegments) ? item.timelineSegments : [];
+    const segment = Number.isInteger(segmentIndex) && segmentIndex >= 0 ? timelineSegments[segmentIndex] || null : null;
+
+    if (segment) {
+        const status = segment.status || getAiTimelineSegmentStatusMeta(segment);
+        const score = Number(segment?.segmentScore) || 0;
+        const departureWind = Number.isFinite(segment?.windSpeed) ? `${segment.windSpeed.toFixed(1)} kn` : 'N/A';
+        const departureDir = Number.isFinite(segment?.windDirection)
+            ? `${Math.round(segment.windDirection)}° ${degreesToCardinalFr(segment.windDirection)}`
+            : 'N/A';
+
+        return `<div class="ai-route-tooltip__title">${escapeHtml(formatWeekdayHourUtc(segment.dateTime))} · ${escapeHtml(formatAiTimelineHeader(segmentIndex))}</div>` +
+            `<div class="ai-route-tooltip__pill"><span class="ai-route-status ai-route-status--${status.key}">${escapeHtml(status.label)}</span><strong>${score}/100</strong></div>` +
+            `<div class="ai-route-tooltip__line"><strong>${t('Route', 'Ruta')}:</strong> ${escapeHtml(routeName)}</div>` +
+            `<div class="ai-route-tooltip__line"><strong>${t('Vent segment', 'Viento segmento')}:</strong> ${escapeHtml(departureWind)} · ${escapeHtml(departureDir)}</div>` +
+            `<div class="ai-route-tooltip__line"><strong>${t('Angle', 'Angulo')}:</strong> ${escapeHtml(describeAiRouteWindAngle(segment?.twa))} (${Number.isFinite(segment?.twa) ? `${Math.round(segment.twa)}°` : 'N/A'})</div>` +
+            `<div class="ai-route-tooltip__line"><strong>${t('Houle', 'Oleaje')}:</strong> ${escapeHtml(Number.isFinite(segment?.waveHeight) ? `${segment.waveHeight.toFixed(1)} m` : 'N/A')}</div>` +
+            `<div class="ai-route-tooltip__line"><strong>${t('Moteur', 'Motor')}:</strong> ${escapeHtml(String(Number.isFinite(segment?.motorSharePercent) ? `${segment.motorSharePercent}%` : 'N/A'))} · <strong>${t('Durée', 'Duracion')}:</strong> ${escapeHtml(formatAiDurationCell(segment.durationHours))}</div>` +
+            `<div class="ai-route-tooltip__line ai-route-table__muted">${segment.isNight ? escapeHtml(t('Segment de nuit', 'Segmento nocturno')) : escapeHtml(t('Segment de jour', 'Segmento diurno'))}</div>`;
+    }
+
+    const status = getAiRouteStatusMeta(item, item?.globalRank);
+    const departureWind = Number.isFinite(item?.departureWeather?.windSpeed) ? `${item.departureWeather.windSpeed.toFixed(1)} kn` : 'N/A';
+    const departureDir = Number.isFinite(item?.departureWindDirection)
+        ? `${Math.round(item.departureWindDirection)}° ${degreesToCardinalFr(item.departureWindDirection)}`
+        : 'N/A';
+    const score = Number(item?.decisionScore) || 0;
+
+    return `<div class="ai-route-tooltip__title">${escapeHtml(formatWeekdayHourUtc(item.departureDateTime))}</div>` +
+        `<div class="ai-route-tooltip__pill"><span class="ai-route-status ai-route-status--${status.key}">${escapeHtml(status.label)}</span><strong>${score}/100</strong></div>` +
+        `<div class="ai-route-tooltip__line"><strong>${t('Route', 'Ruta')}:</strong> ${escapeHtml(routeName)}</div>` +
+        `<div class="ai-route-tooltip__line"><strong>${t('Vent départ', 'Viento salida')}:</strong> ${escapeHtml(departureWind)} · ${escapeHtml(departureDir)}</div>` +
+        `<div class="ai-route-tooltip__line"><strong>${t('Durée', 'Duracion')}:</strong> ${escapeHtml(formatAiDurationCell(item?.totalTimeHours))}</div>` +
+        `<div class="ai-route-tooltip__line ai-route-table__muted">${escapeHtml(buildAiRouteComment(item))}</div>`;
+}
+
+function positionAiRouteTooltip(clientX, clientY) {
+    const tooltip = document.getElementById('aiRouteMatrixTooltip');
+    if (!tooltip || tooltip.hidden) return;
+
+    const margin = 16;
+    const rect = tooltip.getBoundingClientRect();
+    const left = Math.min(window.innerWidth - rect.width - margin, clientX + 16);
+    const top = Math.min(window.innerHeight - rect.height - margin, clientY + 16);
+    tooltip.style.left = `${Math.max(margin, left)}px`;
+    tooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function showAiRouteTooltip(index, segmentIndex = -1, clientX = 0, clientY = 0) {
+    const tooltip = document.getElementById('aiRouteMatrixTooltip');
+    const item = lastAiRouteCandidates[index];
+    if (!tooltip || !item) return;
+
+    lastAiRouteTooltipIndex = index;
+    tooltip.innerHTML = buildAiRouteTooltipHtml(item, segmentIndex);
+    tooltip.hidden = false;
+    positionAiRouteTooltip(clientX, clientY);
+}
+
+function hideAiRouteTooltip() {
+    const tooltip = document.getElementById('aiRouteMatrixTooltip');
+    if (!tooltip) return;
+    lastAiRouteTooltipIndex = -1;
+    tooltip.hidden = true;
+}
+
 function normalizeRouteScenarioPoints(source) {
     if (!Array.isArray(source)) return [];
 
@@ -6378,6 +9409,16 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
     let minWind = Number.POSITIVE_INFINITY;
     let hasMotorSegment = false;
     let motorTimeHours = 0;
+    let weightedWindHours = 0;
+    let weightedCurrentHours = 0;
+    let routeWeatherPenalty = 0;
+    let calmHours = 0;
+    let lightWindHours = 0;
+    let idealWindHours = 0;
+    let strongWindHours = 0;
+    let strongGustHours = 0;
+    let maxWave = 0;
+    const timelineBuckets = new Map();
 
     for (let i = 0; i < points.length - 1; i++) {
         const start = { lat: points[i].lat, lon: points[i].lng };
@@ -6447,6 +9488,79 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
             const sog = getSpeedOverGround(correctedSpeed, rawSegment.bearing, weather);
             const safeSog = Number.isFinite(sog.speedKnots) ? Math.max(0.8, sog.speedKnots) : correctedSpeed;
             const timeHours = rawSegment.distance / safeSog;
+            const weightedTimeHours = Number.isFinite(timeHours) ? Math.max(0.25, timeHours) : 0.25;
+            const waveHeight = Number(weather?.waveHeight);
+            const currentSpeed = Number(weather?.currentSpeedKnots);
+            let remainingHours = timeHours;
+            let elapsedBeforeSegment = totalTimeHours;
+
+            while (remainingHours > 1e-6) {
+                const bucketIndex = Math.floor(elapsedBeforeSegment / AI_ROUTE_DEPARTURE_STEP_HOURS);
+                const bucketStartHours = bucketIndex * AI_ROUTE_DEPARTURE_STEP_HOURS;
+                const bucketRemainingHours = Math.max(0.01, (bucketStartHours + AI_ROUTE_DEPARTURE_STEP_HOURS) - elapsedBeforeSegment);
+                const chunkHours = Math.min(remainingHours, bucketRemainingHours);
+                const bucket = timelineBuckets.get(bucketIndex) || {
+                    durationHours: 0,
+                    windWeighted: 0,
+                    windHours: 0,
+                    gustWeighted: 0,
+                    gustHours: 0,
+                    waveWeighted: 0,
+                    waveHours: 0,
+                    currentWeighted: 0,
+                    currentHours: 0,
+                    windDirectionWeighted: 0,
+                    windDirectionHours: 0,
+                    bearingWeighted: 0,
+                    bearingHours: 0,
+                    twaWeighted: 0,
+                    twaHours: 0,
+                    motorHours: 0
+                };
+
+                bucket.durationHours += chunkHours;
+                bucket.windWeighted += windSpeed * chunkHours;
+                bucket.windHours += chunkHours;
+                bucket.gustWeighted += windGust * chunkHours;
+                bucket.gustHours += chunkHours;
+                if (Number.isFinite(waveHeight)) {
+                    bucket.waveWeighted += waveHeight * chunkHours;
+                    bucket.waveHours += chunkHours;
+                }
+                if (Number.isFinite(currentSpeed)) {
+                    bucket.currentWeighted += currentSpeed * chunkHours;
+                    bucket.currentHours += chunkHours;
+                }
+                if (Number.isFinite(windDirection)) {
+                    bucket.windDirectionWeighted += windDirection * chunkHours;
+                    bucket.windDirectionHours += chunkHours;
+                }
+                if (Number.isFinite(rawSegment?.bearing)) {
+                    bucket.bearingWeighted += rawSegment.bearing * chunkHours;
+                    bucket.bearingHours += chunkHours;
+                }
+                if (Number.isFinite(twa)) {
+                    bucket.twaWeighted += twa * chunkHours;
+                    bucket.twaHours += chunkHours;
+                }
+                if (isMotorSegment) {
+                    bucket.motorHours += chunkHours;
+                }
+
+                timelineBuckets.set(bucketIndex, bucket);
+                elapsedBeforeSegment += chunkHours;
+                remainingHours -= chunkHours;
+            }
+
+            routeWeatherPenalty += getWeatherFavorabilityPenalty(weather) * weightedTimeHours;
+            weightedWindHours += windSpeed * weightedTimeHours;
+            weightedCurrentHours += (Number.isFinite(currentSpeed) ? currentSpeed : 0) * weightedTimeHours;
+            if (windSpeed < MOTOR_WIND_THRESHOLD_KN) calmHours += weightedTimeHours;
+            if (windSpeed < 8) lightWindHours += weightedTimeHours;
+            if (windSpeed >= 8 && windSpeed <= 18) idealWindHours += weightedTimeHours;
+            if (windSpeed > RECOMMENDED_MAX_WIND_KN) strongWindHours += weightedTimeHours;
+            if (windGust > RECOMMENDED_MAX_WIND_KN + 5) strongGustHours += weightedTimeHours;
+            if (Number.isFinite(waveHeight)) maxWave = Math.max(maxWave, waveHeight);
             if (isMotorSegment) motorTimeHours += timeHours;
             totalTimeHours += timeHours;
         }
@@ -6469,15 +9583,40 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
         arrivalSlot.date,
         arrivalSlot.hour
     );
+    const departureBearing = points.length >= 2
+        ? getBearing(
+            { lat: points[0].lat, lon: points[0].lng },
+            { lat: points[1].lat, lon: points[1].lng }
+        )
+        : null;
+    const departureWindDirection = Number(departureWeather?.windDirection);
+    const departureTwa = Number.isFinite(departureBearing) && Number.isFinite(departureWindDirection)
+        ? computeTWA(departureBearing, departureWindDirection)
+        : null;
 
-    const score =
-        getWeatherFavorabilityPenalty(departureWeather) +
-        getWeatherFavorabilityPenalty(arrivalWeather) +
-        (maxWind > RECOMMENDED_MAX_WIND_KN ? (maxWind - RECOMMENDED_MAX_WIND_KN) * 50 : 0) +
-        totalTimeHours * 0.2 +
-        motorTimeHours * 8;
+    const weightedDurationHours = Math.max(0.5, totalTimeHours);
+    const averageWind = weightedWindHours > 0 ? weightedWindHours / weightedDurationHours : null;
+    const averageCurrent = weightedCurrentHours > 0 ? weightedCurrentHours / weightedDurationHours : null;
+    const baseScore =
+        routeWeatherPenalty +
+        getWeatherFavorabilityPenalty(departureWeather) * 0.5 +
+        getWeatherFavorabilityPenalty(arrivalWeather) * 0.5 +
+        calmHours * 18 +
+        Math.max(0, lightWindHours - calmHours) * 7 +
+        strongWindHours * 20 +
+        strongGustHours * 12 +
+        (maxWind > RECOMMENDED_MAX_WIND_KN ? (maxWind - RECOMMENDED_MAX_WIND_KN) * 45 : 0) +
+        (maxGust > RECOMMENDED_MAX_WIND_KN + 8 ? (maxGust - (RECOMMENDED_MAX_WIND_KN + 8)) * 18 : 0) +
+        motorTimeHours * 10 +
+        totalTimeHours * 0.25 -
+        idealWindHours * 2;
+    const score = Math.max(0, baseScore);
 
     const windFloorOk = Number.isFinite(minWind) && minWind > MOTOR_WIND_THRESHOLD_KN;
+    const motorSharePercent = Number.isFinite(totalTimeHours) && totalTimeHours > 0
+        ? Math.round((motorTimeHours / totalTimeHours) * 100)
+        : 0;
+    const timelineSegments = buildAiRouteTimelineSegmentsFromBuckets(timelineBuckets, departureDateTime);
 
     return {
         departureDateTime,
@@ -6488,115 +9627,26 @@ async function estimateRouteForDepartureOnPoints(routeScenarioPoints, departureD
         minWind,
         hasMotorSegment,
         motorTimeHours,
+        motorSharePercent,
         departureWeather,
         arrivalWeather,
+        departureBearing,
+        departureWindDirection,
+        departureTwa,
         score,
+        averageWind,
+        averageCurrent,
+        calmHours,
+        lightWindHours,
+        idealWindHours,
+        strongWindHours,
+        strongGustHours,
+        maxWave,
+        timelineSegments,
         isSafe: maxWind <= RECOMMENDED_MAX_WIND_KN,
         isNoMotor: windFloorOk && !hasMotorSegment,
         routePointCount: points.length
     };
-}
-
-async function estimateRouteForDeparture(departureDateTime) {
-    return estimateRouteForDepartureOnPoints(routePoints, departureDateTime);
-}
-
-function renderDepartureSuggestion(result) {
-    const container = document.getElementById('departureSuggestionInfo');
-    if (!container) return;
-
-    if (!result) {
-        lastDepartureSuggestion = null;
-        container.textContent = t('Suggestion départ: aucune fenêtre météo favorable trouvée.', 'Sugerencia salida: no se encontró una ventana meteo favorable.');
-        container.classList.remove('suggestion-clickable');
-        return;
-    }
-
-    lastDepartureSuggestion = result;
-    container.classList.add('suggestion-clickable');
-
-    const depWind = Number.isFinite(result?.departureWeather?.windSpeed) ? `${result.departureWeather.windSpeed.toFixed(1)} kn` : 'N/A';
-    const arrWind = Number.isFinite(result?.arrivalWeather?.windSpeed) ? `${result.arrivalWeather.windSpeed.toFixed(1)} kn` : 'N/A';
-    const maxWind = Number.isFinite(result?.maxWind) ? `${result.maxWind.toFixed(1)} kn` : 'N/A';
-    const maxGust = Number.isFinite(result?.maxGust) ? `${result.maxGust.toFixed(1)} kn` : 'N/A';
-    const minWind = Number.isFinite(result?.minWind) ? `${result.minWind.toFixed(1)} kn` : 'N/A';
-    const motorTime = Number.isFinite(result?.motorTimeHours) ? result.motorTimeHours : 0;
-    const motorShare = Number.isFinite(result?.totalTimeHours) && result.totalTimeHours > 0
-        ? Math.round((motorTime / result.totalTimeHours) * 100)
-        : 0;
-
-    container.innerHTML =
-        `<strong>${t('Départ conseillé', 'Salida recomendada')}:</strong> ${formatWeekdayHourUtc(result.departureDateTime)}<br>` +
-        `${t('Arrivée estimée', 'Llegada estimada')}: ${formatWeekdayHourUtc(result.arrivalDateTime)} · ${formatDurationHours(result.totalTimeHours)}<br>` +
-        `${t('Vent départ', 'Viento salida')}: ${depWind} · ${t('Vent arrivée', 'Viento llegada')}: ${arrWind} · ${t('Vent min trajet', 'Viento min trayecto')}: ${minWind}<br>` +
-        `${t('Vent maxi trajet', 'Viento máx trayecto')}: ${maxWind} · ${t('Rafale maxi trajet', 'Ráfaga máx trayecto')}: ${maxGust}<br>` +
-        `${t('Moteur estimé', 'Motor estimado')}: ${formatDurationHours(motorTime)} (${motorShare}%)`;
-}
-
-async function suggestBestDeparture() {
-    if (routePoints.length < 2) {
-        alert(t('Ajoute au moins 2 waypoints pour analyser un départ.', 'Añade al menos 2 waypoints para analizar una salida.'));
-        return;
-    }
-
-    const button = document.getElementById('suggestDepartureBtn');
-    if (button) {
-        button.disabled = true;
-        button.textContent = t('Analyse météo...', 'Análisis meteo...');
-    }
-
-    beginAiTrafficSession('Conseil départ météo');
-
-    try {
-        const baseDateTime = new Date(`${departureDate}T${departureTime}:00`);
-        if (Number.isNaN(baseDateTime.getTime())) throw new Error('invalid-departure');
-
-        const candidates = [];
-        const stepHours = 3;
-        const maxCandidates = Math.min(32, Math.max(8, forecastWindowDays * 8));
-
-        for (let i = 0; i < maxCandidates; i++) {
-            const candidateDate = new Date(baseDateTime.getTime() + i * stepHours * 3600 * 1000);
-            if ((candidateDate.getTime() - baseDateTime.getTime()) > forecastWindowDays * 24 * 3600 * 1000) break;
-            pushAiTrafficLog(`Évaluation départ candidat ${i + 1}/${maxCandidates} · ${formatWeekdayHourUtc(candidateDate)}`);
-            const estimate = await estimateRouteForDeparture(candidateDate);
-            if (estimate) candidates.push(estimate);
-        }
-
-        if (candidates.length === 0) {
-            renderDepartureSuggestion(null);
-            endAiTrafficSession('Aucune fenêtre météo viable trouvée');
-            return;
-        }
-
-        const safeCandidates = candidates.filter(c => c.isSafe);
-        const pool = safeCandidates.length ? safeCandidates : [];
-        pool.sort((a, b) => a.score - b.score);
-        const best = pool[0] || null;
-
-        if (!best) {
-            const container = document.getElementById('departureSuggestionInfo');
-            lastDepartureSuggestion = null;
-            if (container) {
-                container.classList.remove('suggestion-clickable');
-                container.textContent = t('Suggestion départ: aucune fenêtre météo ≤ 20 kn trouvée.', 'Sugerencia salida: no se encontró ventana meteo ≤ 20 kn.');
-            }
-            endAiTrafficSession('Aucune fenêtre ≤ 20 kn');
-            return;
-        }
-
-        renderDepartureSuggestion(best);
-        applyLastDepartureSuggestion();
-        endAiTrafficSession('Suggestion départ terminée');
-    } catch (_error) {
-        endAiTrafficSession('Erreur pendant le calcul de suggestion');
-        alert(t('Impossible de calculer une suggestion de départ pour le moment.', 'No se puede calcular una sugerencia de salida por ahora.'));
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.textContent = t('Conseiller départ météo (≤ 20 kn)', 'Sugerir salida meteo (≤ 20 kn)');
-        }
-    }
 }
 
 function updateRoutingControlsUiFromState() {
@@ -6643,37 +9693,157 @@ function updateRoutingTabAvailability() {
     }
 }
 
-function renderAiRouteCandidates(candidates) {
+function buildAiRouteMatrixData(candidates, baseDateTime, signature) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+
+    const orderedCandidates = [...candidates].sort((a, b) => {
+        const timeA = a?.departureDateTime instanceof Date ? a.departureDateTime.getTime() : 0;
+        const timeB = b?.departureDateTime instanceof Date ? b.departureDateTime.getTime() : 0;
+        return timeA - timeB;
+    });
+
+    const segmentCount = orderedCandidates.reduce((maxCount, item) => {
+        const count = Array.isArray(item?.timelineSegments) ? item.timelineSegments.length : 0;
+        return Math.max(maxCount, count);
+    }, 0);
+
+    const bestCandidateIndex = orderedCandidates.reduce((bestIndex, item, index) => {
+        if (!Number.isInteger(bestIndex) || bestIndex < 0) return index;
+        const best = orderedCandidates[bestIndex];
+        const currentDecisionScore = Number(item?.decisionScore) || 0;
+        const bestDecisionScore = Number(best?.decisionScore) || 0;
+        if (currentDecisionScore !== bestDecisionScore) return currentDecisionScore > bestDecisionScore ? index : bestIndex;
+        return Number(item?.aiScore) < Number(best?.aiScore) ? index : bestIndex;
+    }, -1);
+
+    return {
+        signature,
+        generatedAt: new Date(),
+        baseDateTime,
+        segmentCount,
+        candidates: orderedCandidates,
+        bestCandidateIndex
+    };
+}
+
+function renderAiRouteCandidates(matrixData, options = {}) {
     const info = document.getElementById('aiRouteSuggestionInfo');
     const container = document.getElementById('aiRouteSuggestions');
     if (!info || !container) return;
 
-    if (!Array.isArray(candidates) || candidates.length === 0) {
+    if (!matrixData || !Array.isArray(matrixData?.candidates) || matrixData.candidates.length === 0) {
         lastAiRouteCandidates = [];
-        info.textContent = t('Routes IA: aucune proposition disponible.', 'Rutas IA: ninguna propuesta disponible.');
+        lastAiRouteMatrixCache = null;
+        isAiRouteMatrixVisible = false;
+        info.textContent = t('Analyse route + météo: aucune option exploitable sur 5 jours.', 'Analisis ruta + meteo: ninguna opcion utilizable en 5 dias.');
         container.innerHTML = '';
+        updateAiRouteRefreshButtonState();
+        updateMapWorkspaceLayoutState();
         return;
     }
 
-    lastAiRouteCandidates = candidates;
-    info.textContent = t(
-        `Routes IA: ${candidates.length} proposition(s). Clique "Appliquer" pour charger un profil.`,
-        `Rutas IA: ${candidates.length} propuesta(s). Haz clic en "Aplicar" para cargar un perfil.`
-    );
+    const fromCache = options?.fromCache === true;
+    lastAiRouteCandidates = matrixData.candidates;
+    lastAiRouteMatrixCache = matrixData;
+    isAiRouteMatrixVisible = true;
+    updateAiRouteRefreshButtonState();
 
-    container.innerHTML = candidates.map((item, index) => {
-        const depWind = Number.isFinite(item?.departureWeather?.windSpeed) ? `${item.departureWeather.windSpeed.toFixed(1)} kn` : 'N/A';
-        const maxWind = Number.isFinite(item?.maxWind) ? `${item.maxWind.toFixed(1)} kn` : 'N/A';
-        const motor = Number.isFinite(item?.motorTimeHours) ? formatDurationHours(item.motorTimeHours) : 'N/A';
-        const score = Number.isFinite(item?.score) ? item.score.toFixed(1) : 'N/A';
-        const routeVariant = item?.routeVariantLabel || t('Trajectoire standard', 'Trayectoria estándar');
-        return `<div class="ai-route-card"><strong>${escapeHtml(item.label)}</strong><br>` +
-            `${t('Trajectoire', 'Trayectoria')}: ${escapeHtml(routeVariant)} · ${t('Points', 'Puntos')}: ${Number(item?.routePointCount || 0)}<br>` +
-            `${t('Départ', 'Salida')}: ${formatWeekdayHourUtc(item.departureDateTime)} · ${t('Durée', 'Duración')}: ${formatDurationHours(item.totalTimeHours)}<br>` +
-            `${t('Vent départ', 'Viento salida')}: ${depWind} · ${t('Vent max trajet', 'Viento máx trayecto')}: ${maxWind} · ${t('Moteur', 'Motor')}: ${motor}<br>` +
-            `${t('Mode', 'Modo')}: ${escapeHtml(item.sailMode)} · ${t('Bord', 'Bordo')}: ${Math.round(item.tackingTimeHours * 60)} min · Score: ${score}<br>` +
-            `<button type="button" class="apply-ai-route-btn" data-ai-route-index="${index}" style="margin-top:6px;">${t('Appliquer ce profil', 'Aplicar este perfil')}</button></div>`;
+    const generatedAtLabel = matrixData.generatedAt instanceof Date && !Number.isNaN(matrixData.generatedAt.getTime())
+        ? matrixData.generatedAt.toLocaleTimeString(currentLanguage === 'es' ? 'es-ES' : 'fr-FR', { hour: '2-digit', minute: '2-digit' })
+        : '--:--';
+    const bestCandidate = Number.isInteger(matrixData.bestCandidateIndex) && matrixData.bestCandidateIndex >= 0
+        ? matrixData.candidates[matrixData.bestCandidateIndex]
+        : null;
+
+    const infoPrefix = AI_ROUTE_MATRIX_USE_MOCK
+        ? t('Mode test', 'Modo prueba')
+        : t('Analyse réelle', 'Analisis real');
+    info.textContent = fromCache
+        ? t(
+            `${infoPrefix}: matrice 5 jours chargée depuis la mémoire (${generatedAtLabel}), avec 3 départs fixes par jour: 08:00, 12:00, 18:00. Clique une case pour charger le départ, ou utilise Rafraîchir pour recalculer.`,
+            `${infoPrefix}: matriz de 5 dias cargada desde memoria (${generatedAtLabel}), con 3 salidas fijas por día: 08:00, 12:00, 18:00. Pulsa una celda para cargar la salida, o usa Actualizar para recalcular.`
+        )
+        : t(
+            `${infoPrefix}: matrice 5 jours calculée (${generatedAtLabel}), avec 3 départs fixes par jour: 08:00, 12:00, 18:00. Clique une case pour charger le départ.`,
+            `${infoPrefix}: matriz de 5 dias calculada (${generatedAtLabel}), con 3 salidas fijas por día: 08:00, 12:00, 18:00. Pulsa una celda para cargar la salida.`
+        );
+
+    const summaryHtml = bestCandidate
+        ? (() => {
+            const bestStatus = getAiRouteStatusMeta(bestCandidate, bestCandidate?.globalRank);
+            return `<div class="ai-route-matrix-summary">` +
+                `<div class="ai-route-matrix-summary__headline">${t('Meilleur créneau global', 'Mejor franja global')}</div>` +
+                `<div><span class="ai-route-status ai-route-status--${bestStatus.key}">${escapeHtml(bestStatus.label)}</span>` +
+                `<strong>${Number(bestCandidate?.decisionScore) || 0}/100</strong> · ${escapeHtml(formatWeekdayHourUtc(bestCandidate.departureDateTime))}</div>` +
+                `<div class="ai-route-table__muted">${escapeHtml(shortenAiRouteVariantLabel(bestCandidate?.routeVariantLabel))} · ${escapeHtml(getAiRouteWindSummary(bestCandidate))}</div>` +
+                `</div>`;
+        })()
+        : '';
+
+    const legendHtml = `<div class="ai-route-matrix-legend">` +
+        `<span class="ai-route-status ai-route-status--good">${t('Bon compromis', 'Buen compromiso')}</span>` +
+        `<span class="ai-route-status ai-route-status--acceptable">${t('Acceptable', 'Aceptable')}</span>` +
+        `<span class="ai-route-status ai-route-status--avoid">${t('A éviter', 'Evitar')}</span>` +
+        `</div>`;
+
+    const rows = matrixData.candidates.map((item, candidateIndex) => {
+        const rowStatus = getAiRouteStatusMeta(item, item?.globalRank);
+        const departureLabel = formatWeekdayHourUtc(item.departureDateTime);
+        const routeLabel = shortenAiRouteVariantLabel(item?.routeVariantLabel);
+        const timelineSegments = Array.isArray(item?.timelineSegments) ? item.timelineSegments : [];
+
+        const cells = Array.from({ length: matrixData.segmentCount }, (_unused, segmentIndex) => {
+            const segment = timelineSegments[segmentIndex] || null;
+            if (!segment) {
+                return `<td><div class="ai-route-matrix-cell ai-route-matrix-cell--empty">${t('Arrivé', 'Llegado')}</div></td>`;
+            }
+
+            const segmentStatus = segment.status || getAiTimelineSegmentStatusMeta(segment);
+            const segmentScore = Number(segment?.segmentScore) || 0;
+            const title = `${departureLabel} · ${formatAiTimelineHeader(segmentIndex)} · ${segmentScore}/100`;
+            const nightBadge = segment.isNight
+                ? `<span class="ai-route-matrix-cell__badge">${t('nuit', 'noche')}</span>`
+                : '';
+
+            return `<td>` +
+                `<button type="button" class="ai-route-matrix-cell ai-route-matrix-cell--${segmentStatus.key}" data-ai-route-index="${candidateIndex}" data-ai-route-segment-index="${segmentIndex}" data-ai-route-action="apply" title="${escapeHtml(title)}">` +
+                `<span class="ai-route-matrix-cell__score">${segmentScore}</span>` +
+                `<span class="ai-route-matrix-cell__meta">${escapeHtml(getAiRouteWindSummary({ departureWeather: { windSpeed: segment.windSpeed }, departureWindDirection: segment.windDirection, departureTwa: segment.twa }))}</span>` +
+                `<span class="ai-route-matrix-cell__route">${escapeHtml(formatAiDurationCell(segment.durationHours))} · ${escapeHtml(routeLabel)}</span>` +
+                `${nightBadge}` +
+                `</button>` +
+                `</td>`;
+        }).join('');
+
+        return `<tr>` +
+            `<th scope="row" class="ai-route-matrix__departure">` +
+            `<div><strong>${escapeHtml(departureLabel)}</strong></div>` +
+            `<div class="ai-route-table__muted">${escapeHtml(routeLabel)} · ${formatAiDurationCell(item.totalTimeHours)}</div>` +
+            `</th>` +
+            `${cells}` +
+            `<td class="ai-route-matrix__final">` +
+            `<span class="ai-route-status ai-route-status--${rowStatus.key}">${escapeHtml(rowStatus.label)}</span>` +
+            `<strong>${Number(item?.decisionScore) || 0}/100</strong><br>` +
+            `<span class="ai-route-table__muted">${escapeHtml(buildAiRouteReason(item, item?.globalRank))}</span>` +
+            `</td>` +
+            `</tr>`;
     }).join('');
+
+    const headerHours = Array.from({ length: matrixData.segmentCount }, (_unused, segmentIndex) => formatAiTimelineHeader(segmentIndex))
+        .map(label => `<th>${escapeHtml(label)}</th>`)
+        .join('');
+
+    container.innerHTML =
+        summaryHtml +
+        legendHtml +
+        `<div class="ai-route-table-wrap ai-route-matrix-wrap"><table class="ai-route-matrix">` +
+        `<thead><tr>` +
+        `<th>${t('Départ', 'Salida')}</th>` +
+        `${headerHours}` +
+        `<th>${t('Score global', 'Puntuacion global')}</th>` +
+        `</tr></thead><tbody>${rows}</tbody></table></div>`;
+
+    updateMapWorkspaceLayoutState();
 }
 
 function replaceRouteWithScenarioPoints(points) {
@@ -6725,30 +9895,59 @@ function applyAiRouteCandidate(index) {
         replaceRouteWithScenarioPoints(candidate.routeScenarioPoints);
     }
 
-    sailMode = candidate.sailMode;
-    tackingTimeHours = candidate.tackingTimeHours;
+    sailMode = 'auto';
+    setActivePolarProfile(POLAR_AUTO_PROFILE_ID, { persist: false, syncEditor: false });
     updateRoutingControlsUiFromState();
 
     if (candidate?.departureDateTime instanceof Date && !Number.isNaN(candidate.departureDateTime.getTime())) {
         const inputValue = toLocalDateTimeInputValue(candidate.departureDateTime);
-        setDepartureFromDateTimeInput(inputValue);
+        setDepartureFromDateTimeInput(inputValue, { suppressAiInvalidation: true });
     }
 
     const info = document.getElementById('aiRouteSuggestionInfo');
     if (info) {
         const routeVariant = candidate.routeVariantLabel || t('Trajectoire standard', 'Trayectoria estándar');
         info.textContent = t(
-            `Profil appliqué: ${candidate.label} · ${routeVariant}. Tu peux maintenant cliquer Calculer.`,
-            `Perfil aplicado: ${candidate.label} · ${routeVariant}. Ahora puedes hacer clic en Calcular.`
+            `Option appliquée: ${routeVariant} · départ ${formatWeekdayHourUtc(candidate.departureDateTime)} · profil optimum auto actif. Tu peux maintenant cliquer Calculer.`,
+            `Opcion aplicada: ${routeVariant} · salida ${formatWeekdayHourUtc(candidate.departureDateTime)} · perfil optimo auto activo. Ahora puedes hacer clic en Calcular.`
         );
     }
 }
 
-function scoreAiCandidate(estimate, profile) {
-    const windPenalty = Number.isFinite(estimate?.maxWind) ? Math.max(0, estimate.maxWind - RECOMMENDED_MAX_WIND_KN) * 12 : 20;
-    const motorPenalty = Number.isFinite(estimate?.motorTimeHours) ? estimate.motorTimeHours * (profile.priority === 'safe' ? 10 : 5) : 0;
-    const timePenalty = Number.isFinite(estimate?.totalTimeHours) ? estimate.totalTimeHours * (profile.priority === 'performance' ? 0.1 : 0.3) : 10;
-    return (estimate.score || 0) + windPenalty + motorPenalty + timePenalty;
+async function applyAndComputeAiRouteCandidate(index) {
+    const candidate = lastAiRouteCandidates[index];
+    if (!candidate) return;
+
+    applyAiRouteCandidate(index);
+
+    const info = document.getElementById('aiRouteSuggestionInfo');
+    if (info) {
+        const routeVariant = candidate.routeVariantLabel || t('Trajectoire standard', 'Trayectoria estándar');
+        info.textContent = t(
+            `Option appliquée: ${routeVariant}. Calcul du routing en cours...`,
+            `Opcion aplicada: ${routeVariant}. Calculo del routing en curso...`
+        );
+    }
+
+    await computeRoute();
+
+    if (info) {
+        const routeVariant = candidate.routeVariantLabel || t('Trajectoire standard', 'Trayectoria estándar');
+        info.textContent = t(
+            `Routing calculé pour ${routeVariant} · départ ${formatWeekdayHourUtc(candidate.departureDateTime)}.`,
+            `Routing calculado para ${routeVariant} · salida ${formatWeekdayHourUtc(candidate.departureDateTime)}.`
+        );
+    }
+}
+
+function scoreAiCandidate(estimate, options = {}) {
+    const departureHourPenalty = Number(options?.departureHourPenalty) || 0;
+    const durationPenalty = Number(options?.durationPenalty) || 0;
+    const excessDurationPenalty = Number.isFinite(estimate?.totalTimeHours) && estimate.totalTimeHours > AI_ROUTE_MAX_DURATION_HOURS
+        ? 240 + (estimate.totalTimeHours - AI_ROUTE_MAX_DURATION_HOURS) * 18
+        : 0;
+    const motorPenalty = Number.isFinite(estimate?.motorSharePercent) ? estimate.motorSharePercent * 0.55 : 0;
+    return (estimate?.score || 0) + departureHourPenalty + durationPenalty + excessDurationPenalty + motorPenalty;
 }
 
 function buildAiRouteVariants() {
@@ -6791,92 +9990,158 @@ function buildAiRouteVariants() {
     return variants;
 }
 
-async function suggestAiRouteOptions() {
+async function suggestAiRouteOptions(options = {}) {
     if (routePoints.length < 2) {
         alert(t('Ajoute au moins 2 waypoints pour analyser des routes IA.', 'Añade al menos 2 waypoints para analizar rutas IA.'));
         return;
     }
 
+    const forceRefresh = options?.forceRefresh === true;
+    if (forceRefresh) {
+        clearWeatherForecastCache();
+    }
+    const signature = buildAiRouteCacheSignature();
+    if (!forceRefresh && lastAiRouteMatrixCache?.signature === signature) {
+        renderAiRouteCandidates(lastAiRouteMatrixCache, { fromCache: true });
+        return;
+    }
+
+    forecastWindowDays = AI_ROUTE_ANALYSIS_WINDOW_DAYS;
+    const forecastWindowDaysSelect = document.getElementById('forecastWindowDaysSelect');
+    if (forecastWindowDaysSelect) {
+        forecastWindowDaysSelect.value = String(AI_ROUTE_ANALYSIS_WINDOW_DAYS);
+    }
+
     const button = document.getElementById('suggestAiRoutesBtn');
+    const refreshButton = document.getElementById('refreshAiRoutesBtn');
     const info = document.getElementById('aiRouteSuggestionInfo');
 
     if (button) {
         button.disabled = true;
-        button.textContent = t('Calcul IA...', 'Cálculo IA...');
+        button.textContent = t('Analyse matrice...', 'Analisis matriz...');
     }
-    if (info) info.textContent = t('Routes IA: calcul en cours...', 'Rutas IA: cálculo en curso...');
-    beginAiTrafficSession('Routage IA multi-scénarios');
+    if (refreshButton) refreshButton.disabled = true;
+    if (info) {
+        info.textContent = forceRefresh
+            ? t('Recalcul route + météo en cours: cache météo vidé...', 'Recalculo ruta + meteo en curso: cache meteo vaciada...')
+            : t('Analyse route + météo sur 5 jours en cours...', 'Analisis ruta + meteo de 5 dias en curso...');
+    }
+    beginAiTrafficSession('Assistant route + fenêtre météo 5 jours');
 
     const originalSailMode = sailMode;
     const originalTackingTimeHours = tackingTimeHours;
+    const originalPolarProfileId = activePolarProfileId;
 
     try {
-        const baseDateTime = new Date(`${departureDate}T${departureTime}:00`);
+        const baseDateTime = getAiRouteMatrixBaseDate();
         if (Number.isNaN(baseDateTime.getTime())) throw new Error('invalid-departure');
 
         const routeVariants = buildAiRouteVariants();
         if (!routeVariants.length) throw new Error('no-route-variant');
         pushAiTrafficLog(`Variantes trajectoires détectées: ${routeVariants.length}`);
 
-        const profiles = [
-            { label: 'Safe', sailMode: 'prudent', tackingTimeHours: 0.5, priority: 'safe' },
-            { label: 'Équilibré', sailMode: 'auto', tackingTimeHours: 0.5, priority: 'balanced' },
-            { label: 'Performance', sailMode: 'performance', tackingTimeHours: 0.33, priority: 'performance' }
-        ];
+        if (AI_ROUTE_MATRIX_USE_MOCK) {
+            const slotWinners = buildMockAiRouteMatrixCandidates(baseDateTime, routeVariants);
+            const matrixData = buildAiRouteMatrixData(slotWinners, baseDateTime, signature);
+            renderAiRouteCandidates(matrixData, { fromCache: false });
+            pushAiTrafficLog(`Mode test: ${slotWinners.length} départ(s) simulé(s)`);
+            endAiTrafficSession('Analyse route + météo simulée');
+            return;
+        }
 
-        const results = [];
-        const stepHours = 6;
-        const horizonHours = Math.min(48, Math.max(24, forecastWindowDays * 24));
+        sailMode = 'auto';
+        activePolarProfileId = POLAR_AUTO_PROFILE_ID;
+        pushAiTrafficLog('Profil optimum forcé: voile auto + meilleure polaire par segment');
 
-        for (const profile of profiles) {
-            sailMode = profile.sailMode;
-            tackingTimeHours = profile.tackingTimeHours;
-            pushAiTrafficLog(`Profil ${profile.label}: mode ${profile.sailMode}, bord ${Math.round(profile.tackingTimeHours * 60)} min`);
+        const slotWinners = [];
+        const totalSlots = AI_ROUTE_ANALYSIS_WINDOW_DAYS * AI_ROUTE_MATRIX_HOURS.length;
+        let processedSlots = 0;
 
-            for (const variant of routeVariants) {
-                pushAiTrafficLog(`↳ Analyse variante: ${variant.routeVariantLabel}`);
-                let best = null;
-                for (let offset = 0; offset <= horizonHours; offset += stepHours) {
-                    const candidateDate = new Date(baseDateTime.getTime() + offset * 3600 * 1000);
-                    pushAiTrafficLog(`   - Run météo ${formatWeekdayHourUtc(candidateDate)}`);
+        for (let dayIndex = 0; dayIndex < AI_ROUTE_ANALYSIS_WINDOW_DAYS; dayIndex += 1) {
+            const dayDate = new Date(baseDateTime.getTime());
+            dayDate.setDate(baseDateTime.getDate() + dayIndex);
+            dayDate.setHours(0, 0, 0, 0);
+
+            for (const hour of AI_ROUTE_MATRIX_HOURS) {
+                const candidateDate = new Date(dayDate.getTime());
+                candidateDate.setHours(hour, 0, 0, 0);
+                pushAiTrafficLog(`Créneau ${processedSlots + 1}/${totalSlots}: ${formatWeekdayHourUtc(candidateDate)}`);
+
+                let bestCandidate = null;
+                for (const variant of routeVariants) {
                     const estimate = await estimateRouteForDepartureOnPoints(variant.points, candidateDate);
                     if (!estimate) continue;
-                    const aiScore = scoreAiCandidate(estimate, profile);
-                    const enriched = {
+
+                    const departureHourPenalty = getAiDepartureHourPenalty(candidateDate);
+                    const aiScore = scoreAiCandidate(estimate, { departureHourPenalty });
+                    const candidate = {
                         ...estimate,
                         aiScore,
-                        label: profile.label,
-                        sailMode: profile.sailMode,
-                        tackingTimeHours: profile.tackingTimeHours,
+                        departureHourPenalty,
+                        label: t('Optimum', 'Optimo'),
+                        sailMode: 'auto',
                         routeVariantLabel: variant.routeVariantLabel,
-                        routeScenarioPoints: variant.points
+                        routeScenarioPoints: variant.points,
+                        matrixDayIndex: dayIndex,
+                        matrixHour: hour
                     };
 
-                    if (!best || enriched.aiScore < best.aiScore) {
-                        best = enriched;
+                    if (!bestCandidate || candidate.aiScore < bestCandidate.aiScore) {
+                        bestCandidate = candidate;
                     }
                 }
 
-                if (best) results.push(best);
+                if (bestCandidate) {
+                    slotWinners.push(bestCandidate);
+                }
+
+                processedSlots += 1;
+                if (button) {
+                    button.textContent = t(
+                        `Analyse ${processedSlots}/${totalSlots}`,
+                        `Analisis ${processedSlots}/${totalSlots}`
+                    );
+                }
+                if (info) {
+                    info.textContent = t(
+                        `Analyse en cours: ${processedSlots}/${totalSlots} créneaux calculés.`,
+                        `Analisis en curso: ${processedSlots}/${totalSlots} franjas calculadas.`
+                    );
+                }
             }
         }
 
-        results.sort((a, b) => a.aiScore - b.aiScore);
-        renderAiRouteCandidates(results.slice(0, 6));
-        pushAiTrafficLog(`Classement final: ${Math.min(results.length, 6)} résultat(s) affiché(s)`);
-        endAiTrafficSession('Routage IA terminé');
+        if (slotWinners.length === 0) {
+            renderAiRouteCandidates(null);
+            pushAiTrafficLog('Aucun créneau exploitable');
+            endAiTrafficSession('Aucune case exploitable dans la matrice');
+            return;
+        }
+
+        const ranking = [...slotWinners].sort((a, b) => a.aiScore - b.aiScore);
+        applyAiRouteDecisionScores(slotWinners);
+        ranking.forEach((item, index) => {
+            item.globalRank = index;
+        });
+
+        const matrixData = buildAiRouteMatrixData(slotWinners, baseDateTime, signature);
+        renderAiRouteCandidates(matrixData, { fromCache: false });
+        pushAiTrafficLog(`Matrice finale: ${slotWinners.length} départ(s) calculé(s) sur 3 créneaux fixes par jour`);
+        endAiTrafficSession('Analyse route + météo terminée');
     } catch (_error) {
-        renderAiRouteCandidates([]);
-        if (info) info.textContent = t('Routes IA: impossible de calculer des options pour le moment.', 'Rutas IA: no se pueden calcular opciones por ahora.');
-        endAiTrafficSession('Erreur pendant le routage IA');
+        renderAiRouteCandidates(null);
+        if (info) info.textContent = t('Analyse route + météo: impossible de calculer des options pour le moment.', 'Analisis ruta + meteo: no se pueden calcular opciones por ahora.');
+        endAiTrafficSession('Erreur pendant l\'analyse route + météo');
     } finally {
         sailMode = originalSailMode;
         tackingTimeHours = originalTackingTimeHours;
+        activePolarProfileId = originalPolarProfileId;
         updateRoutingControlsUiFromState();
         if (button) {
             button.disabled = false;
-            button.textContent = t('Proposer routes IA (safe / perf)', 'Proponer rutas IA (safe / perf)');
+            button.textContent = t('Calculer matrice départ (5 j)', 'Calcular matriz de salida (5 d)');
         }
+        updateAiRouteRefreshButtonState();
     }
 }
 
@@ -7156,43 +10421,627 @@ function createReportStyles() {
     `;
 }
 
-async function exportVoyagePdfReport() {
-    if (!lastComputedReportData) {
-        alert(t('Calcule une route avant d\'exporter le rapport PDF.', 'Calcula una ruta antes de exportar el informe PDF.'));
-        return;
+function buildVoyagePrintItineraryHtml(plan, timeline) {
+    return timeline.map((entry, index) => {
+        if (entry.type === 'route') {
+            return `
+                <article class="voyage-print-step voyage-print-step--route">
+                    <div class="voyage-print-step__index">${index + 1}</div>
+                    <div class="voyage-print-step__content">
+                        <div class="voyage-print-step__eyebrow">${escapeHtml(t('Navigation', 'Navegación', 'Navigation'))}</div>
+                        <div class="voyage-print-step__title">${escapeHtml(entry.title)}</div>
+                        <div class="voyage-print-step__subtitle">${escapeHtml(entry.subtitle)}</div>
+                        <div class="voyage-print-step__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                    </div>
+                    <div class="voyage-print-step__metrics">
+                        <div><span>${escapeHtml(t('Distance', 'Distancia', 'Distance'))}</span><strong>${escapeHtml((entry.distanceNm || 0).toFixed(1))} NM</strong></div>
+                        <div><span>${escapeHtml(t('Durée', 'Duración', 'Duration'))}</span><strong>${escapeHtml(Number.isFinite(entry.estimatedHours) ? formatDurationHours(entry.estimatedHours) : 'N/A')}</strong></div>
+                    </div>
+                </article>`;
+        }
+
+        return `
+            <article class="voyage-print-step voyage-print-step--stop">
+                <div class="voyage-print-step__index">${index + 1}</div>
+                <div class="voyage-print-step__content">
+                    <div class="voyage-print-step__eyebrow">${escapeHtml(t('Mouillage', 'Fondeo', 'Anchorage'))}</div>
+                    <div class="voyage-print-step__title">${escapeHtml(entry.title)}</div>
+                    <div class="voyage-print-step__subtitle">${escapeHtml(entry.subtitle)}</div>
+                    <div class="voyage-print-step__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                </div>
+                <div class="voyage-print-step__metrics">
+                    <div><span>${escapeHtml(t('Durée', 'Duración', 'Duration'))}</span><strong>${escapeHtml(formatDurationHours((entry.durationDays || 0) * 24))}</strong></div>
+                </div>
+            </article>`;
+    }).join('');
+}
+
+function buildVoyagePdfIntroFallback(plan, timeline) {
+    const routeEntries = timeline.filter(entry => entry.type === 'route');
+    const stopEntries = timeline.filter(entry => entry.type === 'stop');
+    const totalDistance = routeEntries.reduce((sum, entry) => sum + (entry.distanceNm || 0), 0);
+    const departureTitle = String(timeline.find(entry => entry.type === 'route')?.title || plan?.name || t('ce voyage', 'este viaje', 'this trip')).trim();
+    const lastEntryTitle = String([...timeline].reverse().find(entry => entry.title)?.title || t('la dernière étape', 'la última etapa', 'the final leg')).trim();
+    const topStops = stopEntries
+        .map(entry => String(entry?.title || '').trim())
+        .filter(Boolean)
+        .slice(0, 2);
+    const stopText = topStops.length
+        ? topStops.join(' puis ')
+        : t('des escales côtières et des mouillages choisis pour le rythme du bord', 'escalas costeras y fondeos elegidos para el ritmo a bordo', 'coastal stops and anchorages chosen for the pace onboard');
+
+    return [
+        `${departureTitle} ouvre un voyage pensé comme une progression fluide en mer, avec des étapes lisibles et un tempo réaliste pour l'équipage.`,
+        `${String(plan?.name || t('Le programme', 'El programa', 'The plan')).trim()} mêle ${routeEntries.length} route(s), ${stopEntries.length} mouillage(s) et environ ${totalDistance.toFixed(0)} NM à parcourir jusqu'à ${lastEntryTitle}.`,
+        `Le dossier met en avant les séquences clés, les horaires utiles, les distances et les temps d'enchaînement pour garder une vision claire du parcours.`,
+        `On y retrouvera notamment ${stopText}, avec une lecture orientée navigation, confort de bord et continuité du voyage.`
+    ].join(' ');
+}
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Conversion blob -> data URL impossible'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+function normalizeVoyagePrintMapBounds(allPoints, targetAspectRatio = 960 / 380) {
+    let minLat = Math.min(...allPoints.map(point => point.lat));
+    let maxLat = Math.max(...allPoints.map(point => point.lat));
+    let minLng = Math.min(...allPoints.map(point => point.lng));
+    let maxLng = Math.max(...allPoints.map(point => point.lng));
+
+    const latSpan = Math.max(0.01, maxLat - minLat);
+    const lngSpan = Math.max(0.01, maxLng - minLng);
+    const latPad = latSpan * 0.12;
+    const lngPad = lngSpan * 0.12;
+    minLat -= latPad;
+    maxLat += latPad;
+    minLng -= lngPad;
+    maxLng += lngPad;
+
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+    let finalLatSpan = Math.max(0.01, maxLat - minLat);
+    let finalLngSpan = Math.max(0.01, maxLng - minLng);
+    const currentAspectRatio = finalLngSpan / finalLatSpan;
+
+    if (currentAspectRatio > targetAspectRatio) {
+        finalLatSpan = finalLngSpan / targetAspectRatio;
+    } else {
+        finalLngSpan = finalLatSpan * targetAspectRatio;
     }
 
-    if (!window?.jspdf?.jsPDF) {
-        alert(t('jsPDF non disponible dans le navigateur.', 'jsPDF no disponible en el navegador.'));
-        return;
+    return {
+        minLat: centerLat - finalLatSpan / 2,
+        maxLat: centerLat + finalLatSpan / 2,
+        minLng: centerLng - finalLngSpan / 2,
+        maxLng: centerLng + finalLngSpan / 2
+    };
+}
+
+function voyagePrintLonToWorldX(lng, zoom) {
+    return ((lng + 180) / 360) * 256 * (2 ** zoom);
+}
+
+function voyagePrintLatToWorldY(lat, zoom) {
+    const safeLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+    const rad = safeLat * Math.PI / 180;
+    return (0.5 - Math.log((1 + Math.sin(rad)) / (1 - Math.sin(rad))) / (4 * Math.PI)) * 256 * (2 ** zoom);
+}
+
+async function buildVoyagePrintMapBasemapDataUrl(bounds, width = 960, height = 380) {
+    const tileSize = 256;
+    let chosenZoom = 1;
+
+    for (let zoom = 12; zoom >= 1; zoom -= 1) {
+        const dx = Math.abs(voyagePrintLonToWorldX(bounds.maxLng, zoom) - voyagePrintLonToWorldX(bounds.minLng, zoom));
+        const dy = Math.abs(voyagePrintLatToWorldY(bounds.minLat, zoom) - voyagePrintLatToWorldY(bounds.maxLat, zoom));
+        if (dx <= width * 1.8 && dy <= height * 1.8) {
+            chosenZoom = zoom;
+            break;
+        }
     }
 
-    const button = document.getElementById('exportVoyagePdfBtn');
-    if (button) {
-        button.disabled = true;
-        button.textContent = t('Génération PDF...', 'Generación PDF...');
+    const worldLeft = voyagePrintLonToWorldX(bounds.minLng, chosenZoom);
+    const worldRight = voyagePrintLonToWorldX(bounds.maxLng, chosenZoom);
+    const worldTop = voyagePrintLatToWorldY(bounds.maxLat, chosenZoom);
+    const worldBottom = voyagePrintLatToWorldY(bounds.minLat, chosenZoom);
+
+    const tileXStart = Math.floor(worldLeft / tileSize);
+    const tileXEnd = Math.floor(worldRight / tileSize);
+    const tileYStart = Math.floor(worldTop / tileSize);
+    const tileYEnd = Math.floor(worldBottom / tileSize);
+    const maxTileIndex = (2 ** chosenZoom) - 1;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return '';
+
+    context.fillStyle = '#e6f4fb';
+    context.fillRect(0, 0, width, height);
+
+    const tilePromises = [];
+    for (let tileX = tileXStart; tileX <= tileXEnd; tileX += 1) {
+        for (let tileY = tileYStart; tileY <= tileYEnd; tileY += 1) {
+            if (tileY < 0 || tileY > maxTileIndex) continue;
+            const wrappedTileX = ((tileX % (maxTileIndex + 1)) + (maxTileIndex + 1)) % (maxTileIndex + 1);
+            const url = `https://tile.openstreetmap.org/${chosenZoom}/${wrappedTileX}/${tileY}.png`;
+            tilePromises.push(
+                fetch(url, { mode: 'cors', cache: 'force-cache' })
+                    .then(response => response.ok ? response.blob() : null)
+                    .then(blob => blob ? createImageBitmap(blob).then(bitmap => ({ bitmap, tileX, tileY })) : null)
+                    .catch(() => null)
+            );
+        }
     }
+
+    const tiles = await Promise.all(tilePromises);
+    const scaleX = width / Math.max(1, worldRight - worldLeft);
+    const scaleY = height / Math.max(1, worldBottom - worldTop);
+
+    tiles.filter(Boolean).forEach(({ bitmap, tileX, tileY }) => {
+        const drawX = ((tileX * tileSize) - worldLeft) * scaleX;
+        const drawY = ((tileY * tileSize) - worldTop) * scaleY;
+        const drawW = tileSize * scaleX;
+        const drawH = tileSize * scaleY;
+        context.drawImage(bitmap, drawX, drawY, drawW, drawH);
+    });
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    return blob ? blobToDataUrl(blob) : '';
+}
+
+async function buildVoyagePdfIntroText(plan, timeline) {
+    const fallbackText = buildVoyagePdfIntroFallback(plan, timeline);
+    const llmSettings = readDocumentRagLlmSettingsFromUi();
+    const routeEntries = timeline.filter(entry => entry.type === 'route');
+    const stopEntries = timeline.filter(entry => entry.type === 'stop');
+    const routeTitles = routeEntries.map(entry => String(entry?.title || '').trim()).filter(Boolean).slice(0, 6).join(' | ');
+    const stopTitles = stopEntries.map(entry => String(entry?.title || '').trim()).filter(Boolean).slice(0, 6).join(' | ');
+    const totalDistance = routeEntries.reduce((sum, entry) => sum + (entry.distanceNm || 0), 0);
+
+    const prompt = [
+        'Tu es un assistant expert en voyage nautique haut de gamme.',
+        'Rédige un court descriptif inspirant et précis de 4 à 5 lignes pour l\'ouverture d\'un PDF de voyage.',
+        'Style: élégant, concret, descriptif, sans marketing excessif.',
+        'Contraintes: une seule réponse en texte brut, pas de titre, pas de puces, pas de JSON, pas de markdown.',
+        `Langue: ${normalizeLanguage(currentLanguage)}.`,
+        '',
+        `Nom du voyage: ${String(plan?.name || '').trim()}`,
+        `Description interne: ${String(plan?.description || '').trim() || 'Aucune'}`,
+        `Nombre de routes: ${routeEntries.length}`,
+        `Nombre de mouillages: ${stopEntries.length}`,
+        `Distance estimée: ${totalDistance.toFixed(1)} NM`,
+        `Routes principales: ${routeTitles || 'N/A'}`,
+        `Mouillages principaux: ${stopTitles || 'N/A'}`,
+        `Première étape: ${String(timeline[0]?.title || '').trim() || 'N/A'}`,
+        `Dernière étape: ${String(timeline[timeline.length - 1]?.title || '').trim() || 'N/A'}`
+    ].join('\n');
 
     try {
-        const mapImageDataUrl = await captureMapImageDataUrl();
-        const vectorDataUrl = buildRouteVectorDataUrl(lastComputedReportData);
-        const reportHtml = buildVoyageReportHtml(lastComputedReportData, mapImageDataUrl, vectorDataUrl);
-        const wrapper = document.createElement('div');
-        wrapper.style.position = 'fixed';
-        wrapper.style.left = '-10000px';
-        wrapper.style.top = '0';
-        wrapper.style.width = '790px';
-        wrapper.style.background = '#fff';
-        wrapper.innerHTML = `${createReportStyles()}${reportHtml}`;
-        document.body.appendChild(wrapper);
+        let response = await fetch(`${LOCAL_RAG_API_URL}/query-llm`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                question: prompt,
+                top_k: 4,
+                language: normalizeLanguage(currentLanguage),
+                backend: 'faiss',
+                mode: llmSettings.mode,
+                provider: llmSettings.provider,
+                response_style: 'concise',
+                max_tokens: 220,
+                model: llmSettings.model || undefined,
+                api_key: llmSettings.apiKey || undefined
+            })
+        });
 
-        const canvas = await window.html2canvas(wrapper, {
+        if (response.status === 404) {
+            response = await fetch(`${LOCAL_RAG_API_URL}/query`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    question: prompt,
+                    top_k: 4,
+                    language: normalizeLanguage(currentLanguage),
+                    backend: 'faiss'
+                })
+            });
+        }
+
+        if (!response.ok) {
+            throw new Error(`voyage-pdf-intro-llm ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const answerText = String(payload?.answer || '').trim().replace(/\s+/g, ' ');
+        return answerText || fallbackText;
+    } catch (_error) {
+        return fallbackText;
+    }
+}
+
+function buildVoyagePrintMapHtml(timeline, options = {}) {
+    const geometry = buildVoyagePreviewGeometry(timeline || []);
+    const allPoints = [];
+
+    geometry.segments.forEach(segment => {
+        (Array.isArray(segment?.latlngs) ? segment.latlngs : []).forEach(point => {
+            const lat = Number(point?.[0]);
+            const lng = Number(point?.[1]);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                allPoints.push({ lat, lng });
+            }
+        });
+    });
+
+    geometry.markers.forEach(marker => {
+        const lat = Number(marker?.latlng?.[0]);
+        const lng = Number(marker?.latlng?.[1]);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            allPoints.push({ lat, lng });
+        }
+    });
+
+    if (!allPoints.length) return '';
+
+    const viewWidth = 960;
+    const viewHeight = 380;
+    const bounds = normalizeVoyagePrintMapBounds(allPoints, viewWidth / viewHeight);
+    const minLat = bounds.minLat;
+    const maxLat = bounds.maxLat;
+    const minLng = bounds.minLng;
+    const maxLng = bounds.maxLng;
+    const basemapDataUrl = String(options.basemapDataUrl || '').trim();
+    const projectPoint = (lat, lng) => {
+        const x = ((lng - minLng) / Math.max(0.000001, maxLng - minLng)) * viewWidth;
+        const y = viewHeight - (((lat - minLat) / Math.max(0.000001, maxLat - minLat)) * viewHeight);
+        return {
+            x: Math.max(0, Math.min(viewWidth, x)),
+            y: Math.max(0, Math.min(viewHeight, y))
+        };
+    };
+
+    const gridLines = Array.from({ length: 5 }, (_value, index) => {
+        const x = ((index + 1) / 6) * viewWidth;
+        const y = ((index + 1) / 6) * viewHeight;
+        return `
+            <line x1="${x.toFixed(2)}" y1="0" x2="${x.toFixed(2)}" y2="${viewHeight}" />
+            <line x1="0" y1="${y.toFixed(2)}" x2="${viewWidth}" y2="${y.toFixed(2)}" />`;
+    }).join('');
+
+    const segmentSvg = geometry.segments.map(segment => {
+        const polyline = (Array.isArray(segment?.latlngs) ? segment.latlngs : [])
+            .map(point => {
+                const lat = Number(point?.[0]);
+                const lng = Number(point?.[1]);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+                const projected = projectPoint(lat, lng);
+                return `${projected.x.toFixed(2)},${projected.y.toFixed(2)}`;
+            })
+            .filter(Boolean)
+            .join(' ');
+        if (!polyline) return '';
+        const stroke = segment.isDerived ? '#f0b95f' : '#58c7f3';
+        const dash = segment.isDerived ? ' stroke-dasharray="10 7"' : '';
+        return `<polyline points="${polyline}" class="voyage-print-map__route" style="stroke:${stroke};"${dash} />`;
+    }).join('');
+
+    const markerSvg = geometry.markers.map(marker => {
+        const lat = Number(marker?.latlng?.[0]);
+        const lng = Number(marker?.latlng?.[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+        const projected = projectPoint(lat, lng);
+        const fillColor = marker.kind === 'stop'
+            ? '#ff9a3a'
+            : (marker.kind === 'departure' ? '#70e4a0' : '#7cc9ff');
+        const labelY = marker.kind === 'stop' ? projected.y - 14 : projected.y + 20;
+        return `
+            <g>
+                <circle cx="${projected.x.toFixed(2)}" cy="${projected.y.toFixed(2)}" r="7.5" fill="${fillColor}" stroke="#ffffff" stroke-width="3" />
+                <text x="${projected.x.toFixed(2)}" y="${labelY.toFixed(2)}" class="voyage-print-map__marker-label">${escapeHtml(marker.label)}</text>
+            </g>`;
+    }).join('');
+
+    const legendItems = geometry.markers
+        .slice(0, 8)
+        .map(marker => `<span><strong>${escapeHtml(marker.label)}</strong> ${escapeHtml(marker.title || '')}</span>`)
+        .join('');
+
+    const boundsLabel = `${minLat.toFixed(2)}° / ${maxLat.toFixed(2)}° · ${minLng.toFixed(2)}° / ${maxLng.toFixed(2)}°`;
+
+    return `
+        <div class="voyage-print-map">
+            <div class="voyage-print-map__frame">
+                ${basemapDataUrl ? `<img src="${basemapDataUrl}" alt="${escapeHtml(t('Fond de carte OpenStreetMap', 'Fondo de mapa OpenStreetMap', 'OpenStreetMap basemap'))}" class="voyage-print-map__image">` : ''}
+                <svg viewBox="0 0 ${viewWidth} ${viewHeight}" class="voyage-print-map__svg" role="img" aria-label="${escapeHtml(t('Carte du parcours du voyage', 'Mapa del recorrido del viaje', 'Trip route map'))}">
+                    <rect x="0" y="0" width="${viewWidth}" height="${viewHeight}" fill="#e6f4fb" opacity="0.16" />
+                    <g class="voyage-print-map__grid">${gridLines}</g>
+                    ${segmentSvg}
+                    ${markerSvg}
+                </svg>
+            </div>
+            <div class="voyage-print-map__meta">
+                <span>${escapeHtml(t('Vue synthétique du tracé et des mouillages.', 'Vista sintética de la derrota y los fondeos.', 'Synthetic view of route and anchorages.'))}</span>
+                <span>${escapeHtml(boundsLabel)} · OpenStreetMap</span>
+            </div>
+            ${legendItems ? `<div class="voyage-print-map__legend">${legendItems}</div>` : ''}
+        </div>`;
+}
+
+async function buildVoyagePrintWeatherHtml(timeline) {
+    const slots = buildVoyageAgendaWeatherSlots(timeline);
+    if (!slots.length) return '';
+
+    const results = await Promise.all(slots.map(async slot => {
+        try {
+            const date = `${slot.slotDate.getFullYear()}-${String(slot.slotDate.getMonth() + 1).padStart(2, '0')}-${String(slot.slotDate.getDate()).padStart(2, '0')}`;
+            const hour = `${String(slot.slotDate.getHours()).padStart(2, '0')}:00`;
+            const weather = await getWeatherAtDateHour(slot.anchor.lat, slot.anchor.lng, date, hour);
+            return { slot, weather, error: null };
+        } catch (error) {
+            return { slot, weather: null, error };
+        }
+    }));
+
+    return `
+        <section class="voyage-weather-summary-card">
+            <div class="voyage-weather-summary-card__header">
+                <div>
+                    <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Météo du voyage', 'Meteo del viaje', 'Trip weather'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Résumé prévu par demi-journée le long du voyage.', 'Resumen previsto por medias jornadas a lo largo del viaje.', 'Half-day forecast summary along the trip.'))}</div>
+                </div>
+            </div>
+            <div class="voyage-weather-summary-grid">
+                ${results.map(result => renderVoyageWeatherCardHtml(result.slot, result.weather, { error: result.error })).join('')}
+            </div>
+        </section>`;
+}
+
+function buildVoyagePrintCrewHtml(plan) {
+    const crewEntries = getVoyageAssignedCrewMembers(plan);
+    if (!crewEntries.length) return '';
+
+    return `
+        <section class="print-section">
+            <h2 class="print-section__title">${escapeHtml(t('Équipage & contacts', 'Tripulación y contactos', 'Crew & contacts'))}</h2>
+            <div class="print-meta">${escapeHtml(t('Coordonnées utiles pour partager le dossier voyage et joindre rapidement chaque équipier.', 'Datos útiles para compartir el dossier del viaje y contactar rápidamente a cada tripulante.', 'Useful contact details to share the trip dossier and quickly reach each crew member.'))}</div>
+            <div class="voyage-print-crew-grid">
+                ${crewEntries.map(entry => `
+                    <article class="voyage-print-crew-card">
+                        <div class="voyage-print-crew-card__name">${escapeHtml(getCrewMemberDisplayName(entry))}</div>
+                        <div class="voyage-print-crew-card__row"><span>${escapeHtml(t('Téléphone', 'Teléfono', 'Phone'))}</span><strong>${escapeHtml(entry.telephone || t('Non renseigné', 'No indicado', 'Not provided'))}</strong></div>
+                        <div class="voyage-print-crew-card__row"><span>${escapeHtml(t('Email', 'Email', 'Email'))}</span><strong>${escapeHtml(entry.email || t('Non renseigné', 'No indicado', 'Not provided'))}</strong></div>
+                    </article>`).join('')}
+            </div>
+        </section>`;
+}
+
+function buildVoyagePrintDocumentHtml(plan, timeline, options = {}) {
+    const totalDistance = timeline.filter(entry => entry.type === 'route').reduce((sum, entry) => sum + (entry.distanceNm || 0), 0);
+    const firstDeparture = timeline.find(entry => entry.departure)?.departure || null;
+    const endDate = [...timeline].reverse().find(entry => entry.arrival)?.arrival || null;
+    const totalStops = timeline.filter(entry => entry.type === 'stop').length;
+    const weatherHtml = options.weatherHtml || '';
+    const introText = String(options.introText || '').trim();
+    const mapHtml = String(options.mapHtml || '').trim();
+    const crewHtml = String(options.crewHtml || '').trim();
+    const generatedAt = new Date();
+
+    return `<!DOCTYPE html>
+<html lang="${escapeHtml(currentLanguage)}">
+<head>
+    <meta charset="utf-8">
+    <title>${escapeHtml('DOSSIER VOYAGE - CEIBO')}</title>
+    <style>
+        @page { size: A4; margin: 16mm; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; background: #f4efe7; color: #173047; font: 14px/1.5 "Avenir Next", "Segoe UI", sans-serif; }
+        body { padding: 0; }
+        .print-shell { display: grid; gap: 18px; }
+        .print-hero {
+            padding: 24px 26px;
+            border-radius: 24px;
+            background: linear-gradient(135deg, #0f3048, #1f5b7a 58%, #d7b572 120%);
+            color: #fffdf8;
+            position: relative;
+            overflow: hidden;
+        }
+        .print-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -40px -70px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,255,255,0.2), transparent 70%);
+        }
+        .print-hero__eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.78; }
+        .print-hero__title { margin-top: 8px; font: 700 34px/1.05 Georgia, serif; }
+        .print-hero__desc { margin-top: 10px; max-width: 75ch; color: rgba(255,253,248,0.86); }
+        .print-hero__intro { margin-top: 16px; max-width: 78ch; padding: 14px 16px; border-radius: 18px; background: rgba(7, 25, 39, 0.18); border: 1px solid rgba(255,255,255,0.16); color: rgba(255,252,246,0.94); font-size: 13px; line-height: 1.6; }
+        .print-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+        .print-stat { padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,0.13); border: 1px solid rgba(255,255,255,0.12); }
+        .print-stat span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.72; }
+        .print-stat strong { display: block; margin-top: 6px; font-size: 18px; }
+        .print-section { padding: 18px 20px; border-radius: 20px; background: rgba(255,255,255,0.92); border: 1px solid rgba(29, 76, 109, 0.08); }
+        .print-section__title { font: 700 20px/1.15 Georgia, serif; color: #12314a; margin: 0 0 12px; }
+        .print-meta { font-size: 12px; color: rgba(47, 71, 92, 0.78); }
+        .voyage-print-steps { display: grid; gap: 12px; }
+        .voyage-print-step { display: grid; grid-template-columns: 44px minmax(0, 1fr) 190px; gap: 14px; padding: 14px; border-radius: 18px; border: 1px solid rgba(35, 90, 128, 0.1); page-break-inside: avoid; }
+        .voyage-print-step--route { background: linear-gradient(180deg, #f5fbff, #eef6fd); }
+        .voyage-print-step--stop { background: linear-gradient(180deg, #fff8f0, #fff1e2); }
+        .voyage-print-step__index { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: #143a54; color: #fff; font-weight: 700; }
+        .voyage-print-step__eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(61, 89, 112, 0.68); }
+        .voyage-print-step__title { margin-top: 4px; font-size: 18px; font-weight: 700; color: #18324a; }
+        .voyage-print-step__subtitle { margin-top: 2px; font-size: 12px; color: rgba(64, 82, 100, 0.8); }
+        .voyage-print-step__timeline { margin-top: 8px; font-size: 13px; color: #304860; }
+        .voyage-print-step__metrics { display: grid; gap: 10px; align-content: start; }
+        .voyage-print-step__metrics div { padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.72); }
+        .voyage-print-step__metrics span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(80, 95, 111, 0.72); }
+        .voyage-print-step__metrics strong { display: block; margin-top: 5px; font-size: 15px; color: #173047; }
+        .voyage-print-map { display: grid; gap: 10px; }
+        .voyage-print-map__frame { position: relative; overflow: hidden; border-radius: 20px; border: 1px solid rgba(29, 76, 109, 0.14); background: linear-gradient(180deg, #edf7ff, #d8eefc 58%, #f2efe6 100%); aspect-ratio: 960 / 380; }
+        .voyage-print-map__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+        .voyage-print-map__svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+        .voyage-print-map__grid line { stroke: rgba(20, 86, 128, 0.16); stroke-width: 1; }
+        .voyage-print-map__route { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.95; }
+        .voyage-print-map__marker-label { fill: #163147; font-size: 16px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: rgba(255,255,255,0.95); stroke-width: 4px; stroke-linejoin: round; }
+        .voyage-print-map__meta { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: rgba(57, 79, 98, 0.8); }
+        .voyage-print-map__legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 11px; color: #264861; }
+        .voyage-print-map__legend span { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(29, 76, 109, 0.08); }
+        .voyage-calendar-card, .voyage-weather-summary-card { margin: 0; page-break-inside: avoid; }
+        .voyage-calendar-weeks { display: grid; gap: 12px; }
+        .voyage-calendar-week, .voyage-weather-summary-card, .voyage-calendar-card { break-inside: avoid; }
+        .voyage-calendar-week__title { margin-bottom: 8px; font-weight: 700; color: #18324a; }
+        .voyage-calendar-week__header { display: grid; grid-template-columns: repeat(7, 1fr); border-radius: 12px 12px 0 0; overflow: hidden; }
+        .voyage-calendar-week__day { padding: 8px 6px; background: #edf4fa; border-left: 1px solid rgba(61, 128, 180, 0.12); font-size: 11px; text-align: center; }
+        .voyage-calendar-week__day:first-child { border-left: 0; }
+        .voyage-calendar-week__body { position: relative; padding: 12px; min-height: 66px; background: #fff; border: 1px solid rgba(35,90,128,0.08); border-top: 0; border-radius: 0 0 14px 14px; }
+        .voyage-calendar-grid { position: absolute; inset: 12px; }
+        .voyage-calendar-grid__col { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(79, 141, 187, 0.16); }
+        .voyage-calendar-grid__col:first-child { border-left: 0; }
+        .voyage-calendar-items { position: relative; display: grid; gap: 8px; }
+        .voyage-calendar-row { position: relative; min-height: 46px; }
+        .voyage-calendar-item { position: absolute; top: 0; bottom: 0; min-height: 42px; padding: 8px 10px; border-radius: 12px; color: #fff; background: linear-gradient(135deg, #1481ba, #2b5f9e); }
+        .voyage-calendar-item--stop { background: linear-gradient(135deg, #ff9f1c, #f25f29); }
+        .voyage-calendar-item__drag-handle, .voyage-calendar-item__resize-handle { display: none !important; }
+        .voyage-calendar-item__title { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .voyage-calendar-item__meta { margin-top: 3px; font-size: 10px; opacity: 0.92; }
+        .voyage-weather-summary-card { padding: 0; background: none; border: 0; box-shadow: none; }
+        .voyage-weather-summary-card__header { margin-bottom: 10px; }
+        .voyage-weather-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+        .voyage-weather-card { padding: 12px; border-radius: 16px; background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(240,247,255,0.95)); border: 1px solid rgba(123,178,218,0.24); }
+        .voyage-weather-card.weather-card--risk { background: linear-gradient(180deg, rgba(255,245,241,0.98), rgba(255,232,224,0.96)); }
+        .voyage-weather-card.weather-card--ok { background: linear-gradient(180deg, rgba(242,255,248,0.98), rgba(226,248,238,0.96)); }
+        .voyage-weather-card--unavailable, .voyage-weather-card.is-loading { background: linear-gradient(180deg, rgba(247,250,253,0.92), rgba(236,242,247,0.92)); }
+        .voyage-weather-card__body { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; align-items: center; margin-top: 8px; }
+        .voyage-weather-card__icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: rgba(17,95,147,0.08); font-size: 24px; }
+        .voyage-weather-card__title { font-size: 14px; font-weight: 700; }
+        .voyage-weather-card__meta, .voyage-weather-card__topline { font-size: 11px; color: rgba(65,84,103,0.82); }
+        .voyage-weather-card__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 10px; font-size: 11px; }
+        .voyage-weather-card__metrics span { display: block; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,0.74); }
+        .voyage-print-crew-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+        .voyage-print-crew-card { padding: 14px 16px; border-radius: 18px; background: linear-gradient(180deg, #f8fbfe, #eef6fb); border: 1px solid rgba(35, 90, 128, 0.1); break-inside: avoid; }
+        .voyage-print-crew-card__name { font-size: 16px; font-weight: 700; color: #173047; margin-bottom: 10px; }
+        .voyage-print-crew-card__row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: 6px 0; border-top: 1px solid rgba(20, 58, 84, 0.08); }
+        .voyage-print-crew-card__row:first-of-type { border-top: 0; padding-top: 0; }
+        .voyage-print-crew-card__row span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(80, 95, 111, 0.72); }
+        .voyage-print-crew-card__row strong { font-size: 13px; color: #173047; word-break: break-word; }
+        .print-footer { font-size: 11px; color: rgba(61, 83, 103, 0.74); text-align: right; }
+        @media print {
+            body { background: #fff; }
+            .print-section, .print-hero, .voyage-print-step, .voyage-weather-card, .voyage-calendar-week__body { box-shadow: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <main class="print-shell">
+        <section class="print-hero">
+            <div class="print-hero__eyebrow">${escapeHtml('DOSSIER VOYAGE - CEIBO')}</div>
+            <div class="print-hero__title">${escapeHtml(plan.name)}</div>
+            <div class="print-hero__desc">${escapeHtml(plan.description || t('Voyage préparé dans CEIBO avec itinéraire, planning et météo embarquée.', 'Viaje preparado en CEIBO con itinerario, agenda y meteo embarcada.', 'Trip prepared in CEIBO with itinerary, schedule and onboard weather.'))}</div>
+            ${introText ? `<div class="print-hero__intro">${escapeHtml(introText)}</div>` : ''}
+            <div class="print-stats">
+                <div class="print-stat"><span>${escapeHtml(t('Départ', 'Salida', 'Departure'))}</span><strong>${escapeHtml(firstDeparture ? formatDateTimeLocalLabel(firstDeparture) : t('À définir', 'Por definir', 'TBD'))}</strong></div>
+                <div class="print-stat"><span>${escapeHtml(t('Fin', 'Fin', 'End'))}</span><strong>${escapeHtml(endDate ? formatDateTimeLocalLabel(endDate) : t('À définir', 'Por definir', 'TBD'))}</strong></div>
+                <div class="print-stat"><span>${escapeHtml(t('Distance', 'Distancia', 'Distance'))}</span><strong>${escapeHtml(totalDistance.toFixed(1))} NM</strong></div>
+                <div class="print-stat"><span>${escapeHtml(t('Mouillages', 'Fondeos', 'Anchorages'))}</span><strong>${escapeHtml(String(totalStops))}</strong></div>
+            </div>
+        </section>
+        ${mapHtml ? `<section class="print-section"><h2 class="print-section__title">${escapeHtml(t('Carte du parcours', 'Mapa del recorrido', 'Route map'))}</h2><div class="print-meta">${escapeHtml(t('Lecture rapide du tracé, des arrivées et des mouillages principaux.', 'Lectura rápida de la derrota, llegadas y fondeos principales.', 'Quick reading of the track, arrivals and main anchorages.'))}</div>${mapHtml}</section>` : ''}
+        <section class="print-section">
+            <h2 class="print-section__title">${escapeHtml(t('Itinéraire détaillé', 'Itinerario detallado', 'Detailed itinerary'))}</h2>
+            <div class="print-meta">${escapeHtml(t('Chaque étape reprend les horaires, les distances et les durées calculées au moment de l’impression.', 'Cada etapa muestra horarios, distancias y duraciones calculadas en el momento de la impresión.', 'Each step includes the timings, distances and durations calculated at print time.'))}</div>
+            <div class="voyage-print-steps">${buildVoyagePrintItineraryHtml(plan, timeline)}</div>
+        </section>
+        ${crewHtml}
+        ${weatherHtml ? `<section class="print-section"><h2 class="print-section__title">${escapeHtml(t('Météo prévue', 'Meteo prevista', 'Forecast weather'))}</h2>${weatherHtml}</section>` : ''}
+        <div class="print-footer">${escapeHtml(t('Document généré le', 'Documento generado el', 'Document generated on'))} ${escapeHtml(generatedAt.toLocaleString(getCurrentLocale()))}</div>
+    </main>
+</body>
+</html>`;
+}
+
+function buildVoyagePdfFileName(plan) {
+    const baseName = String(plan?.name || t('voyage', 'viaje', 'trip'))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\-_]+/gi, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 48);
+    const dateLabel = new Date().toISOString().slice(0, 10);
+    return `dossier_voyage_ceibo_${baseName || 'voyage'}_${dateLabel}.pdf`;
+}
+
+function createVoyagePdfRenderRoot(documentHtml) {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(String(documentHtml || ''), 'text/html');
+    const root = document.createElement('div');
+    root.style.position = 'fixed';
+    root.style.left = '-10000px';
+    root.style.top = '0';
+    root.style.width = '794px';
+    root.style.background = '#ffffff';
+    root.style.zIndex = '-1';
+
+    const styleNode = document.createElement('style');
+    styleNode.textContent = Array.from(parsed.head.querySelectorAll('style')).map(node => node.textContent || '').join('\n');
+    root.appendChild(styleNode);
+    Array.from(parsed.body.childNodes).forEach(node => {
+        root.appendChild(document.importNode(node, true));
+    });
+
+    document.body.appendChild(root);
+    return root;
+}
+
+async function waitForVoyagePdfRenderRoot(root) {
+    if (!root) return;
+    if (document.fonts?.ready) {
+        await document.fonts.ready.catch(() => undefined);
+    }
+
+    const images = Array.from(root.querySelectorAll('img'));
+    await Promise.all(images.map(image => {
+        if (image.complete) return Promise.resolve();
+        return new Promise(resolve => {
+            image.addEventListener('load', resolve, { once: true });
+            image.addEventListener('error', resolve, { once: true });
+        });
+    }));
+
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+async function renderVoyagePdfBlobFromHtml(documentHtml) {
+    if (!window?.jspdf?.jsPDF) {
+        throw new Error('jspdf-unavailable');
+    }
+    if (typeof window.html2canvas !== 'function') {
+        throw new Error('html2canvas-unavailable');
+    }
+
+    const root = createVoyagePdfRenderRoot(documentHtml);
+    try {
+        await waitForVoyagePdfRenderRoot(root);
+        const canvas = await window.html2canvas(root, {
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
-            scale: 2
+            scale: 2,
+            windowWidth: root.scrollWidth || 794,
+            windowHeight: root.scrollHeight || root.offsetHeight || 1123
         });
-        document.body.removeChild(wrapper);
 
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
@@ -7201,7 +11050,7 @@ async function exportVoyagePdfReport() {
         const pageHeight = pdf.internal.pageSize.getHeight();
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const imgWidth = pageWidth;
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const imgHeight = (canvas.height * imgWidth) / Math.max(1, canvas.width);
 
         let heightLeft = imgHeight;
         let position = 0;
@@ -7215,15 +11064,274 @@ async function exportVoyagePdfReport() {
             heightLeft -= pageHeight;
         }
 
-        const safeName = (lastComputedReportData.routeName || 'voyage').replace(/[^a-z0-9\-_]/gi, '_');
-        const dateTag = new Date().toISOString().slice(0, 10);
-        pdf.save(`rapport_${safeName}_${dateTag}.pdf`);
+        return pdf.output('blob');
+    } finally {
+        root.remove();
+    }
+}
+
+function downloadBlobAsFile(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function buildVoyagePdfPackage(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const timeline = computeVoyagePlanTimeline(safePlan);
+    if (!timeline.length) {
+        throw new Error('voyage-pdf-empty-timeline');
+    }
+
+    const introText = await buildVoyagePdfIntroText(safePlan, timeline);
+    const weatherHtml = await buildVoyagePrintWeatherHtml(timeline);
+    const mapGeometry = buildVoyagePreviewGeometry(timeline);
+    const mapPoints = mapGeometry.segments
+        .flatMap(segment => (segment.latlngs || []).map(point => ({ lat: Number(point?.[0]), lng: Number(point?.[1]) })))
+        .concat(mapGeometry.markers.map(marker => ({ lat: Number(marker?.latlng?.[0]), lng: Number(marker?.latlng?.[1]) })))
+        .filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+    const mapBounds = mapPoints.length
+        ? normalizeVoyagePrintMapBounds(mapPoints, 960 / 380)
+        : null;
+    const basemapDataUrl = mapBounds
+        ? await buildVoyagePrintMapBasemapDataUrl(mapBounds, 960, 380).catch(() => '')
+        : '';
+    const mapHtml = buildVoyagePrintMapHtml(timeline, { basemapDataUrl });
+    const crewHtml = buildVoyagePrintCrewHtml(safePlan);
+    const documentHtml = buildVoyagePrintDocumentHtml(safePlan, timeline, { weatherHtml, introText, mapHtml, crewHtml });
+    const blob = await renderVoyagePdfBlobFromHtml(documentHtml);
+    return {
+        blob,
+        fileName: buildVoyagePdfFileName(safePlan),
+        plan: safePlan,
+        timeline,
+        crewMembers: getVoyageAssignedCrewMembers(safePlan)
+    };
+}
+
+function getVoyagePdfEmailRecipients(plan) {
+    const uniqueRecipients = new Map();
+    getVoyageAssignedCrewMembers(plan).forEach(entry => {
+        const email = normalizeEmailForCompare(entry?.email || '');
+        if (!email || uniqueRecipients.has(email)) return;
+        uniqueRecipients.set(email, sanitizeCrewMember(entry, uniqueRecipients.size));
+    });
+    return Array.from(uniqueRecipients.values());
+}
+
+function buildVoyagePdfEmailSubject(plan) {
+    return t(
+        `Dossier voyage CEIBO · ${String(plan?.name || '').trim() || t('Voyage', 'Viaje', 'Trip')}`,
+        `Dossier de viaje CEIBO · ${String(plan?.name || '').trim() || t('Viaje', 'Viaje', 'Trip')}`,
+        `CEIBO trip dossier · ${String(plan?.name || '').trim() || t('Trip', 'Viaje', 'Trip')}`
+    );
+}
+
+function buildVoyagePdfEmailHtml(plan, recipients) {
+    const creator = getCreatorPatch();
+    const creatorLine = creator.creatorEmail
+        ? `${escapeHtml(t('Répondre à', 'Responder a', 'Reply to'))}: <strong>${escapeHtml(creator.creatorEmail)}</strong>`
+        : '';
+    return `
+        <div style="font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#173047;">
+            <p>${escapeHtml(t('Bonjour,', 'Hola,', 'Hello,'))}</p>
+            <p>${escapeHtml(t('Vous trouverez en pièce jointe la dernière version du dossier voyage généré depuis CEIBO.', 'Encontrarán adjunta la última versión del dossier del viaje generado desde CEIBO.', 'Please find attached the latest trip dossier generated from CEIBO.'))}</p>
+            <p><strong>${escapeHtml(t('Voyage', 'Viaje', 'Trip'))}:</strong> ${escapeHtml(plan?.name || '')}<br>${creatorLine}</p>
+            <p><strong>${escapeHtml(t('Destinataires', 'Destinatarios', 'Recipients'))}:</strong> ${escapeHtml(recipients.map(entry => getCrewMemberDisplayName(entry)).join(', '))}</p>
+            <p>${escapeHtml(t('Bon voyage et bonne navigation.', 'Buen viaje y buena navegación.', 'Have a great trip and fair sailing.'))}</p>
+        </div>`;
+}
+
+function formatVoyagePdfEmailError(error) {
+    const message = String(error?.message || error || '').trim();
+    if (!message) return t('Erreur d\'envoi inconnue.', 'Error de envío desconocido.', 'Unknown email sending error.');
+
+    if (message.includes('voyage-pdf-email-fetch')) {
+        return t(
+            'La fonction email Supabase est inaccessible depuis le navigateur. Vérifie l\'URL Supabase configurée, le déploiement de voyage-pdf-email, et que le projet répond bien sur /functions/v1/.',
+            'La función email de Supabase no es accesible desde el navegador. Verifica la URL Supabase configurada, el despliegue de voyage-pdf-email y que el proyecto responda en /functions/v1/.',
+            'The Supabase email function is unreachable from the browser. Check the configured Supabase URL, the voyage-pdf-email deployment, and that the project responds on /functions/v1/.'
+        );
+    }
+    if (message.includes('voyage-pdf-email-cloud-not-ready') || message.includes('voyage-pdf-email-config-missing')) {
+        return t(
+            'Configuration cloud incomplète pour l\'envoi email. Vérifie l\'URL Supabase et la clé anon.',
+            'Configuración cloud incompleta para el envío email. Verifica la URL Supabase y la clave anon.',
+            'Incomplete cloud configuration for email sending. Check the Supabase URL and anon key.'
+        );
+    }
+    if (message.includes('voyage-pdf-email 404')) {
+        return t(
+            'La fonction Supabase voyage-pdf-email n\'est pas déployée.',
+            'La función Supabase voyage-pdf-email no está desplegada.',
+            'The Supabase function voyage-pdf-email is not deployed.'
+        );
+    }
+    if (message.includes('Missing RESEND_API_KEY') || message.includes('Missing RESEND_FROM_EMAIL')) {
+        return t(
+            'Les secrets RESEND_API_KEY ou RESEND_FROM_EMAIL manquent côté Supabase.',
+            'Faltan los secretos RESEND_API_KEY o RESEND_FROM_EMAIL en Supabase.',
+            'The RESEND_API_KEY or RESEND_FROM_EMAIL secrets are missing in Supabase.'
+        );
+    }
+    if (message.includes('voyage-pdf-email 401') || message.includes('voyage-pdf-email 403')) {
+        return t(
+            'Accès refusé à la fonction email. Vérifie la politique d\'accès ou le déploiement.',
+            'Acceso denegado a la función email. Verifica la política de acceso o el despliegue.',
+            'Access denied to the email function. Check the access policy or deployment.'
+        );
+    }
+    if (message.includes('voyage-pdf-email 429')) {
+        return t(
+            'Le service email a refusé la demande pour cause de quota ou de rate limit.',
+            'El servicio email rechazó la solicitud por cuota o límite de velocidad.',
+            'The email service rejected the request because of quota or rate limiting.'
+        );
+    }
+    return t(
+        `Envoi email impossible: ${message}`,
+        `Envío email imposible: ${message}`,
+        `Email sending failed: ${message}`
+    );
+}
+
+async function sendVoyagePdfEmailRequest({ plan, blob, fileName, recipients }) {
+    if (!cloudConfig) {
+        throw new Error('voyage-pdf-email-cloud-not-ready');
+    }
+
+    const endpoint = getCloudFunctionUrl(CLOUD_VOYAGE_PDF_EMAIL_FUNCTION);
+    const anonKey = getCloudAnonKey();
+    if (!endpoint || !anonKey) {
+        throw new Error('voyage-pdf-email-config-missing');
+    }
+
+    const creator = getCreatorPatch();
+    const accessToken = cloudAuthUser ? await getCloudAuthAccessToken().catch(() => '') : '';
+
+    const attachmentDataUrl = await blobToDataUrl(blob);
+    const attachmentBase64 = String(attachmentDataUrl || '').split(',')[1] || '';
+    if (!attachmentBase64) {
+        throw new Error('voyage-pdf-email-attachment-missing');
+    }
+
+    const payload = {
+        to: recipients.map(entry => entry.email),
+        cc: creator.creatorEmail ? [creator.creatorEmail] : [],
+        replyTo: creator.creatorEmail,
+        subject: buildVoyagePdfEmailSubject(plan),
+        html: buildVoyagePdfEmailHtml(plan, recipients),
+        text: `${buildVoyagePdfEmailSubject(plan)}\n\n${t('Le dossier voyage CEIBO est en pièce jointe.', 'El dossier del viaje CEIBO está adjunto.', 'The CEIBO trip dossier is attached.')}`,
+        attachment: {
+            filename: fileName,
+            contentBase64: attachmentBase64,
+            contentType: 'application/pdf'
+        },
+        metadata: {
+            tripId: plan.id,
+            tripName: plan.name,
+            senderEmail: creator.creatorEmail,
+            senderName: creator.creatorName
+        }
+    };
+
+    let response;
+    try {
+        response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                apikey: anonKey,
+                ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+            },
+            body: JSON.stringify(payload)
+        });
     } catch (error) {
-        alert(t('Impossible de générer le PDF.', 'No se puede generar el PDF.'));
+        throw new Error(`voyage-pdf-email-fetch ${endpoint}: ${String(error?.message || error)}`);
+    }
+
+    const responseText = await response.text().catch(() => '');
+    if (!response.ok) {
+        throw new Error(`voyage-pdf-email ${response.status}: ${responseText}`);
+    }
+
+    return responseText;
+}
+
+async function exportVoyagePdfReport() {
+    const plan = getSelectedVoyagePlan();
+    if (!plan) {
+        alert(t('Sélectionne d\'abord un voyage.', 'Selecciona primero un viaje.', 'Select a trip first.'));
+        return;
+    }
+
+    const button = document.getElementById('exportVoyagePdfBtn');
+    if (button) {
+        button.disabled = true;
+        button.textContent = t('Préparation du PDF...', 'Preparando PDF...', 'Preparing PDF...');
+    }
+
+    try {
+        const pdfPackage = await buildVoyagePdfPackage(plan);
+        downloadBlobAsFile(pdfPackage.blob, pdfPackage.fileName);
+    } catch (_error) {
+        alert(t('Impossible de préparer le PDF du voyage.', 'No se puede preparar el PDF del viaje.', 'Unable to prepare the trip PDF.'));
     } finally {
         if (button) {
             button.disabled = false;
-            button.textContent = t('Exporter rapport PDF', 'Exportar informe PDF');
+            button.textContent = t('Exporter PDF voyage', 'Exportar PDF viaje', 'Export trip PDF');
+        }
+    }
+}
+
+async function emailVoyagePdfReport() {
+    const plan = getSelectedVoyagePlan();
+    if (!plan) {
+        alert(t('Sélectionne d\'abord un voyage.', 'Selecciona primero un viaje.', 'Select a trip first.'));
+        return;
+    }
+
+    const recipients = getVoyagePdfEmailRecipients(plan);
+    if (!recipients.length) {
+        alert(t('Aucun équipier du voyage n\'a d\'email renseigné.', 'Ningún tripulante del viaje tiene email informado.', 'No trip crew member has an email address.'));
+        return;
+    }
+
+    const button = document.getElementById('emailVoyagePdfBtn');
+    if (button) {
+        button.disabled = true;
+        button.textContent = t('PDF + email...', 'PDF + email...', 'PDF + email...');
+    }
+
+    try {
+        const pdfPackage = await buildVoyagePdfPackage(plan);
+        downloadBlobAsFile(pdfPackage.blob, pdfPackage.fileName);
+        await sendVoyagePdfEmailRequest({
+            plan: pdfPackage.plan,
+            blob: pdfPackage.blob,
+            fileName: pdfPackage.fileName,
+            recipients
+        });
+
+        alert(t(
+            `PDF généré et email envoyé à ${recipients.length} équipier(s).`,
+            `PDF generado y email enviado a ${recipients.length} tripulante(s).`,
+            `PDF generated and emailed to ${recipients.length} crew member(s).`
+        ));
+    } catch (error) {
+        console.error('Unable to email trip PDF:', error);
+        const errorMessage = formatVoyagePdfEmailError(error);
+        setCloudStatus(errorMessage, true);
+        alert(errorMessage);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = t('PDF + email équipage', 'PDF + email tripulación', 'PDF + crew email');
         }
     }
 }
@@ -14865,7 +18973,7 @@ function tryFlushPendingCloudLogbookPush() {
 
 function tryFlushPendingCloudDataPush() {
     if (!isCloudReady()) return;
-    if (!routesCloudDirty && !arrivalAnalysesCloudDirty) return;
+    if (!routesCloudDirty && !arrivalAnalysesCloudDirty && !voyagePlansCloudDirty && !crewDirectoryCloudDirty) return;
     if (cloudPendingDataPushInFlight) return;
 
     cloudPendingDataPushInFlight = true;
@@ -14877,9 +18985,11 @@ function tryFlushPendingCloudDataPush() {
                 includeEngineLog: false,
                 includeWaypointPhotos: true,
                 includeMaintenanceBoards: false,
-                includeArrivalAnalyses: true
+                includeArrivalAnalyses: true,
+                includeVoyagePlans: true,
+                includeCrewDirectory: true
             });
-            setCloudStatus(t(`Cloud synchronisé · ${getSavedRoutes().length} route(s) · ${arrivalAnalysisEntries.length} analyse(s) arrivée`, `Nube sincronizada · ${getSavedRoutes().length} ruta(s) · ${arrivalAnalysisEntries.length} análisis llegada`));
+            setCloudStatus(t(`Cloud synchronisé · ${getSavedRoutes().length} route(s) · ${voyagePlans.length} voyage(s) · ${crewDirectory.length} équipier(s) · ${arrivalAnalysisEntries.length} analyse(s) arrivée`, `Nube sincronizada · ${getSavedRoutes().length} ruta(s) · ${voyagePlans.length} viaje(s) · ${crewDirectory.length} tripulante(s) · ${arrivalAnalysisEntries.length} análisis llegada`));
             updateCloudDataSourceStatus('cloud', getSavedRoutes().length, waypointPhotoEntries.length);
             setCloudSyncBadge('ok', t('Synchro cloud: OK', 'Sincronización nube: OK'));
         } catch (error) {
@@ -14887,6 +18997,9 @@ function tryFlushPendingCloudDataPush() {
             setCloudSyncBadge('error', t('Synchro cloud: échec', 'Sincronización nube: error'));
         } finally {
             cloudPendingDataPushInFlight = false;
+            if (routesCloudDirty || arrivalAnalysesCloudDirty || voyagePlansCloudDirty || crewDirectoryCloudDirty) {
+                tryFlushPendingCloudDataPush();
+            }
         }
     })();
 }
@@ -20684,6 +24797,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // DATE & TIME INPUT
     // =====================
 
+    restoreDepartureDateTimeFromStorage();
     updateDepartureDateTimeInput();
     document.getElementById("departureDateTimeInput").addEventListener("change", function(e) {
         setDepartureFromDateTimeInput(e.target.value);
@@ -20700,6 +24814,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     const routingTabBtn = document.getElementById('routingTabBtn');
     const routesTabBtn = document.getElementById('routesTabBtn');
+    const voyagesTabBtn = document.getElementById('voyagesTabBtn');
     const cloudTabBtn = document.getElementById('cloudTabBtn');
     const documentTabBtn = document.getElementById('documentTabBtn');
     const navLogTabBtn = document.getElementById('navLogTabBtn');
@@ -20708,6 +24823,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const maintenanceTabBtn = document.getElementById('maintenanceTabBtn');
     const routingTab = document.getElementById('routingTab');
     const routesTab = document.getElementById('routesTab');
+    const voyagesTab = document.getElementById('voyagesTab');
     const cloudTab = document.getElementById('cloudTab');
     const documentTab = document.getElementById('documentTab');
     const navLogTab = document.getElementById('navLogTab');
@@ -20718,6 +24834,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const mapContainer = document.getElementById('mapWorkspace');
     const waypointDockPanel = document.getElementById('waypointDockPanel');
     const documentDockPanel = document.getElementById('documentDockPanel');
+    const aiRouteDockPanel = document.getElementById('aiRouteDockPanel');
     const maintenanceMapPanel = document.getElementById('maintenanceMapPanel');
     const maintenanceInvoicePreviewPanel = document.getElementById('maintenanceInvoicePreviewPanel');
     const logWorkspacePanel = document.getElementById('logWorkspacePanel');
@@ -20795,6 +24912,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         syncNavLogGpsCompactUi();
         const isRouting = tabName === 'routing';
         const isRoutes = tabName === 'routes';
+        const isVoyages = tabName === 'voyages';
         const isCloud = tabName === 'cloud';
         const isDocument = tabName === 'document';
         const isNavLog = tabName === 'navlog';
@@ -20805,6 +24923,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         routingTabBtn.classList.toggle('active', isRouting);
         routesTabBtn.classList.toggle('active', isRoutes);
+        if (voyagesTabBtn) voyagesTabBtn.classList.toggle('active', isVoyages);
         cloudTabBtn.classList.toggle('active', isCloud);
         if (documentTabBtn) documentTabBtn.classList.toggle('active', isDocument);
         navLogTabBtn.classList.toggle('active', isNavLog);
@@ -20814,6 +24933,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         routingTab.classList.toggle('active', isRouting);
         routesTab.classList.toggle('active', isRoutes);
+        if (voyagesTab) voyagesTab.classList.toggle('active', isVoyages);
         cloudTab.classList.toggle('active', isCloud);
         if (documentTab) documentTab.classList.toggle('active', isDocument);
         navLogTab.classList.toggle('active', isNavLog);
@@ -20829,13 +24949,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (documentDockPanel) {
             documentDockPanel.classList.toggle('is-visible', isDocument && !isMaintenance);
         }
-        if (mapContainer) {
-            mapContainer.classList.toggle('map-workspace--document-only', isDocument);
-        }
-        if (map && !isMaintenance) {
-            window.setTimeout(() => {
-                map.invalidateSize();
-            }, 80);
+        updateMapWorkspaceLayoutState();
+
+        if (isVoyages) {
+            renderVoyageAgendaPanel();
         }
 
         if (isWaypoint) {
@@ -20879,8 +24996,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateNavLogLayoutToolbarUi();
     }
 
-    routingTabBtn.addEventListener('click', () => activateTab('routing'));
+    routingTabBtn.addEventListener('click', () => {
+        activateTab('routing');
+        restoreAiRouteMatrixViewFromCache();
+    });
     routesTabBtn.addEventListener('click', () => activateTab('routes'));
+    if (voyagesTabBtn) voyagesTabBtn.addEventListener('click', () => activateTab('voyages'));
     cloudTabBtn.addEventListener('click', () => activateTab('cloud'));
     if (documentTabBtn) documentTabBtn.addEventListener('click', () => activateTab('document'));
     navLogTabBtn.addEventListener('click', () => activateTab('navlog'));
@@ -20936,33 +25057,75 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (saveRouteFromRoutingBtn) {
         saveRouteFromRoutingBtn.addEventListener('click', saveRouteFromRouting);
     }
-    const suggestDepartureBtn = document.getElementById('suggestDepartureBtn');
-    if (suggestDepartureBtn) {
-        suggestDepartureBtn.addEventListener('click', suggestBestDeparture);
-    }
 
     const suggestAiRoutesBtn = document.getElementById('suggestAiRoutesBtn');
     if (suggestAiRoutesBtn) {
         suggestAiRoutesBtn.addEventListener('click', suggestAiRouteOptions);
     }
 
+    const refreshAiRoutesBtn = document.getElementById('refreshAiRoutesBtn');
+    if (refreshAiRoutesBtn) {
+        refreshAiRoutesBtn.addEventListener('click', () => suggestAiRouteOptions({ forceRefresh: true }));
+    }
+    updateAiRouteRefreshButtonState();
+
     const aiRouteSuggestions = document.getElementById('aiRouteSuggestions');
     if (aiRouteSuggestions) {
-        aiRouteSuggestions.addEventListener('click', event => {
-            const target = event.target;
+        aiRouteSuggestions.addEventListener('click', async event => {
+            const target = event.target instanceof HTMLElement
+                ? event.target.closest('[data-ai-route-index]')
+                : null;
             if (!(target instanceof HTMLElement)) return;
             const indexRaw = target.getAttribute('data-ai-route-index');
             if (indexRaw === null) return;
             const index = parseInt(indexRaw, 10);
             if (!Number.isFinite(index)) return;
+            const action = String(target.getAttribute('data-ai-route-action') || 'apply');
+            if (action === 'apply-compute') {
+                await applyAndComputeAiRouteCandidate(index);
+                return;
+            }
             applyAiRouteCandidate(index);
         });
-    }
 
-    const departureSuggestionInfo = document.getElementById('departureSuggestionInfo');
-    if (departureSuggestionInfo) {
-        departureSuggestionInfo.addEventListener('click', () => {
-            applyLastDepartureSuggestion();
+        aiRouteSuggestions.addEventListener('pointerover', event => {
+            const target = event.target instanceof HTMLElement
+                ? event.target.closest('.ai-route-matrix-cell[data-ai-route-index]')
+                : null;
+            if (!(target instanceof HTMLElement)) return;
+            const index = parseInt(String(target.getAttribute('data-ai-route-index') || ''), 10);
+            const segmentIndex = parseInt(String(target.getAttribute('data-ai-route-segment-index') || '-1'), 10);
+            if (!Number.isFinite(index)) return;
+            showAiRouteTooltip(index, Number.isFinite(segmentIndex) ? segmentIndex : -1, event.clientX, event.clientY);
+        });
+
+        aiRouteSuggestions.addEventListener('pointermove', event => {
+            if (lastAiRouteTooltipIndex < 0) return;
+            positionAiRouteTooltip(event.clientX, event.clientY);
+        });
+
+        aiRouteSuggestions.addEventListener('pointerout', event => {
+            const related = event.relatedTarget;
+            if (related instanceof HTMLElement && related.closest('.ai-route-matrix-cell[data-ai-route-index]')) {
+                return;
+            }
+            hideAiRouteTooltip();
+        });
+
+        aiRouteSuggestions.addEventListener('focusin', event => {
+            const target = event.target instanceof HTMLElement
+                ? event.target.closest('.ai-route-matrix-cell[data-ai-route-index]')
+                : null;
+            if (!(target instanceof HTMLElement)) return;
+            const index = parseInt(String(target.getAttribute('data-ai-route-index') || ''), 10);
+            const segmentIndex = parseInt(String(target.getAttribute('data-ai-route-segment-index') || '-1'), 10);
+            if (!Number.isFinite(index)) return;
+            const rect = target.getBoundingClientRect();
+            showAiRouteTooltip(index, Number.isFinite(segmentIndex) ? segmentIndex : -1, rect.right, rect.top);
+        });
+
+        aiRouteSuggestions.addEventListener('focusout', () => {
+            hideAiRouteTooltip();
         });
     }
     document.getElementById("recenterBtn").addEventListener("click", recenterOnRoute);
@@ -21839,17 +26002,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (weatherContainer) weatherContainer.innerHTML = '';
         const windLegend = document.getElementById('windSpeedLegend');
         if (windLegend) windLegend.innerHTML = '';
-        const suggestionBox = document.getElementById('departureSuggestionInfo');
-        lastDepartureSuggestion = null;
-        if (suggestionBox) {
-            suggestionBox.textContent = t('Suggestion départ: en attente', 'Sugerencia salida: en espera');
-            suggestionBox.classList.remove('suggestion-clickable');
-        }
-        const aiInfo = document.getElementById('aiRouteSuggestionInfo');
-        const aiList = document.getElementById('aiRouteSuggestions');
-        lastAiRouteCandidates = [];
-        if (aiInfo) aiInfo.textContent = t('Routes IA: en attente', 'Rutas IA: en espera');
-        if (aiList) aiList.innerHTML = '';
+        applyRoutePlanningForm(null);
+        updateVoyagePlanningSummary();
+        invalidateAiRouteAnalysisState();
         const arrivalSummary = document.getElementById('arrivalSummary');
         if (arrivalSummary) arrivalSummary.textContent = t('Analyse mouillage: en attente', 'Análisis fondeo: en espera');
         const anchorageContainer = document.getElementById('anchorageRecommendations');
@@ -21889,6 +26044,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (exportVoyagePdfBtn) {
         exportVoyagePdfBtn.addEventListener('click', exportVoyagePdfReport);
     }
+    const emailVoyagePdfBtn = document.getElementById('emailVoyagePdfBtn');
+    if (emailVoyagePdfBtn) {
+        emailVoyagePdfBtn.addEventListener('click', emailVoyagePdfReport);
+    }
+    const voyageLlmPromptBtn = document.getElementById('voyageLlmPromptBtn');
+    if (voyageLlmPromptBtn) {
+        voyageLlmPromptBtn.addEventListener('click', openVoyageLlmPromptModal);
+    }
     document.getElementById('importRouteInput').addEventListener('change', handleImport);
 
     // Routes subtabs
@@ -21923,6 +26086,446 @@ document.addEventListener('DOMContentLoaded', async function() {
             refreshSavedList();
         });
     }
+
+    loadVoyagePlans();
+    loadCrewDirectory();
+
+    const voyageAgendaSearchInput = document.getElementById('voyageAgendaSearchInput');
+    if (voyageAgendaSearchInput) {
+        voyageAgendaSearchInput.addEventListener('input', event => {
+            voyageAgendaSearchTerm = String(event.target?.value || '');
+            renderVoyageAgendaPanel();
+        });
+    }
+
+    const voyageAgendaOpenRoutesBtn = document.getElementById('voyageAgendaOpenRoutesBtn');
+    if (voyageAgendaOpenRoutesBtn) {
+        voyageAgendaOpenRoutesBtn.addEventListener('click', () => activateTab('routes'));
+    }
+
+    const voyageAgendaRefreshBtn = document.getElementById('voyageAgendaRefreshBtn');
+    if (voyageAgendaRefreshBtn) {
+        voyageAgendaRefreshBtn.addEventListener('click', () => renderVoyageAgendaPanel());
+    }
+
+    const voyageLlmPromptCloseBtn = document.getElementById('voyageLlmPromptCloseBtn');
+    if (voyageLlmPromptCloseBtn) {
+        voyageLlmPromptCloseBtn.addEventListener('click', closeVoyageLlmPromptModal);
+    }
+
+    const voyageLlmPromptModal = document.getElementById('voyageLlmPromptModal');
+    if (voyageLlmPromptModal) {
+        voyageLlmPromptModal.addEventListener('click', event => {
+            if (event.target === voyageLlmPromptModal) {
+                closeVoyageLlmPromptModal();
+            }
+        });
+    }
+
+    const voyageLlmPromptCopyBtn = document.getElementById('voyageLlmPromptCopyBtn');
+    if (voyageLlmPromptCopyBtn) {
+        voyageLlmPromptCopyBtn.addEventListener('click', () => {
+            void copyVoyageLlmPromptToClipboard();
+        });
+    }
+
+    const voyageLlmPromptRefreshBtn = document.getElementById('voyageLlmPromptRefreshBtn');
+    if (voyageLlmPromptRefreshBtn) {
+        voyageLlmPromptRefreshBtn.addEventListener('click', () => fillVoyageLlmPromptTextarea());
+    }
+
+    const voyagesSidebarNewBtn = document.getElementById('voyagesSidebarNewBtn');
+    if (voyagesSidebarNewBtn) {
+        voyagesSidebarNewBtn.addEventListener('click', () => resetVoyagePlanEditor());
+    }
+
+    const voyagesSidebarPanel = document.getElementById('voyagesTab');
+    if (voyagesSidebarPanel) {
+        voyagesSidebarPanel.addEventListener('click', event => {
+            const planActionTarget = event.target.closest('[data-voyage-plan-action]');
+            if (!planActionTarget) return;
+            const action = String(planActionTarget.getAttribute('data-voyage-plan-action') || '');
+            const planId = String(planActionTarget.getAttribute('data-voyage-plan-id') || '');
+            if (action === 'select' && planId) {
+                selectedVoyagePlanId = planId;
+                syncVoyagePlanEditorUi();
+                renderVoyageAgendaPanel();
+                setVoyagePlanStatus(t('Voyage chargé dans l\'éditeur.', 'Viaje cargado en el editor.', 'Trip loaded in editor.'));
+            }
+        });
+    }
+
+    const voyagePlanSaveBtn = document.getElementById('voyagePlanSaveBtn');
+    if (voyagePlanSaveBtn) {
+        voyagePlanSaveBtn.addEventListener('click', () => {
+            upsertSelectedVoyagePlanFromEditor();
+        });
+    }
+
+    const voyagePlanNewBtn = document.getElementById('voyagePlanNewBtn');
+    if (voyagePlanNewBtn) {
+        voyagePlanNewBtn.addEventListener('click', () => resetVoyagePlanEditor());
+    }
+
+    const voyagePlanDuplicateBtn = document.getElementById('voyagePlanDuplicateBtn');
+    if (voyagePlanDuplicateBtn) {
+        voyagePlanDuplicateBtn.addEventListener('click', () => duplicateSelectedVoyagePlan());
+    }
+
+    const voyagePlanDeleteBtn = document.getElementById('voyagePlanDeleteBtn');
+    if (voyagePlanDeleteBtn) {
+        voyagePlanDeleteBtn.addEventListener('click', () => deleteSelectedVoyagePlan());
+    }
+
+    const voyagePlanAddRouteBtn = document.getElementById('voyagePlanAddRouteBtn');
+    if (voyagePlanAddRouteBtn) {
+        voyagePlanAddRouteBtn.addEventListener('click', () => addRouteToSelectedVoyagePlan());
+    }
+
+    const voyagePlanOpenRouteBtn = document.getElementById('voyagePlanOpenRouteBtn');
+    if (voyagePlanOpenRouteBtn) {
+        voyagePlanOpenRouteBtn.addEventListener('click', () => {
+            const routeId = String(document.getElementById('voyagePlanRouteSelectInput')?.value || '');
+            const routeIndex = getSavedRoutes().findIndex(route => String(route.id || '') === routeId);
+            if (routeIndex < 0) {
+                setVoyagePlanStatus(t('Route introuvable.', 'Ruta no encontrada.', 'Route not found.'), true);
+                return;
+            }
+            loadRoute(routeIndex);
+            activateTab('routes');
+        });
+    }
+
+    const voyagePlanWaypointSelectInput = document.getElementById('voyagePlanWaypointSelectInput');
+    if (voyagePlanWaypointSelectInput) {
+        voyagePlanWaypointSelectInput.addEventListener('change', () => {
+            applySelectedVoyageWaypointToStopDraft();
+        });
+    }
+
+    const voyagePlanAddStopBtn = document.getElementById('voyagePlanAddStopBtn');
+    if (voyagePlanAddStopBtn) {
+        voyagePlanAddStopBtn.addEventListener('click', () => addStopToSelectedVoyagePlan());
+    }
+
+    const voyageCrewDirectorySelectInput = document.getElementById('voyageCrewDirectorySelectInput');
+    if (voyageCrewDirectorySelectInput) {
+        voyageCrewDirectorySelectInput.addEventListener('change', event => {
+            selectedCrewMemberId = String(event.target?.value || '').trim();
+            clearCrewEditorDraft();
+            syncCrewEditorUi();
+        });
+    }
+
+    const voyagePlanAddCrewBtn = document.getElementById('voyagePlanAddCrewBtn');
+    if (voyagePlanAddCrewBtn) {
+        voyagePlanAddCrewBtn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            assignSelectedCrewMemberToVoyage();
+        });
+    }
+
+    const voyageCrewNewBtn = document.getElementById('voyageCrewNewBtn');
+    if (voyageCrewNewBtn) {
+        voyageCrewNewBtn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            resetCrewEditor();
+        });
+    }
+
+    const voyageCrewSaveBtn = document.getElementById('voyageCrewSaveBtn');
+    if (voyageCrewSaveBtn) {
+        voyageCrewSaveBtn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            upsertCrewMemberFromEditor();
+        });
+    }
+
+    const voyageCrewDeleteBtn = document.getElementById('voyageCrewDeleteBtn');
+    if (voyageCrewDeleteBtn) {
+        voyageCrewDeleteBtn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            deleteSelectedCrewMember();
+        });
+    }
+
+    const voyageCrewEditorInputIds = [
+        'voyageCrewFirstNameInput',
+        'voyageCrewLastNameInput',
+        'voyageCrewEmailInput',
+        'voyageCrewPhoneInput'
+    ];
+    voyageCrewEditorInputIds.forEach(inputId => {
+        const inputNode = document.getElementById(inputId);
+        if (!inputNode) return;
+        inputNode.addEventListener('input', () => captureCrewEditorDraftFromInputs());
+        inputNode.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            event.stopPropagation();
+            upsertCrewMemberFromEditor();
+        });
+    });
+
+    const voyageCrewCommentInput = document.getElementById('voyageCrewCommentInput');
+    if (voyageCrewCommentInput) {
+        voyageCrewCommentInput.addEventListener('input', () => captureCrewEditorDraftFromInputs());
+        voyageCrewCommentInput.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            upsertCrewMemberFromEditor();
+        });
+    }
+
+    const voyagePlanCrewList = document.getElementById('voyagePlanCrewList');
+    if (voyagePlanCrewList) {
+        voyagePlanCrewList.addEventListener('click', event => {
+            const actionTarget = event.target.closest('[data-voyage-crew-action]');
+            if (!actionTarget) return;
+            const action = String(actionTarget.getAttribute('data-voyage-crew-action') || '');
+            const crewMemberId = String(actionTarget.getAttribute('data-crew-member-id') || '');
+            const planId = String(actionTarget.getAttribute('data-voyage-plan-id') || selectedVoyagePlanId || '');
+
+            if (action === 'edit-member' && crewMemberId) {
+                selectedCrewMemberId = crewMemberId;
+                clearCrewEditorDraft();
+                syncVoyagePlanEditorUi();
+                setVoyageCrewStatus(t('Équipier chargé dans l\'éditeur.', 'Tripulante cargado en el editor.', 'Crew member loaded in editor.'));
+            }
+            if (action === 'remove-member' && crewMemberId && planId) {
+                removeCrewMemberFromVoyage(planId, crewMemberId);
+            }
+        });
+    }
+
+    const voyageAgendaContent = document.getElementById('voyageAgendaContent');
+    if (voyageAgendaContent) {
+        voyageAgendaContent.addEventListener('mousedown', event => {
+            const resizeHandle = event.target.closest('[data-voyage-resize-handle]');
+            if (!resizeHandle || !selectedVoyagePlanId) return;
+
+            const itemElement = resizeHandle.closest('.voyage-calendar-item[data-voyage-map-item-id]');
+            const dropZone = resizeHandle.closest('.voyage-calendar-week__body[data-voyage-week-start]');
+            const itemId = String(itemElement?.getAttribute('data-voyage-map-item-id') || '');
+            const plan = getSelectedVoyagePlan();
+            const timelineEntry = computeVoyagePlanTimeline(plan).find(entry => entry.id === itemId && entry.type === 'stop');
+            if (!itemElement || !dropZone || !itemId || !timelineEntry?.departure) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            activeVoyageMapItemId = itemId;
+            activeVoyageCalendarResize = {
+                planId: selectedVoyagePlanId,
+                itemId,
+                startDateTime: timelineEntry.departure,
+                dropZone,
+                itemElement,
+                handleElement: resizeHandle
+            };
+            itemElement.classList.add('is-resizing');
+        });
+
+        document.addEventListener('mousemove', event => {
+            if (!activeVoyageCalendarResize) return;
+            const previewDateTime = getVoyageCalendarResizeTargetDateTime(activeVoyageCalendarResize.startDateTime, activeVoyageCalendarResize.dropZone, event.clientX);
+            const durationDays = getVoyageCalendarDurationDaysFromPointer(activeVoyageCalendarResize.startDateTime, activeVoyageCalendarResize.dropZone, event.clientX);
+            const widthPct = getVoyageCalendarResizeWidthPct(activeVoyageCalendarResize.startDateTime, durationDays, activeVoyageCalendarResize.dropZone);
+            if (!Number.isFinite(widthPct)) return;
+            activeVoyageCalendarResize.itemElement.style.width = `${widthPct.toFixed(2)}%`;
+            updateVoyageCalendarHandleLabel(activeVoyageCalendarResize.handleElement, previewDateTime);
+        });
+
+        document.addEventListener('mouseup', event => {
+            if (!activeVoyageCalendarResize) return;
+
+            const { planId, itemId, startDateTime, dropZone, itemElement } = activeVoyageCalendarResize;
+            const durationDays = getVoyageCalendarDurationDaysFromPointer(startDateTime, dropZone, event.clientX);
+            const targetDepartureDateTime = getVoyageCalendarResizeTargetDateTime(startDateTime, dropZone, event.clientX);
+            activeVoyageCalendarResize = null;
+            itemElement.classList.remove('is-resizing');
+
+            if (!Number.isFinite(durationDays) || !(targetDepartureDateTime instanceof Date) || Number.isNaN(targetDepartureDateTime.getTime())) {
+                renderVoyageAgendaPanel();
+                return;
+            }
+
+            updateVoyagePlanItemField(planId, itemId, 'stopDepartureDateTime', formatDateTimeLocalInputValue(targetDepartureDateTime));
+            renderVoyageAgendaPanel();
+            setVoyagePlanStatus(t('Départ du mouillage mis à jour.', 'Salida del fondeo actualizada.', 'Anchorage departure updated.'));
+        });
+
+        voyageAgendaContent.addEventListener('dragstart', event => {
+            if (event.target.closest('[data-voyage-resize-handle]') || activeVoyageCalendarResize) {
+                event.preventDefault();
+                return;
+            }
+            const itemTarget = event.target.closest('.voyage-calendar-item[data-voyage-map-item-id]');
+            if (!itemTarget) return;
+            if (itemTarget.getAttribute('draggable') !== 'true') {
+                event.preventDefault();
+                return;
+            }
+            const itemId = String(itemTarget.getAttribute('data-voyage-map-item-id') || '');
+            if (!itemId) return;
+            draggedVoyageCalendarItemId = itemId;
+            activeVoyageMapItemId = itemId;
+            itemTarget.classList.add('is-dragging');
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', itemId);
+            }
+        });
+
+        voyageAgendaContent.addEventListener('dragover', event => {
+            const dropZone = event.target.closest('.voyage-calendar-week__body[data-voyage-week-start]');
+            if (!dropZone || !draggedVoyageCalendarItemId) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            dropZone.classList.add('is-drop-target');
+            const previewDateTime = getDateTimeFromVoyageCalendarDropTarget(dropZone, event.clientX);
+            const draggedItem = voyageAgendaContent.querySelector(`.voyage-calendar-item[data-voyage-map-item-id="${CSS.escape(draggedVoyageCalendarItemId)}"]`);
+            updateVoyageCalendarHandleLabel(draggedItem?.querySelector('.voyage-calendar-item__drag-handle'), previewDateTime);
+        });
+
+        voyageAgendaContent.addEventListener('dragleave', event => {
+            const dropZone = event.target.closest('.voyage-calendar-week__body[data-voyage-week-start]');
+            if (!dropZone) return;
+            const relatedTarget = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+            if (relatedTarget && dropZone.contains(relatedTarget)) return;
+            dropZone.classList.remove('is-drop-target');
+        });
+
+        voyageAgendaContent.addEventListener('dragend', event => {
+            draggedVoyageCalendarItemId = '';
+            const itemNode = event.target.closest('.voyage-calendar-item');
+            itemNode?.classList.remove('is-dragging');
+            updateVoyageCalendarHandleLabel(itemNode?.querySelector('.voyage-calendar-item__drag-handle'), getSelectedVoyagePlan() ? computeVoyagePlanTimeline(getSelectedVoyagePlan()).find(entry => entry.id === itemNode?.getAttribute('data-voyage-map-item-id'))?.departure : null);
+            voyageAgendaContent.querySelectorAll('.voyage-calendar-week__body.is-drop-target').forEach(node => node.classList.remove('is-drop-target'));
+        });
+
+        voyageAgendaContent.addEventListener('drop', event => {
+            const dropZone = event.target.closest('.voyage-calendar-week__body[data-voyage-week-start]');
+            if (!dropZone || !draggedVoyageCalendarItemId || !selectedVoyagePlanId) return;
+            event.preventDefault();
+            dropZone.classList.remove('is-drop-target');
+
+            const plan = getSelectedVoyagePlan();
+            const draggedItem = plan?.items.find(item => item.id === draggedVoyageCalendarItemId) || null;
+            if (!draggedItem || draggedItem.id !== getEditableVoyageRouteItemId(plan)) {
+                draggedVoyageCalendarItemId = '';
+                return;
+            }
+            const droppedDateTime = getDateTimeFromVoyageCalendarDropTarget(dropZone, event.clientX);
+            const nextValue = formatDateTimeLocalInputValue(droppedDateTime);
+
+            draggedVoyageCalendarItemId = '';
+            voyageAgendaContent.querySelectorAll('.voyage-calendar-item.is-dragging').forEach(node => node.classList.remove('is-dragging'));
+
+            if (!nextValue) return;
+
+            updateVoyagePlanItemField(selectedVoyagePlanId, draggedItem.id, 'departureDateTime', nextValue);
+            renderVoyageAgendaPanel();
+            setVoyagePlanStatus(t('Agenda déplacé: horaires recalculés.', 'Agenda movido: horarios recalculados.', 'Agenda moved: schedule recalculated.'));
+        });
+
+        voyageAgendaContent.addEventListener('click', event => {
+            const mapActionTarget = event.target.closest('[data-voyage-map-action]');
+            if (mapActionTarget) {
+                const action = String(mapActionTarget.getAttribute('data-voyage-map-action') || '');
+                if (action === 'toggle-calendar') {
+                    isVoyageCalendarVisible = !isVoyageCalendarVisible;
+                    renderVoyageAgendaPanel();
+                }
+                if (action === 'toggle-weather') {
+                    isVoyageWeatherVisible = !isVoyageWeatherVisible;
+                    renderVoyageAgendaPanel();
+                }
+                if (action === 'toggle-expand') {
+                    isVoyageMapExpanded = !isVoyageMapExpanded;
+                    renderVoyageAgendaPanel();
+                }
+                return;
+            }
+
+            const planActionTarget = event.target.closest('[data-voyage-plan-action]');
+            if (planActionTarget) {
+                const action = String(planActionTarget.getAttribute('data-voyage-plan-action') || '');
+                const planId = String(planActionTarget.getAttribute('data-voyage-plan-id') || '');
+                if (action === 'select') {
+                    selectedVoyagePlanId = planId;
+                    activeVoyageMapItemId = '';
+                    syncVoyagePlanEditorUi();
+                    renderVoyageAgendaPanel();
+                    setVoyagePlanStatus(t('Voyage chargé dans l\'éditeur.', 'Viaje cargado en el editor.', 'Trip loaded in editor.'));
+                }
+                return;
+            }
+
+            const itemActionTarget = event.target.closest('[data-voyage-item-action]');
+            if (itemActionTarget) {
+                const planId = String(itemActionTarget.getAttribute('data-voyage-plan-id') || '');
+                const itemId = String(itemActionTarget.getAttribute('data-voyage-item-id') || '');
+                const action = String(itemActionTarget.getAttribute('data-voyage-item-action') || '');
+                if (planId && itemId) {
+                    if (action === 'delete') deleteVoyagePlanItem(planId, itemId);
+                    if (action === 'move-up') moveVoyagePlanItem(planId, itemId, 'up');
+                    if (action === 'move-down') moveVoyagePlanItem(planId, itemId, 'down');
+                    if (action === 'save-stop-waypoint') saveVoyageStopAsWaypoint(planId, itemId);
+                }
+                return;
+            }
+
+            const mapItemTarget = event.target.closest('[data-voyage-map-item-id]');
+            if (mapItemTarget && !event.target.closest('button, input, select, textarea, label, a')) {
+                const itemId = String(mapItemTarget.getAttribute('data-voyage-map-item-id') || '');
+                if (itemId && itemId !== activeVoyageMapItemId) {
+                    activeVoyageMapItemId = itemId;
+                    renderVoyageAgendaPanel();
+                }
+                return;
+            }
+
+            const actionTarget = event.target.closest('[data-voyage-action]');
+            if (!actionTarget) return;
+
+            const routeIndex = Number(actionTarget.getAttribute('data-route-index'));
+            if (!Number.isInteger(routeIndex) || routeIndex < 0) return;
+
+            const action = String(actionTarget.getAttribute('data-voyage-action') || '');
+            loadRoute(routeIndex);
+
+            if (action === 'open-routing') {
+                activateTab('routing');
+                void computeRoute();
+                return;
+            }
+
+            activateTab('routes');
+        });
+
+        voyageAgendaContent.addEventListener('change', event => {
+            const target = event.target.closest('[data-voyage-item-field]');
+            if (!target) return;
+            const field = String(target.getAttribute('data-voyage-item-field') || '');
+            const planId = String(target.getAttribute('data-voyage-plan-id') || '');
+            const itemId = String(target.getAttribute('data-voyage-item-id') || '');
+            if (!field || !planId || !itemId) return;
+            updateVoyagePlanItemField(planId, itemId, field, target.value);
+            setVoyagePlanStatus(t('Planning mis à jour.', 'Planificación actualizada.', 'Schedule updated.'));
+        });
+    }
+
+    ['voyageNameInput', 'voyageLegInput', 'voyageDepartureInput', 'voyageArrivalInput', 'voyageSharedWithInput', 'voyageNotesInput'].forEach(id => {
+        const node = document.getElementById(id);
+        if (!node) return;
+        node.addEventListener('input', () => updateVoyagePlanningSummary());
+        node.addEventListener('change', () => updateVoyagePlanningSummary());
+    });
 
     const polarProfileManagerSelect = document.getElementById('polarProfileManagerSelect');
     if (polarProfileManagerSelect) {
@@ -22028,7 +26631,10 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     const backToRoutingBtn = document.getElementById('backToRoutingBtn');
     if (backToRoutingBtn) {
-        backToRoutingBtn.addEventListener('click', () => activateTab('routing'));
+        backToRoutingBtn.addEventListener('click', () => {
+            activateTab('routing');
+            restoreAiRouteMatrixViewFromCache();
+        });
     }
 
     const documentCategoryInput = document.getElementById('documentCategoryInput');
@@ -22227,6 +26833,9 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 async function computeRoute() {
 
+    isAiRouteMatrixVisible = false;
+    updateMapWorkspaceLayoutState();
+
     if (routePoints.length < 2) return;
 
     clearWaypointWindDirectionLayers();
@@ -22248,6 +26857,8 @@ async function computeRoute() {
         alert(t('Date/heure de départ invalide', 'Fecha/hora de salida inválida'));
         return;
     }
+
+    try {
 
     for (let i = 0; i < routePoints.length - 1; i++) {
 
@@ -22791,6 +27402,15 @@ async function computeRoute() {
     }
 
     updateArrivalPointWeather(totalTime);
+    } catch (error) {
+        invalidateComputedRouteDisplay();
+        const message = buildWeatherDataUnavailableMessage(error?.message || error);
+        const info = document.getElementById('info');
+        if (info) {
+            info.innerHTML = `<strong>${t('Routage indisponible', 'Routing no disponible')}</strong><br>${escapeHtml(message)}`;
+        }
+        alert(message);
+    }
 }
 
 // =====================
@@ -22927,30 +27547,86 @@ function getWeatherCacheKey(lat, lon) {
     return `${roundedLat},${roundedLon}|${departureDate}|${departureTime}`;
 }
 
+function roundWeatherNearbyCoord(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'NaN';
+    const rounded = Math.round(numeric / WEATHER_NEARBY_CACHE_STEP_DEG) * WEATHER_NEARBY_CACHE_STEP_DEG;
+    return rounded.toFixed(1);
+}
+
 function getWeatherCacheKeyAtDateHour(lat, lon, date, hour) {
     const roundedLat = Number(lat).toFixed(4);
     const roundedLon = Number(lon).toFixed(4);
     return `${roundedLat},${roundedLon}|${date}|${hour}`;
 }
 
+function getNearbyWeatherCacheKeyAtDateHour(lat, lon, date, hour) {
+    const roundedLat = roundWeatherNearbyCoord(lat);
+    const roundedLon = roundWeatherNearbyCoord(lon);
+    return `${roundedLat},${roundedLon}|${date}|${hour}`;
+}
+
+function getWeatherDailyBundleCacheKey(lat, lon, date) {
+    const roundedLat = roundWeatherNearbyCoord(lat);
+    const roundedLon = roundWeatherNearbyCoord(lon);
+    return `${roundedLat},${roundedLon}|${date}`;
+}
+
 async function fetchJsonWithRetry(url, { retries = 2, timeoutMs = 9000 } = {}) {
     let lastError = null;
 
+    const runWeatherRequest = (task) => new Promise((resolve, reject) => {
+        weatherRequestQueue.push(async () => {
+            activeWeatherRequestCount += 1;
+            try {
+                resolve(await task());
+            } catch (error) {
+                reject(error);
+            } finally {
+                activeWeatherRequestCount = Math.max(0, activeWeatherRequestCount - 1);
+                while (activeWeatherRequestCount < WEATHER_REQUEST_MAX_CONCURRENT && weatherRequestQueue.length > 0) {
+                    const nextTask = weatherRequestQueue.shift();
+                    if (typeof nextTask === 'function') {
+                        nextTask();
+                    }
+                }
+            }
+        });
+
+        while (activeWeatherRequestCount < WEATHER_REQUEST_MAX_CONCURRENT && weatherRequestQueue.length > 0) {
+            const nextTask = weatherRequestQueue.shift();
+            if (typeof nextTask === 'function') {
+                nextTask();
+            }
+        }
+    });
+
     for (let attempt = 0; attempt <= retries; attempt++) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
         try {
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeout);
+            const payload = await runWeatherRequest(async () => {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-            if (!response.ok) {
-                lastError = new Error(`HTTP ${response.status}`);
+                try {
+                    const response = await fetch(url, { signal: controller.signal });
+                    clearTimeout(timeout);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    return await response.json();
+                } finally {
+                    clearTimeout(timeout);
+                }
+            });
+
+            if (payload?.error) {
+                lastError = new Error(String(payload.reason || payload.message || 'API error'));
             } else {
-                return await response.json();
+                return payload;
             }
         } catch (error) {
-            clearTimeout(timeout);
             lastError = error;
         }
 
@@ -22959,25 +27635,95 @@ async function fetchJsonWithRetry(url, { retries = 2, timeoutMs = 9000 } = {}) {
         }
     }
 
-    return null;
+    return {
+        error: true,
+        reason: String(lastError?.message || 'fetch-failed')
+    };
+}
+
+function getWeatherSeriesHourIndex(hourlyTimes, date, hour) {
+    if (!Array.isArray(hourlyTimes) || hourlyTimes.length === 0) return -1;
+    const parsedHour = parseInt(String(hour || '12:00').split(':')[0], 10);
+    const normalizedHour = Number.isFinite(parsedHour) ? Math.max(0, Math.min(23, parsedHour)) : 12;
+    const targetIso = `${date}T${String(normalizedHour).padStart(2, '0')}:00`;
+    const directIndex = hourlyTimes.indexOf(targetIso);
+    if (directIndex !== -1) return directIndex;
+    return normalizedHour < hourlyTimes.length ? normalizedHour : -1;
+}
+
+async function getWeatherDailyBundle(lat, lon, date) {
+    const bundleKey = getWeatherDailyBundleCacheKey(lat, lon, date);
+    if (weatherDailyCache.has(bundleKey)) return weatherDailyCache.get(bundleKey);
+    if (weatherDailyInFlight.has(bundleKey)) return weatherDailyInFlight.get(bundleKey);
+
+    const roundedLat = roundWeatherNearbyCoord(lat);
+    const roundedLon = roundWeatherNearbyCoord(lon);
+    const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${roundedLat}&longitude=${roundedLon}&start_date=${date}&end_date=${date}&hourly=temperature_2m,windspeed_10m,winddirection_10m,windgusts_10m,precipitation,weather_code,surface_pressure&windspeed_unit=kn&timezone=UTC`;
+    const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${roundedLat}&longitude=${roundedLon}&start_date=${date}&end_date=${date}&hourly=wave_height,wave_direction,wave_period,sea_surface_temperature,ocean_current_velocity,ocean_current_direction&timezone=UTC`;
+
+    const request = Promise.all([
+        fetchJsonWithRetry(forecastUrl, { retries: 2, timeoutMs: 9000 }),
+        fetchJsonWithRetry(marineUrl, { retries: 1, timeoutMs: 9000 })
+    ]).then(([forecastData, marineData]) => {
+        const bundle = {
+            forecastData,
+            marineData,
+            fetchedAt: new Date().toISOString()
+        };
+        weatherDailyCache.set(bundleKey, bundle);
+        weatherDailyInFlight.delete(bundleKey);
+        return bundle;
+    }).catch(error => {
+        weatherDailyInFlight.delete(bundleKey);
+        throw error;
+    });
+
+    weatherDailyInFlight.set(bundleKey, request);
+    return request;
+}
+
+function buildWeatherDataUnavailableMessage(reason = '') {
+    const details = String(reason || '').trim();
+    if (details.toLowerCase().includes('request limit exceeded')) {
+        return t(
+            'Météo indisponible: limite Open-Meteo atteinte pour aujourd\'hui. Le routage réel ne peut pas être calculé tant que le quota n\'est pas rétabli.',
+            'Meteo no disponible: límite de Open-Meteo alcanzado por hoy. El routing real no se puede calcular hasta que vuelva el cupo.'
+        );
+    }
+
+    return details
+        ? t(`Météo indisponible: ${details}`, `Meteo no disponible: ${details}`)
+        : t(
+            'Météo indisponible: données horaires Open-Meteo manquantes.',
+            'Meteo no disponible: faltan datos horarios de Open-Meteo.'
+        );
 }
 
 async function getWeatherAtDateHour(lat, lon, date, hour) {
     const cacheKey = getWeatherCacheKeyAtDateHour(lat, lon, date, hour);
     if (weatherCache.has(cacheKey)) return weatherCache.get(cacheKey);
 
-    const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&start_date=${date}&end_date=${date}&hourly=temperature_2m,windspeed_10m,winddirection_10m,windgusts_10m,precipitation,weather_code,surface_pressure&windspeed_unit=kn&timezone=UTC`;
-    const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&start_date=${date}&end_date=${date}&hourly=wave_height,wave_direction,wave_period,sea_surface_temperature,ocean_current_velocity,ocean_current_direction&timezone=UTC`;
+    const nearbyCacheKey = getNearbyWeatherCacheKeyAtDateHour(lat, lon, date, hour);
+    if (weatherCache.has(nearbyCacheKey)) {
+        const cachedNearbyWeather = weatherCache.get(nearbyCacheKey);
+        weatherCache.set(cacheKey, cachedNearbyWeather);
+        return cachedNearbyWeather;
+    }
 
-    const [data, marineData] = await Promise.all([
-        fetchJsonWithRetry(forecastUrl, { retries: 2, timeoutMs: 9000 }),
-        fetchJsonWithRetry(marineUrl, { retries: 1, timeoutMs: 9000 })
-    ]);
+    const { forecastData: data, marineData, fetchedAt } = await getWeatherDailyBundle(lat, lon, date);
+    const hourIndex = getWeatherSeriesHourIndex(data?.hourly?.time, date, hour);
 
-    const parsedHour = parseInt(String(hour || '12:00').split(':')[0], 10);
-    const hourIndex = Number.isFinite(parsedHour) ? Math.max(0, Math.min(23, parsedHour)) : 12;
+    const hasForecastSeries = hourIndex >= 0
+        && Array.isArray(data?.hourly?.windspeed_10m)
+        && Array.isArray(data?.hourly?.winddirection_10m)
+        && data.hourly.windspeed_10m.length > hourIndex
+        && data.hourly.winddirection_10m.length > hourIndex;
 
-    const fetchedAt = new Date().toISOString();
+    if (!hasForecastSeries) {
+        throw new Error(buildWeatherDataUnavailableMessage(data?.reason || data?.message || ''));
+    }
+
+    const marineHourIndex = getWeatherSeriesHourIndex(marineData?.hourly?.time, date, hour);
 
     const weather = {
         temperature: data?.hourly?.temperature_2m?.[hourIndex] ?? 20,
@@ -22986,14 +27732,14 @@ async function getWeatherAtDateHour(lat, lon, date, hour) {
         windDirection: data?.hourly?.winddirection_10m?.[hourIndex] ?? 0,
         precipitation: data?.hourly?.precipitation?.[hourIndex] ?? 0,
         pressure: data?.hourly?.surface_pressure?.[hourIndex] ?? 1015,
-        waveHeight: marineData?.hourly?.wave_height?.[hourIndex],
-        waveDirection: marineData?.hourly?.wave_direction?.[hourIndex],
-        wavePeriod: marineData?.hourly?.wave_period?.[hourIndex],
-        seaSurfaceTemperature: marineData?.hourly?.sea_surface_temperature?.[hourIndex],
-        oceanCurrentVelocity: marineData?.hourly?.ocean_current_velocity?.[hourIndex],
-        oceanCurrentDirection: marineData?.hourly?.ocean_current_direction?.[hourIndex],
-        currentSpeedKnots: Number.isFinite(marineData?.hourly?.ocean_current_velocity?.[hourIndex])
-            ? marineData.hourly.ocean_current_velocity[hourIndex] * MPS_TO_KNOTS
+        waveHeight: marineHourIndex >= 0 ? marineData?.hourly?.wave_height?.[marineHourIndex] : undefined,
+        waveDirection: marineHourIndex >= 0 ? marineData?.hourly?.wave_direction?.[marineHourIndex] : undefined,
+        wavePeriod: marineHourIndex >= 0 ? marineData?.hourly?.wave_period?.[marineHourIndex] : undefined,
+        seaSurfaceTemperature: marineHourIndex >= 0 ? marineData?.hourly?.sea_surface_temperature?.[marineHourIndex] : undefined,
+        oceanCurrentVelocity: marineHourIndex >= 0 ? marineData?.hourly?.ocean_current_velocity?.[marineHourIndex] : undefined,
+        oceanCurrentDirection: marineHourIndex >= 0 ? marineData?.hourly?.ocean_current_direction?.[marineHourIndex] : undefined,
+        currentSpeedKnots: marineHourIndex >= 0 && Number.isFinite(marineData?.hourly?.ocean_current_velocity?.[marineHourIndex])
+            ? marineData.hourly.ocean_current_velocity[marineHourIndex] * MPS_TO_KNOTS
             : null,
         weatherCode: data?.hourly?.weather_code?.[hourIndex] ?? 2,
         updatedAt: fetchedAt
@@ -23001,6 +27747,7 @@ async function getWeatherAtDateHour(lat, lon, date, hour) {
 
     lastWeatherUpdateAt = fetchedAt;
 
+    weatherCache.set(nearbyCacheKey, weather);
     weatherCache.set(cacheKey, weather);
     return weather;
 }
@@ -23753,6 +28500,12 @@ function sanitizeSavedRoute(route, fallbackIndex = 0) {
         name,
         date,
         time,
+        voyageName: String(route?.voyageName || '').trim(),
+        voyageLeg: String(route?.voyageLeg || '').trim(),
+        agendaDepartureDateTime: normalizeDateTimeLocalValue(route?.agendaDepartureDateTime || ''),
+        agendaArrivalDateTime: normalizeDateTimeLocalValue(route?.agendaArrivalDateTime || ''),
+        sharedWith: sanitizeSharedWithValue(route?.sharedWith || ''),
+        agendaNotes: String(route?.agendaNotes || '').trim(),
         tackingTimeHours: tacking,
         points,
         totalDistanceNm,
@@ -24135,19 +28888,52 @@ function startCloudAutoSync() {
     }, CLOUD_AUTO_PULL_INTERVAL_MS);
 }
 
+function parseRouteLegacyPayload(rawPayload) {
+    if (!rawPayload) return null;
+    if (typeof rawPayload === 'object') return rawPayload;
+    try {
+        return JSON.parse(String(rawPayload));
+    } catch (_error) {
+        return null;
+    }
+}
+
+function extractRouteMetaFromLegacyPayload(rawPayload) {
+    const parsed = parseRouteLegacyPayload(rawPayload);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const voyage = parsed?.voyage && typeof parsed.voyage === 'object'
+        ? parsed.voyage
+        : (parsed?.metadata?.voyage && typeof parsed.metadata.voyage === 'object' ? parsed.metadata.voyage : {});
+
+    return {
+        voyageName: String(voyage?.name || parsed?.voyageName || '').trim(),
+        voyageLeg: String(voyage?.leg || parsed?.voyageLeg || '').trim(),
+        agendaDepartureDateTime: normalizeDateTimeLocalValue(voyage?.departureDateTime || parsed?.agendaDepartureDateTime || ''),
+        agendaArrivalDateTime: normalizeDateTimeLocalValue(voyage?.arrivalDateTime || parsed?.agendaArrivalDateTime || ''),
+        sharedWith: sanitizeSharedWithValue(voyage?.sharedWith || parsed?.sharedWith || ''),
+        agendaNotes: String(voyage?.notes || parsed?.agendaNotes || '').trim()
+    };
+}
+
+function buildRouteLegacyPayload(route) {
+    const safeRoute = sanitizeSavedRoute(route, 0);
+    return {
+        points: safeRoute.points,
+        voyage: {
+            name: safeRoute.voyageName || '',
+            leg: safeRoute.voyageLeg || '',
+            departureDateTime: safeRoute.agendaDepartureDateTime || '',
+            arrivalDateTime: safeRoute.agendaArrivalDateTime || '',
+            sharedWith: safeRoute.sharedWith || '',
+            notes: safeRoute.agendaNotes || ''
+        }
+    };
+}
+
 function buildRoutesFromCloudV2Rows(routeRows, pointRows) {
     const extractLegacyPoints = (row) => {
-        const raw = row?.legacy_payload;
-        if (!raw) return [];
-
-        let parsed = raw;
-        if (typeof raw === 'string') {
-            try {
-                parsed = JSON.parse(raw);
-            } catch (_error) {
-                return [];
-            }
-        }
+        const parsed = parseRouteLegacyPayload(row?.legacy_payload);
+        if (!parsed) return [];
 
         const candidateLists = [
             parsed?.points,
@@ -24206,12 +28992,19 @@ function buildRoutesFromCloudV2Rows(routeRows, pointRows) {
         const points = pointsFromTable.length > 0
             ? pointsFromTable
             : extractLegacyPoints(row);
+        const legacyMeta = extractRouteMetaFromLegacyPayload(row?.legacy_payload);
 
         return sanitizeSavedRoute({
             id: routeId,
             name: row?.name,
             date: row?.departure_date ?? row?.date,
             time: row?.departure_time ?? row?.time,
+            voyageName: row?.voyage_name ?? legacyMeta.voyageName,
+            voyageLeg: row?.voyage_leg ?? legacyMeta.voyageLeg,
+            agendaDepartureDateTime: row?.agenda_departure_at ?? legacyMeta.agendaDepartureDateTime,
+            agendaArrivalDateTime: row?.agenda_arrival_at ?? legacyMeta.agendaArrivalDateTime,
+            sharedWith: row?.shared_with ?? legacyMeta.sharedWith,
+            agendaNotes: row?.agenda_notes ?? legacyMeta.agendaNotes,
             tackingTimeHours: row?.tacking_time_hours ?? row?.tackingTimeHours,
             totalDistanceNm: row?.total_distance_nm ?? row?.totalDistanceNm,
             creatorEmail: row?.creator_email ?? row?.creatorEmail,
@@ -24991,7 +29784,7 @@ async function pushRoutesToCloudV2(routes) {
             creator_email: route.creatorEmail || creatorEmail,
             creator_name: route.creatorName || null,
             legacy_hash: null,
-            legacy_payload: null,
+            legacy_payload: JSON.stringify(buildRouteLegacyPayload(route)),
             created_at: route.createdAt || fallbackUpdatedAt,
             updated_at: fallbackUpdatedAt
         };
@@ -25015,8 +29808,9 @@ async function pushRoutesToCloudV2(routes) {
         } else {
             const { error: insertRouteError } = await cloudClient
                 .from(CLOUD_ROUTES_TABLE)
-                .insert(routePayload);
+                .upsert(routePayload, { onConflict: 'id' });
             if (insertRouteError) throw insertRouteError;
+            existingById.set(routeId, { id: routeId, name: routeName });
             existingByName.set(routeNameKey, { id: routeId, name: routeName });
         }
 
@@ -25130,6 +29924,391 @@ async function renameRouteInCloudByName(oldName, newName) {
     return true;
 }
 
+function buildVoyagePlansFromCloudRows(planRows, itemRows, crewAssignmentRows = []) {
+    const itemsByPlanId = new Map();
+    const crewIdsByPlanId = new Map();
+
+    (Array.isArray(itemRows) ? itemRows : []).forEach((row, index) => {
+        const planId = String(row?.voyage_plan_id || '').trim();
+        if (!planId) return;
+        if (!itemsByPlanId.has(planId)) {
+            itemsByPlanId.set(planId, []);
+        }
+        itemsByPlanId.get(planId).push({
+            seq: Number(row?.seq),
+            item: sanitizeVoyagePlanItem({
+                id: String(row?.id || `voyage-item-${Date.now()}-${index}`),
+                type: String(row?.item_type || 'route').trim(),
+                routeId: row?.route_id,
+                departureDateTime: row?.departure_date_time,
+                startDateTime: row?.start_date_time,
+                stopDepartureDateTime: row?.stop_departure_date_time,
+                stopName: row?.stop_name,
+                durationDays: row?.duration_days,
+                waypointPhotoId: row?.waypoint_photo_id,
+                waypointLat: row?.waypoint_lat,
+                waypointLng: row?.waypoint_lng,
+                notes: row?.notes
+            }, index)
+        });
+    });
+
+    (Array.isArray(crewAssignmentRows) ? crewAssignmentRows : []).forEach(row => {
+        const planId = String(row?.voyage_plan_id || '').trim();
+        const crewMemberId = String(row?.equipage_id || '').trim();
+        if (!planId || !crewMemberId) return;
+        if (!crewIdsByPlanId.has(planId)) {
+            crewIdsByPlanId.set(planId, []);
+        }
+        crewIdsByPlanId.get(planId).push(crewMemberId);
+    });
+
+    return (Array.isArray(planRows) ? planRows : [])
+        .map((row, index) => sanitizeVoyagePlan({
+            id: String(row?.id || `voyage-plan-${Date.now()}-${index}`),
+            name: row?.name,
+            description: row?.description,
+            crewMemberIds: Array.from(new Set(crewIdsByPlanId.get(String(row?.id || '').trim()) || [])),
+            items: (itemsByPlanId.get(String(row?.id || '').trim()) || [])
+                .sort((a, b) => {
+                    const aSeq = Number.isFinite(a.seq) ? a.seq : 0;
+                    const bSeq = Number.isFinite(b.seq) ? b.seq : 0;
+                    return aSeq - bSeq;
+                })
+                .map(entry => entry.item),
+            createdAt: row?.created_at,
+            updatedAt: row?.updated_at
+        }, index))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function mergeVoyagePlansPreservingDirtyLocal(localList, cloudList) {
+    const planKey = (plan) => {
+        const id = String(plan?.id || '').trim();
+        if (id) return `id:${id}`;
+        return `name:${String(plan?.name || '').trim().toLowerCase()}`;
+    };
+    const mergedByKey = new Map();
+
+    (Array.isArray(cloudList) ? cloudList : []).forEach((plan, index) => {
+        const safe = sanitizeVoyagePlan(plan, index);
+        mergedByKey.set(planKey(safe), safe);
+    });
+
+    (Array.isArray(localList) ? localList : []).forEach((plan, index) => {
+        const safeLocal = sanitizeVoyagePlan(plan, index);
+        const key = planKey(safeLocal);
+        const cloudVersion = mergedByKey.get(key);
+        if (!cloudVersion) {
+            mergedByKey.set(key, safeLocal);
+            return;
+        }
+
+        const localUpdatedMs = Date.parse(String(safeLocal?.updatedAt || safeLocal?.createdAt || ''));
+        const cloudUpdatedMs = Date.parse(String(cloudVersion?.updatedAt || cloudVersion?.createdAt || ''));
+        if (Number.isFinite(localUpdatedMs) && Number.isFinite(cloudUpdatedMs) && localUpdatedMs >= cloudUpdatedMs) {
+            mergedByKey.set(key, safeLocal);
+        }
+    });
+
+    return Array.from(mergedByKey.values())
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function mergeCrewDirectoryPreservingDirtyLocal(localList, cloudList) {
+    const keyForEntry = (entry) => {
+        const id = String(entry?.id || '').trim();
+        if (id) return `id:${id}`;
+        return `email:${normalizeEmailForCompare(entry?.email || '')}`;
+    };
+
+    const mergedByKey = new Map();
+    (Array.isArray(cloudList) ? cloudList : []).forEach((entry, index) => {
+        const safe = sanitizeCrewMember(entry, index);
+        mergedByKey.set(keyForEntry(safe), safe);
+    });
+
+    (Array.isArray(localList) ? localList : []).forEach((entry, index) => {
+        const safeLocal = sanitizeCrewMember(entry, index);
+        const key = keyForEntry(safeLocal);
+        const cloudVersion = mergedByKey.get(key);
+        if (!cloudVersion) {
+            mergedByKey.set(key, safeLocal);
+            return;
+        }
+
+        const localUpdatedMs = Date.parse(String(safeLocal?.updatedAt || safeLocal?.createdAt || ''));
+        const cloudUpdatedMs = Date.parse(String(cloudVersion?.updatedAt || cloudVersion?.createdAt || ''));
+        if (Number.isFinite(localUpdatedMs) && Number.isFinite(cloudUpdatedMs) && localUpdatedMs >= cloudUpdatedMs) {
+            mergedByKey.set(key, safeLocal);
+        }
+    });
+
+    return Array.from(mergedByKey.values())
+        .sort((a, b) => a.sortLabel.localeCompare(b.sortLabel));
+}
+
+function buildCrewDirectoryFromCloudRows(rows) {
+    return (Array.isArray(rows) ? rows : [])
+        .map((row, index) => sanitizeCrewMember({
+            id: String(row?.id || generateClientUuid()),
+            nom: row?.nom,
+            prenom: row?.prenom,
+            email: row?.email,
+            telephone: row?.telephone,
+            commentaire: row?.commentaire,
+            creatorEmail: row?.creator_email,
+            creatorName: row?.creator_name,
+            createdAt: row?.created_at,
+            updatedAt: row?.updated_at
+        }, index))
+        .sort((a, b) => a.sortLabel.localeCompare(b.sortLabel));
+}
+
+async function pullCrewDirectoryFromCloudV2() {
+    if (!isCloudReady()) return [];
+
+    const resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    let query = cloudClient
+        .from(CLOUD_CREW_TABLE)
+        .select('*')
+        .order('nom', { ascending: true })
+        .order('prenom', { ascending: true });
+
+    if (isUuidString(resolvedProjectIdUuid)) {
+        query = query.eq('project_id', resolvedProjectIdUuid);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return buildCrewDirectoryFromCloudRows(data || []);
+}
+
+async function pullVoyagePlansFromCloudV2() {
+    if (!isCloudReady()) return [];
+
+    const resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+
+    let plansQuery = cloudClient
+        .from(CLOUD_VOYAGE_PLANS_TABLE)
+        .select('*')
+        .order('updated_at', { ascending: false });
+
+    if (isUuidString(resolvedProjectIdUuid)) {
+        plansQuery = plansQuery.eq('project_id', resolvedProjectIdUuid);
+    }
+
+    const { data: planRows, error: planError } = await plansQuery;
+
+    if (planError) throw planError;
+    if (!Array.isArray(planRows) || planRows.length === 0) return [];
+
+    const planIds = planRows
+        .map(row => String(row?.id || '').trim())
+        .filter(Boolean);
+
+    let itemsQuery = cloudClient
+        .from(CLOUD_VOYAGE_PLAN_ITEMS_TABLE)
+        .select('*')
+        .in('voyage_plan_id', planIds)
+        .order('seq', { ascending: true });
+
+    if (isUuidString(resolvedProjectIdUuid)) {
+        itemsQuery = itemsQuery.eq('project_id', resolvedProjectIdUuid);
+    }
+
+    const { data: itemRows, error: itemError } = await itemsQuery;
+
+    if (itemError) throw itemError;
+
+    let crewAssignmentsQuery = cloudClient
+        .from(CLOUD_VOYAGE_CREW_TABLE)
+        .select('*')
+        .in('voyage_plan_id', planIds);
+
+    if (isUuidString(resolvedProjectIdUuid)) {
+        crewAssignmentsQuery = crewAssignmentsQuery.eq('project_id', resolvedProjectIdUuid);
+    }
+
+    const { data: crewAssignmentRows, error: crewAssignmentsError } = await crewAssignmentsQuery;
+    if (crewAssignmentsError) throw crewAssignmentsError;
+
+    return buildVoyagePlansFromCloudRows(planRows, itemRows || [], crewAssignmentRows || []);
+}
+
+async function pushCrewDirectoryToCloudV2(entries) {
+    if (!isCloudReady()) return false;
+
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) return false;
+
+    let resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    if (!resolvedProjectIdUuid) {
+        throw new Error('project_id introuvable pour equipage.');
+    }
+    resolvedProjectIdUuid = await ensureCloudProjectRow(resolvedProjectIdUuid);
+
+    const creator = getCreatorPatch();
+    const safeEntries = (Array.isArray(entries) ? entries : []).map((entry, index) => sanitizeCrewMember(entry, index));
+
+    const { error: deleteError } = await cloudClient
+        .from(CLOUD_CREW_TABLE)
+        .delete()
+        .eq('creator_email', creatorEmail)
+        .eq('project_id', resolvedProjectIdUuid);
+    if (deleteError) throw deleteError;
+
+    if (!safeEntries.length) return true;
+
+    const payload = safeEntries.map(entry => ({
+        id: String(entry.id || generateClientUuid()),
+        project_id: resolvedProjectIdUuid,
+        creator_email: creatorEmail,
+        creator_name: creator.creatorName || null,
+        nom: String(entry.nom || '').trim(),
+        prenom: String(entry.prenom || '').trim(),
+        email: normalizeEmailForCompare(entry.email || ''),
+        telephone: normalizePhoneValue(entry.telephone || ''),
+        commentaire: String(entry.commentaire || '').trim(),
+        created_at: entry.createdAt || new Date().toISOString(),
+        updated_at: entry.updatedAt || new Date().toISOString()
+    }));
+
+    const { error: insertError } = await cloudClient
+        .from(CLOUD_CREW_TABLE)
+        .insert(payload);
+    if (insertError) throw insertError;
+    return true;
+}
+
+async function pushVoyagePlansToCloudV2(plans) {
+    if (!isCloudReady()) return false;
+
+    const creatorEmail = getCurrentCloudUserEmail();
+    if (!creatorEmail) return false;
+
+    let resolvedProjectIdUuid = await resolveCloudProjectIdUuid();
+    if (!resolvedProjectIdUuid) {
+        throw new Error('project_id introuvable pour voyage_plans.');
+    }
+    resolvedProjectIdUuid = await ensureCloudProjectRow(resolvedProjectIdUuid);
+
+    const creator = getCreatorPatch();
+    const safePlans = (Array.isArray(plans) ? plans : [])
+        .map((plan, index) => sanitizeVoyagePlan(plan, index));
+
+    const { data: existingPlanRows, error: existingPlanRowsError } = await cloudClient
+        .from(CLOUD_VOYAGE_PLANS_TABLE)
+        .select('id')
+        .eq('creator_email', creatorEmail)
+        .eq('project_id', resolvedProjectIdUuid);
+    if (existingPlanRowsError) throw existingPlanRowsError;
+
+    const existingPlanIds = (Array.isArray(existingPlanRows) ? existingPlanRows : [])
+        .map(row => String(row?.id || '').trim())
+        .filter(Boolean);
+
+    if (existingPlanIds.length > 0) {
+        const { error: deleteItemsError } = await cloudClient
+            .from(CLOUD_VOYAGE_PLAN_ITEMS_TABLE)
+            .delete()
+            .eq('creator_email', creatorEmail)
+            .eq('project_id', resolvedProjectIdUuid)
+            .in('voyage_plan_id', existingPlanIds);
+        if (deleteItemsError) throw deleteItemsError;
+    }
+
+    const { error: deletePlansError } = await cloudClient
+        .from(CLOUD_VOYAGE_PLANS_TABLE)
+        .delete()
+        .eq('creator_email', creatorEmail)
+        .eq('project_id', resolvedProjectIdUuid);
+    if (deletePlansError) throw deletePlansError;
+
+    const { error: deleteCrewLinksError } = await cloudClient
+        .from(CLOUD_VOYAGE_CREW_TABLE)
+        .delete()
+        .eq('creator_email', creatorEmail)
+        .eq('project_id', resolvedProjectIdUuid);
+    if (deleteCrewLinksError) throw deleteCrewLinksError;
+
+    if (!safePlans.length) return true;
+
+    const nowIso = new Date().toISOString();
+    const planPayload = safePlans.map(plan => ({
+        id: String(plan.id || generateClientUuid()),
+        project_id: resolvedProjectIdUuid,
+        creator_email: creatorEmail,
+        creator_name: creator.creatorName || null,
+        name: String(plan.name || '').trim(),
+        description: String(plan.description || '').trim(),
+        created_at: plan.createdAt || nowIso,
+        updated_at: plan.updatedAt || nowIso
+    }));
+
+    const { error: insertPlansError } = await cloudClient
+        .from(CLOUD_VOYAGE_PLANS_TABLE)
+        .insert(planPayload);
+    if (insertPlansError) throw insertPlansError;
+
+    const itemPayload = safePlans.flatMap(plan => (Array.isArray(plan.items) ? plan.items : []).map((item, index) => {
+        const safeItem = sanitizeVoyagePlanItem(item, index);
+        return {
+            id: String(safeItem.id || generateClientUuid()),
+            voyage_plan_id: String(plan.id || ''),
+            project_id: resolvedProjectIdUuid,
+            creator_email: creatorEmail,
+            creator_name: creator.creatorName || null,
+            seq: index,
+            item_type: safeItem.type,
+            route_id: safeItem.routeId || null,
+            departure_date_time: safeItem.departureDateTime || null,
+            start_date_time: safeItem.startDateTime || null,
+            stop_departure_date_time: safeItem.stopDepartureDateTime || null,
+            stop_name: safeItem.stopName || '',
+            duration_days: Number.isFinite(safeItem.durationDays) ? safeItem.durationDays : 0,
+            waypoint_photo_id: safeItem.waypointPhotoId || null,
+            waypoint_lat: Number.isFinite(safeItem.waypointLat) ? safeItem.waypointLat : null,
+            waypoint_lng: Number.isFinite(safeItem.waypointLng) ? safeItem.waypointLng : null,
+            notes: safeItem.notes || '',
+            created_at: plan.createdAt || nowIso,
+            updated_at: plan.updatedAt || nowIso
+        };
+    }));
+
+    if (itemPayload.length) {
+        const { error: insertItemsError } = await cloudClient
+            .from(CLOUD_VOYAGE_PLAN_ITEMS_TABLE)
+            .insert(itemPayload);
+        if (insertItemsError) throw insertItemsError;
+    }
+
+    const validCrewMemberIds = new Set(crewDirectory.map(entry => String(entry?.id || '').trim()).filter(Boolean));
+    const crewLinkPayload = safePlans.flatMap(plan => (Array.isArray(plan.crewMemberIds) ? plan.crewMemberIds : [])
+        .map(id => String(id || '').trim())
+        .filter(id => validCrewMemberIds.has(id))
+        .map(id => ({
+            id: generateClientUuid(),
+            project_id: resolvedProjectIdUuid,
+            creator_email: creatorEmail,
+            creator_name: creator.creatorName || null,
+            voyage_plan_id: String(plan.id || ''),
+            equipage_id: id,
+            commentaire: '',
+            created_at: plan.createdAt || nowIso,
+            updated_at: plan.updatedAt || nowIso
+        })));
+
+    if (crewLinkPayload.length) {
+        const { error: insertCrewLinksError } = await cloudClient
+            .from(CLOUD_VOYAGE_CREW_TABLE)
+            .insert(crewLinkPayload);
+        if (insertCrewLinksError) throw insertCrewLinksError;
+    }
+
+    return true;
+}
+
 async function pullRoutesFromCloud(options = {}) {
     if (!isCloudReady()) return getSavedRoutes();
 
@@ -25139,7 +30318,9 @@ async function pullRoutesFromCloud(options = {}) {
         includeEngineLog = true,
         includeEngineSound = includeEngineLog,
         includeWaypointPhotos = true,
-        includeArrivalAnalyses = true
+        includeArrivalAnalyses = true,
+        includeVoyagePlans = true,
+        includeCrewDirectory = true
     } = options || {};
     const cloudNavEntriesFromTable = includeNavLog
         ? await pullNavLogEntriesFromCloudTable()
@@ -25156,6 +30337,12 @@ async function pullRoutesFromCloud(options = {}) {
     const cloudArrivalAnalysesV2 = includeArrivalAnalyses
         ? await pullArrivalAnalysisEntriesFromCloudV2()
         : null;
+    const cloudCrewDirectoryV2 = includeCrewDirectory
+        ? await pullCrewDirectoryFromCloudV2()
+        : null;
+    const cloudVoyagePlansV2 = includeVoyagePlans
+        ? await pullVoyagePlansFromCloudV2()
+        : null;
 
     let cloudMaintenanceBoardsV2 = null;
     let cloudMaintenanceExpensesV2 = null;
@@ -25168,6 +30355,8 @@ async function pullRoutesFromCloud(options = {}) {
 
     const localRoutesBeforePull = [...getSavedRoutes()];
     const localArrivalAnalysesBeforePull = [...arrivalAnalysisEntries];
+    const localCrewDirectoryBeforePull = crewDirectory.map((entry, index) => sanitizeCrewMember(entry, index));
+    const localVoyagePlansBeforePull = voyagePlans.map((plan, index) => sanitizeVoyagePlan(plan, index));
     const cloudRoutesV2 = await pullRoutesFromCloudV2();
     const cloudPolarProfilesFromCloud = await pullPolarProfilesFromCloudTable().catch(() => null);
     const effectiveRoutes = Array.isArray(cloudRoutesV2) ? cloudRoutesV2 : [];
@@ -25214,6 +30403,18 @@ async function pullRoutesFromCloud(options = {}) {
         });
     };
 
+    const resolveCrewDirectoryToApply = (cloudList) => {
+        const safeCloudList = Array.isArray(cloudList) ? cloudList : [];
+        if (!safeCloudList.length && localCrewDirectoryBeforePull.length > 0) {
+            // Do not wipe a local crew directory just because the cloud table is currently empty.
+            return localCrewDirectoryBeforePull;
+        }
+        if (crewDirectoryCloudDirty) {
+            return mergeCrewDirectoryPreservingDirtyLocal(localCrewDirectoryBeforePull, safeCloudList);
+        }
+        return safeCloudList;
+    };
+
     if (routesCloudDirty && localRoutesBeforePull.length > 0) {
         // Prevent transient UI rollback while local changes are waiting for cloud sync.
         const merged = mergeRoutesPreservingDirtyLocal(localRoutesBeforePull, effectiveRoutes);
@@ -25228,6 +30429,18 @@ async function pullRoutesFromCloud(options = {}) {
                 ? mergeArrivalAnalysisEntriesPreservingDirtyLocal(localArrivalAnalysesBeforePull, cloudArrivalAnalysesV2)
                 : cloudArrivalAnalysesV2;
             setArrivalAnalysisEntries(mergedArrivalAnalyses, { persistLocal: true, refreshUi: true });
+        }
+        if (includeCrewDirectory && Array.isArray(cloudCrewDirectoryV2)) {
+            const mergedCrewDirectory = resolveCrewDirectoryToApply(cloudCrewDirectoryV2);
+            setCrewDirectory(mergedCrewDirectory, { persistLocal: true, markCloudDirty: false });
+        }
+        if (includeVoyagePlans && Array.isArray(cloudVoyagePlansV2)) {
+            const mergedVoyagePlans = voyagePlansCloudDirty
+                ? mergeVoyagePlansPreservingDirtyLocal(localVoyagePlansBeforePull, cloudVoyagePlansV2)
+                : cloudVoyagePlansV2;
+            setVoyagePlans(mergedVoyagePlans, { persistLocal: true, markCloudDirty: false });
+            syncVoyagePlanEditorUi();
+            renderVoyageAgendaPanel();
         }
         if (allowMaintenanceOverwrite) {
             setMaintenanceBoards(cloudMaintenanceBoardsV2, { persistLocal: true, refreshUi: true, syncCloud: false });
@@ -25267,6 +30480,18 @@ async function pullRoutesFromCloud(options = {}) {
             : cloudArrivalAnalysesV2;
         setArrivalAnalysisEntries(arrivalEntriesToApply, { persistLocal: true, refreshUi: true });
     }
+    if (includeCrewDirectory && Array.isArray(cloudCrewDirectoryV2)) {
+        const crewDirectoryToApply = resolveCrewDirectoryToApply(cloudCrewDirectoryV2);
+        setCrewDirectory(crewDirectoryToApply, { persistLocal: true, markCloudDirty: false });
+    }
+    if (includeVoyagePlans && Array.isArray(cloudVoyagePlansV2)) {
+        const voyagePlansToApply = voyagePlansCloudDirty
+            ? mergeVoyagePlansPreservingDirtyLocal(localVoyagePlansBeforePull, cloudVoyagePlansV2)
+            : cloudVoyagePlansV2;
+        setVoyagePlans(voyagePlansToApply, { persistLocal: true, markCloudDirty: false });
+        syncVoyagePlanEditorUi();
+        renderVoyageAgendaPanel();
+    }
     if (allowMaintenanceOverwrite) {
         setMaintenanceBoards(cloudMaintenanceBoardsV2, { persistLocal: true, refreshUi: true, syncCloud: false });
         setMaintenanceExpenses(cloudMaintenanceExpensesV2, { refreshUi: true });
@@ -25304,25 +30529,74 @@ async function pushRoutesToCloud(options = {}) {
         includeEngineSound = includeEngineLog,
         includeWaypointPhotos = true,
         includeMaintenanceBoards = true,
-        includeArrivalAnalyses = true
+        includeArrivalAnalyses = true,
+        includeVoyagePlans = true,
+        includeCrewDirectory = true
     } = options || {};
 
     const routesSnapshot = getSavedRoutes();
+    const voyagePlansRevisionAtPushStart = voyagePlansCloudRevision;
+    const crewDirectoryRevisionAtPushStart = crewDirectoryCloudRevision;
+    const creatorEmail = getCurrentCloudUserEmail();
+
+    if (!creatorEmail) {
+        throw new Error(t(
+            'Utilisateur cloud non authentifié: synchronisation impossible.',
+            'Usuario nube no autenticado: sincronización imposible.',
+            'Cloud user not authenticated: sync unavailable.'
+        ));
+    }
 
     // Strict mode: if normalized tables fail, report sync failure instead of silently claiming success.
+    if (includeCrewDirectory || includeVoyagePlans) {
+        if (!await pushCrewDirectoryToCloudV2(crewDirectory)) {
+            throw new Error(t(
+                'Synchronisation cloud de l\'équipage refusée.',
+                'Sincronización nube de la tripulación rechazada.',
+                'Cloud crew sync was rejected.'
+            ));
+        }
+    }
+    if (includeVoyagePlans) {
+        if (!await pushVoyagePlansToCloudV2(voyagePlans)) {
+            throw new Error(t(
+                'Synchronisation cloud des voyages refusée.',
+                'Sincronización nube de viajes rechazada.',
+                'Cloud trip sync was rejected.'
+            ));
+        }
+    }
     if (includeEngineLog) {
         await pushEngineLogEntriesToCloudTable();
     }
     if (includeEngineSound) {
         await pushEngineSoundSnapshotsToCloudTable();
     }
-    await pushRoutesToCloudV2(routesSnapshot);
+    if (!await pushRoutesToCloudV2(routesSnapshot)) {
+        throw new Error(t(
+            'Synchronisation cloud des routes refusée.',
+            'Sincronización nube de rutas rechazada.',
+            'Cloud route sync was rejected.'
+        ));
+    }
     await pushPolarProfilesToCloudTable().catch(() => {});
     if (includeWaypointPhotos) {
-        await pushWaypointPhotosToCloudV2(waypointPhotoEntries);
+        if (!await pushWaypointPhotosToCloudV2(waypointPhotoEntries)) {
+            throw new Error(t(
+                'Synchronisation cloud des mouillages refusée.',
+                'Sincronización nube de fondeos rechazada.',
+                'Cloud waypoint sync was rejected.'
+            ));
+        }
     }
     if (includeArrivalAnalyses) {
-        await pushArrivalAnalysisEntriesToCloudV2(arrivalAnalysisEntries);
+        if (!await pushArrivalAnalysisEntriesToCloudV2(arrivalAnalysisEntries)) {
+            throw new Error(t(
+                'Synchronisation cloud des analyses d\'arrivée refusée.',
+                'Sincronización nube de análisis de llegada rechazada.',
+                'Cloud arrival-analysis sync was rejected.'
+            ));
+        }
     }
     if (includeMaintenanceBoards) {
         await pushMaintenanceBoardsToCloudV2(maintenanceBoards);
@@ -25330,6 +30604,12 @@ async function pushRoutesToCloud(options = {}) {
 
     routesCloudDirty = false;
     arrivalAnalysesCloudDirty = false;
+    if (includeVoyagePlans && voyagePlansCloudRevision === voyagePlansRevisionAtPushStart) {
+        voyagePlansCloudDirty = false;
+    }
+    if ((includeCrewDirectory || includeVoyagePlans) && crewDirectoryCloudRevision === crewDirectoryRevisionAtPushStart) {
+        crewDirectoryCloudDirty = false;
+    }
     cloudLastSeenUpdatedAtMs = Math.max(cloudLastSeenUpdatedAtMs, Date.now());
     return true;
 }
@@ -25487,7 +30767,10 @@ async function connectCloud(config, { silent = false } = {}) {
 
 function refreshSavedList() {
     const container = document.getElementById('savedRoutesList');
-    if (!container) return;
+    if (!container) {
+        renderVoyageAgendaPanel();
+        return;
+    }
     
     container.innerHTML = '';
     const saved = getSavedRoutes();
@@ -25499,41 +30782,20 @@ function refreshSavedList() {
         return;
     }
 
-    // Create indexed array with calculated distances
-    const routesWithData = saved.map((r, i) => {
-        let totalDistance = 0;
-        const storedDistance = Number(r.totalDistanceNm);
-        if (Number.isFinite(storedDistance)) {
-            totalDistance = storedDistance;
-        } else if (r.points && r.points.length > 1) {
-            for (let j = 0; j < r.points.length - 1; j++) {
-                const p1 = r.points[j];
-                const p2 = r.points[j + 1];
-                totalDistance += distanceNm(
-                    Number(p1.lat),
-                    Number(p1.lon ?? p1.lng),
-                    Number(p2.lat),
-                    Number(p2.lon ?? p2.lng)
-                );
-            }
-        }
-        return {
-            route: r,
-            index: i,
-            distance: totalDistance
-        };
-    });
+    const routesWithData = saved.map((route, index) => ({
+        route,
+        index,
+        distance: getSavedRouteDistanceNm(route) || 0
+    }));
 
-    // Filter by search term
     let filteredRoutes = routesWithData;
     if (routesSearchTerm.trim()) {
         const searchLower = routesSearchTerm.toLowerCase().trim();
-        filteredRoutes = routesWithData.filter(item => 
-            item.route.name.toLowerCase().includes(searchLower)
+        filteredRoutes = routesWithData.filter(item =>
+            String(item.route.name || '').toLowerCase().includes(searchLower)
         );
     }
 
-    // Sort by name
     filteredRoutes.sort((a, b) => {
         const nameA = a.route.name.toLowerCase();
         const nameB = b.route.name.toLowerCase();
@@ -25570,7 +30832,6 @@ function refreshSavedList() {
         return;
     }
 
-    // Routes
     filteredRoutes.forEach(({ route, index, distance }) => {
         const row = document.createElement('div');
         row.className = 'route-row';
@@ -25580,34 +30841,30 @@ function refreshSavedList() {
 
         const btn = document.createElement('div');
         btn.className = 'route-summary-btn';
-        const creatorName = String(route?.creatorName || '').trim();
-        const creatorMeta = creatorName
-            ? `<div class="route-col__meta">${t('Créateur', 'Creador')}: ${escapeHtml(creatorName)}</div>`
-            : '';
         const canDeleteRoute = isOwnedByCurrentCloudUser(route?.creatorEmail);
         btn.innerHTML = `
-            <div class="route-col route-col--with-meta" title="${escapeHtml(route.name)}">${escapeHtml(route.name)}${creatorMeta}</div>
+            <div class="route-col" title="${escapeHtml(route.name)}">${escapeHtml(route.name)}</div>
             <div class="route-col route-col--distance">${distance.toFixed(1)} NM</div>
             <div class="route-actions">
                 <button type="button" class="route-action-btn route-action-btn--reroute" data-action="reroute" data-index="${index}" title="${t('Routage', 'Navegación')}">⛵</button>
                 ${canDeleteRoute ? `<button type="button" class="route-action-btn route-action-btn--delete" data-action="delete" data-index="${index}" title="${t('Supprimer', 'Eliminar')}">🗑️</button>` : ''}
             </div>
         `;
-        
-        btn.addEventListener('click', async (e) => {
-            const actionTarget = e.target.closest('[data-action]');
+
+        btn.addEventListener('click', async event => {
+            const actionTarget = event.target.closest('[data-action]');
             const action = actionTarget?.dataset?.action;
 
             if (action === 'delete') {
-                e.preventDefault();
-                e.stopPropagation();
+                event.preventDefault();
+                event.stopPropagation();
                 deleteRoute(Number(actionTarget.dataset.index));
                 return;
             }
 
             if (action === 'reroute') {
-                e.preventDefault();
-                e.stopPropagation();
+                event.preventDefault();
+                event.stopPropagation();
                 loadRoute(index);
                 const routingTabBtn = document.getElementById('routingTabBtn');
                 if (routingTabBtn) routingTabBtn.click();
@@ -25625,6 +30882,7 @@ function refreshSavedList() {
     });
 
     updateRoutingTabAvailability();
+    renderVoyageAgendaPanel();
 }
 
 async function saveRoute() {
@@ -25658,24 +30916,8 @@ async function saveRoute() {
     }
     const shouldUpdateExisting = targetIndex >= 0;
 
-    // Calculate distance from computed route or direct waypoint distance
-    let totalDistanceNm = undefined;
-    if (lastComputedReportData?.metrics?.totalDistanceNm) {
-        totalDistanceNm = Number(lastComputedReportData.metrics.totalDistanceNm);
-    } else if (routePoints.length > 1) {
-        // Calculate direct distance between waypoints
-        totalDistanceNm = 0;
-        for (let i = 0; i < routePoints.length - 1; i++) {
-            const p1 = routePoints[i];
-            const p2 = routePoints[i + 1];
-            totalDistanceNm += distanceNm(
-                Number(p1.lat),
-                Number(p1.lng ?? p1.lon),
-                Number(p2.lat),
-                Number(p2.lng ?? p2.lon)
-            );
-        }
-    }
+    const planningValues = getRoutePlanningFormValues();
+    const totalDistanceNm = getDraftRouteDistanceNm();
 
     const activePolarProfile = getActivePolarProfile();
     const payload = {
@@ -25685,6 +30927,12 @@ async function saveRoute() {
         name,
         date: departureDate,
         time: departureTime,
+        voyageName: planningValues.voyageName,
+        voyageLeg: planningValues.voyageLeg,
+        agendaDepartureDateTime: planningValues.agendaDepartureDateTime,
+        agendaArrivalDateTime: planningValues.agendaArrivalDateTime,
+        sharedWith: planningValues.sharedWith,
+        agendaNotes: planningValues.agendaNotes,
         tackingTimeHours,
         polarProfileId: String(activePolarProfile?.id || ''),
         polarProfileName: String(activePolarProfile?.name || ''),
@@ -25725,6 +30973,12 @@ async function saveRoute() {
     const metaEqual = previousRoute
         && String(previousRoute.date || '') === String(payload.date || '')
         && String(previousRoute.time || '') === String(payload.time || '')
+        && String(previousRoute.voyageName || '') === String(payload.voyageName || '')
+        && String(previousRoute.voyageLeg || '') === String(payload.voyageLeg || '')
+        && String(previousRoute.agendaDepartureDateTime || '') === String(payload.agendaDepartureDateTime || '')
+        && String(previousRoute.agendaArrivalDateTime || '') === String(payload.agendaArrivalDateTime || '')
+        && String(previousRoute.sharedWith || '') === String(payload.sharedWith || '')
+        && String(previousRoute.agendaNotes || '') === String(payload.agendaNotes || '')
         && Number(previousRoute.tackingTimeHours) === Number(payload.tackingTimeHours)
         && Number(previousRoute.totalDistanceNm ?? NaN) === Number(payload.totalDistanceNm ?? NaN)
         && String(previousRoute.polarProfileId || '') === String(payload.polarProfileId || '');
@@ -25757,6 +31011,7 @@ async function saveRoute() {
         : t(`Route sauvegardée: ${name}`, `Ruta guardada: ${name}`));
 
     refreshSavedList();
+    updateVoyagePlanningSummary(payload);
 
     if (isCloudReady()) {
         setCloudStatus(t('Sauvegarde locale OK, synchro cloud en cours...', 'Guardado local OK, sincronización nube en curso...'));
@@ -25846,17 +31101,7 @@ function clearCurrentRoute() {
     if (weatherContainer) weatherContainer.innerHTML = '';
     const windLegend = document.getElementById('windSpeedLegend');
     if (windLegend) windLegend.innerHTML = '';
-    const suggestionBox = document.getElementById('departureSuggestionInfo');
-    lastDepartureSuggestion = null;
-    if (suggestionBox) {
-        suggestionBox.textContent = t('Suggestion départ: en attente', 'Sugerencia salida: en espera');
-        suggestionBox.classList.remove('suggestion-clickable');
-    }
-    const aiInfo = document.getElementById('aiRouteSuggestionInfo');
-    const aiList = document.getElementById('aiRouteSuggestions');
-    lastAiRouteCandidates = [];
-    if (aiInfo) aiInfo.textContent = t('Routes IA: en attente', 'Rutas IA: en espera');
-    if (aiList) aiList.innerHTML = '';
+    invalidateAiRouteAnalysisState();
     const arrivalSummary = document.getElementById('arrivalSummary');
     if (arrivalSummary) arrivalSummary.textContent = t('Analyse mouillage: en attente', 'Análisis fondeo: en espera');
     const anchorageContainer = document.getElementById('anchorageRecommendations');
@@ -25958,10 +31203,12 @@ function loadRoute(index) {
 
     const nameInput = document.getElementById('routeNameInput');
     if (nameInput) nameInput.value = r.name || '';
+    applyRoutePlanningForm(r);
     if (r?.polarProfileId) {
         setActivePolarProfile(String(r.polarProfileId), { persist: true, syncEditor: true });
     }
     updateRoutingActiveRouteDisplay();
+    updateVoyagePlanningSummary(r);
 
     // restore UI values (keep current selected date)
     departureTime = normalizeHourTime(r.time);
@@ -26106,6 +31353,12 @@ function parseGpxToRoute(gpxText, fileName = 'Route importée') {
         name: routeName,
         date: departureDate,
         time: departureTime,
+        voyageName: '',
+        voyageLeg: '',
+        agendaDepartureDateTime: '',
+        agendaArrivalDateTime: '',
+        sharedWith: '',
+        agendaNotes: '',
         tackingTimeHours,
         points,
         createdAt: new Date().toISOString()
