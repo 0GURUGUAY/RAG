@@ -19,6 +19,7 @@ create table if not exists public.voyage_plans (
     creator_name text,
     name text not null default '',
     description text not null default '',
+    status text not null default 'planned' check (status in ('planned', 'completed', 'cancelled')),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );

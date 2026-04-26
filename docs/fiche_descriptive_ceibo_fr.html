@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CEIBO · Fiche descriptive</title>
+  <style>
+    :root {
+      --bg: #eef2f5;
+      --ink: #17212b;
+      --muted: #556473;
+      --line: #d4dde6;
+      --panel: #ffffff;
+      --navy: #12263a;
+      --sea: #1f5f8b;
+      --sand: #c67a2b;
+      --foam: #e8f4fb;
+      --ok: #2f7d5b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    @page {
+      size: A4;
+      margin: 14mm;
+    }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f4f7fa 0%, #ecf1f6 100%);
+      color: var(--ink);
+      font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.45;
+    }
+
+    .document {
+      width: min(1040px, calc(100vw - 32px));
+      margin: 24px auto 40px;
+    }
+
+    .sheet {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: 0 24px 60px rgba(18, 38, 58, 0.08);
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+
+    .hero {
+      padding: 34px 38px 30px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 95, 139, 0.18), transparent 32%),
+        radial-gradient(circle at 0% 100%, rgba(198, 122, 43, 0.16), transparent 28%),
+        linear-gradient(135deg, #f9fcff 0%, #eef5fb 48%, #f7fbff 100%);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(18, 38, 58, 0.06);
+      color: var(--navy);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 18px 0 10px;
+      font-size: 38px;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      color: var(--navy);
+    }
+
+    .lead {
+      max-width: 760px;
+      font-size: 18px;
+      color: #30404f;
+      margin: 0;
+    }
+
+    .meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 22px;
+    }
+
+    .meta span,
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid rgba(18, 38, 58, 0.1);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .section {
+      padding: 28px 38px;
+      border-top: 1px solid var(--line);
+    }
+
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 23px;
+      color: var(--navy);
+      letter-spacing: -0.02em;
+    }
+
+    .section p {
+      margin: 0 0 12px;
+      color: #31414f;
+    }
+
+    .grid-2,
+    .grid-3 {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      color: var(--sea);
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #344351;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .stat {
+      padding: 18px 16px;
+      border-radius: 18px;
+      background: var(--navy);
+      color: #eff7ff;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 26px;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+
+    .accent-band {
+      background: linear-gradient(135deg, var(--navy) 0%, #183a59 55%, #215478 100%);
+      color: #eff7ff;
+    }
+
+    .accent-band h2,
+    .accent-band p,
+    .accent-band li {
+      color: inherit;
+    }
+
+    .accent-band .card {
+      background: rgba(255, 255, 255, 0.96);
+      border-color: rgba(255, 255, 255, 0.45);
+      color: var(--ink);
+      box-shadow: 0 14px 28px rgba(7, 20, 34, 0.18);
+    }
+
+    .accent-band .card h3 {
+      color: var(--navy);
+    }
+
+    .accent-band .card ul,
+    .accent-band .card li,
+    .accent-band .card p {
+      color: #2d3b47;
+    }
+
+    .function-card {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .function-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 5px;
+      background: linear-gradient(90deg, #7fb2d9 0%, #c67a2b 100%);
+    }
+
+    .function-tag {
+      display: inline-flex;
+      align-items: center;
+      margin-bottom: 10px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(18, 38, 58, 0.08);
+      color: var(--sea);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .callout {
+      padding: 18px 20px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(31, 95, 139, 0.09), rgba(198, 122, 43, 0.1));
+      border: 1px solid rgba(31, 95, 139, 0.18);
+      font-size: 17px;
+      color: var(--navy);
+    }
+
+    .capture-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    figure {
+      margin: 0;
+      padding: 14px;
+      border-radius: 18px;
+      background: #f8fbfd;
+      border: 1px solid var(--line);
+    }
+
+    figure img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
+      border: 1px solid rgba(18, 38, 58, 0.08);
+    }
+
+    figcaption {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .page-break {
+      break-before: page;
+      page-break-before: always;
+    }
+
+    .print-note {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .document {
+        width: 100%;
+        margin: 0;
+      }
+
+      .sheet {
+        box-shadow: none;
+        margin: 0 0 10px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .grid-2,
+      .grid-3,
+      .capture-grid,
+      .stat-row {
+        grid-template-columns: 1fr;
+      }
+
+      .hero,
+      .section {
+        padding: 24px;
+      }
+
+      h1 {
+        font-size: 30px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="document">
+    <section class="sheet">
+      <div class="hero">
+        <div class="eyebrow">Fiche descriptive programme</div>
+        <h1>CEIBO</h1>
+        <p class="lead">CEIBO est une plateforme nautique intégrée qui réunit, dans une seule interface, la préparation de route, le routage météo, le journal de navigation, la maintenance technique, la gestion documentaire et la synchronisation cloud.</p>
+        <div class="meta">
+          <span>Version observée : V5</span>
+          <span>Auteur du programme : Max Patissier</span>
+          <span>Date : 19 avril 2026</span>
+          <span>Positionnement : centre de pilotage numérique embarqué</span>
+        </div>
+        <div class="stat-row">
+          <div class="stat"><strong>8</strong>modules principaux dans l'interface</div>
+          <div class="stat"><strong>1</strong>environnement unifié pour la navigation et l'exploitation</div>
+          <div class="stat"><strong>Cloud</strong>partage multi-appareils et multi-utilisateurs</div>
+          <div class="stat"><strong>IA + SignalK</strong>assistance documentaire et données temps réel</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Résumé exécutif</h2>
+        <p>CEIBO répond à un besoin rarement traité de façon cohérente dans le nautisme : disposer d'un outil unique pour préparer une traversée, exécuter la navigation avec les bonnes données, conserver une trace exploitable après coup, puis gérer la maintenance et la documentation du bateau sans changer d'environnement.</p>
+        <p>Le programme combine ainsi une logique de routeur, de logbook professionnel, de poste de maintenance et de base documentaire assistée par IA. Le résultat est une réduction de la dispersion des outils, une meilleure traçabilité opérationnelle et une continuité entre la décision à terre et l'usage réel à bord.</p>
+      </div>
+
+      <div class="section">
+        <h2>Valeur apportée</h2>
+        <div class="grid-3">
+          <div class="card">
+            <h3>Mieux planifier</h3>
+            <ul>
+              <li>Création, édition, import et export de routes en JSON et GPX.</li>
+              <li>Routage fondé sur des polaires et une lecture météo par fenêtre temporelle.</li>
+              <li>Suggestion d'heures de départ et variantes de route.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Mieux naviguer</h3>
+            <ul>
+              <li>Journal de navigation avec données GPS, météo et contexte opérationnel.</li>
+              <li>Connexion possible à SignalK pour exploiter l'instrumentation du bord.</li>
+              <li>Gestion d'une alarme de mouillage et suivi de la navigation en temps réel.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Mieux exploiter le bateau</h3>
+            <ul>
+              <li>Suivi visuel de la maintenance, des fournisseurs et des factures.</li>
+              <li>Bibliothèque documentaire avec recherche assistée par IA locale.</li>
+              <li>Synchronisation cloud pour la continuité entre appareils.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="section accent-band">
+        <h2>Fonctions clés</h2>
+        <p>Cette section synthétise les briques qui structurent réellement CEIBO dans son usage quotidien. La présentation a été renforcée pour distinguer clairement les fonctions cœur, les données exploitées et la finalité opérationnelle de chaque module.</p>
+        <div class="grid-2">
+          <div class="card function-card">
+            <div class="function-tag">Route et météo</div>
+            <h3>Navigation et routage</h3>
+            <ul>
+              <li>Gestion complète des routes avec création, sauvegarde, recherche, inversion, import et export JSON ou GPX.</li>
+              <li>Calcul de trajectoires à partir des polaires du bateau, des paramètres de voilure et des réglages de contournement côtier.</li>
+              <li>Exploitation des couches météo et suggestion de départ pour arbitrer entre sécurité, performance et faisabilité.</li>
+            </ul>
+          </div>
+          <div class="card function-card">
+            <div class="function-tag">Traçabilité terrain</div>
+            <h3>Journal de navigation</h3>
+            <ul>
+              <li>Enregistrement GPS de session, exploitation des traces et contextualisation par données météo et navigation.</li>
+              <li>Fonctionnement autonome sur iPad ou alimentation temps réel depuis un serveur SignalK embarqué.</li>
+              <li>Socle de reporting pour relecture post-navigation, export documentaire et constitution d'un historique exploitable.</li>
+            </ul>
+          </div>
+          <div class="card function-card">
+            <div class="function-tag">Support technique</div>
+            <h3>Maintenance technique</h3>
+            <ul>
+              <li>Schémas techniques annotables avec pastilles visuelles, états de traitement, priorité et datation des interventions.</li>
+              <li>Gestion intégrée des dépenses, factures, fournisseurs et pièces documentaires liées à l'entretien.</li>
+              <li>Volet moteur et monitoring SignalK pour rapprocher incidents, maintenance et données de fonctionnement réelles.</li>
+            </ul>
+          </div>
+          <div class="card function-card">
+            <div class="function-tag">Connaissance embarquée</div>
+            <h3>Documentation intelligente</h3>
+            <ul>
+              <li>Classement de fichiers techniques par catégories, sous-catégories, tags et descriptions structurées.</li>
+              <li>Moteur RAG local pour interroger les manuels, notices et procédures sans recherche manuelle fastidieuse.</li>
+              <li>Historique de requêtes, réglage du style de réponse et base de connaissance immédiatement réutilisable à bord.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sheet page-break">
+      <div class="section">
+        <h2>Innovations et différenciation</h2>
+        <div class="callout">CEIBO ne se limite pas à un routeur ou à un carnet de bord. Sa force est d'unifier le cycle complet de la navigation : préparation, exécution, observation, reporting, maintenance et capitalisation documentaire.</div>
+        <div class="grid-2" style="margin-top: 18px;">
+          <div class="card">
+            <h3>1. Plateforme vraiment transversale</h3>
+            <p>Le programme combine dans un même poste de travail des briques habituellement dispersées : cartographie, routage, météo, journal nav, maintenance, documents et cloud.</p>
+          </div>
+          <div class="card">
+            <h3>2. Pont entre données réelles et décision</h3>
+            <p>L'intégration SignalK et les journaux de bord permettent de relier les données issues du bateau aux fonctions de suivi, d'analyse et de reporting.</p>
+          </div>
+          <div class="card">
+            <h3>3. Documentation technique exploitable</h3>
+            <p>Le module documentaire assisté par IA réduit le temps passé à rechercher une information dans des manuels ou des dossiers techniques hétérogènes.</p>
+          </div>
+          <div class="card">
+            <h3>4. Conception orientée usage à bord</h3>
+            <p>L'interface par onglets, l'accès direct aux opérations critiques et la synchronisation cloud en font un outil exploitable en situation opérationnelle, pas seulement en préparation à terre.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Public visé</h2>
+        <div class="grid-3">
+          <div class="card">
+            <h3>Armateurs</h3>
+            <p>Pour centraliser l'état du bateau, la documentation, les coûts et l'historique technique.</p>
+          </div>
+          <div class="card">
+            <h3>Skippers et professionnels</h3>
+            <p>Pour disposer d'une base de traçabilité robuste, exploitable en navigation et en restitution.</p>
+          </div>
+          <div class="card">
+            <h3>Équipages multi-supports</h3>
+            <p>Pour partager les données entre Mac, iPad et autres postes grâce à la couche cloud.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Captures d'écran des fonctions principales</h2>
+        <p class="print-note">Captures réalisées depuis l'interface locale du programme.</p>
+        <div class="capture-grid">
+          <figure>
+            <img src="screenshots/01-cloud.png" alt="Capture de l'onglet Cloud de CEIBO">
+            <figcaption>Cloud : authentification, état de synchronisation et base de données partagée.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/02-routage.png" alt="Capture de l'onglet Routage de CEIBO">
+            <figcaption>Routage : paramètres de départ, polaires et calcul de trajectoire.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/03-journal-nav.png" alt="Capture de l'onglet Journal nav de CEIBO">
+            <figcaption>Journal nav : log GPS, source autonome ou SignalK, alarme de mouillage.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/04-documents-ia.png" alt="Capture de l'onglet Documents IA de CEIBO">
+            <figcaption>Documents + IA : interrogation assistée de la documentation technique via RAG local.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/05-maintenance-signalk.png" alt="Capture de l'onglet Maintenance SignalK de CEIBO">
+            <figcaption>Maintenance / SignalK : surveillance des flux live et monitoring dédié.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/06-waypoint.png" alt="Capture de l'onglet Waypoint de CEIBO">
+            <figcaption>Waypoint photo : qualification d'un mouillage avec photo, commentaires, fond et protection.</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>En synthèse</h2>
+        <p>CEIBO se positionne comme un centre de pilotage numérique pour la navigation moderne. Sa proposition de valeur tient dans l'intégration de fonctions normalement cloisonnées et dans sa capacité à connecter préparation de route, données temps réel, historique de navigation, maintenance et connaissance technique.</p>
+        <p>Pour une présentation commerciale, une démonstration produit ou un dossier de projet, CEIBO peut être décrit comme une solution nautique tout-en-un, orientée terrain, à forte valeur opérationnelle.</p>
+      </div>
+
+      <div class="section footer">
+        <span>Document généré localement pour le programme CEIBO</span>
+        <span>Source éditable : HTML</span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

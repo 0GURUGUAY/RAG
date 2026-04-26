@@ -42,9 +42,15 @@ body.night-mode #map {
     z-index: 40;
     margin-top: 0;
     min-width: 0;
-    padding: 7px 10px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
     border-radius: 999px;
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 .navlog-display-toolbar {
@@ -301,8 +307,12 @@ body.sidebar-collapsed #sidebar {
 .voyage-agenda-builder {
     margin-top: 18px;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+        "plan route route"
+        "plan crew crew";
     gap: 14px;
+    align-items: start;
 }
 
 .voyage-agenda-panel--map-focus .voyage-agenda-builder {
@@ -313,11 +323,44 @@ body.sidebar-collapsed #sidebar {
     margin-top: 10px;
 }
 
+.voyage-agenda-panel--overview .voyage-agenda-builder {
+    display: none;
+}
+
+.voyage-agenda-panel--overview .voyage-agenda-panel__actions {
+    display: none;
+}
+
+.voyage-agenda-panel--overview .voyage-agenda-content {
+    margin-top: 12px;
+}
+
 .voyage-agenda-builder__card {
     padding: 16px;
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.04);
+}
+
+.voyage-agenda-builder__card--plan {
+    grid-area: plan;
+}
+
+.voyage-agenda-builder__card--route {
+    grid-area: route;
+}
+
+.voyage-agenda-builder__card--crew {
+    grid-area: crew;
+}
+
+.voyage-agenda-builder.is-new-voyage {
+    grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+    grid-template-areas: "plan crew";
+}
+
+.voyage-agenda-builder.is-new-voyage .voyage-agenda-builder__card--route {
+    display: none;
 }
 
 .voyage-crew-list {
@@ -369,13 +412,32 @@ body.sidebar-collapsed #sidebar {
 
 @media (max-width: 1300px) {
     .voyage-agenda-builder {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        grid-template-areas:
+            "plan route"
+            "crew crew";
+    }
+
+    .voyage-agenda-builder.is-new-voyage {
+        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        grid-template-areas: "plan crew";
     }
 }
 
 @media (max-width: 900px) {
     .voyage-agenda-builder {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "plan"
+            "route"
+            "crew";
+    }
+
+    .voyage-agenda-builder.is-new-voyage {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "plan"
+            "crew";
     }
 }
 
@@ -395,25 +457,63 @@ body.sidebar-collapsed #sidebar {
     display: grid;
     gap: 8px;
 }
+.voyages-sidebar-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+#voyagesSidebarCalendar {
+    margin-top: 16px;
+}
+
+.voyages-overview-calendar__item {
+    cursor: pointer;
+}
+
+#voyagesSidebarCalendarBtn.is-active {
+    border-color: rgba(143, 231, 255, 0.36);
+    background: rgba(34, 74, 92, 0.48);
+}
 
 .voyages-sidebar-item {
     width: 100%;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--voyage-accent-soft, rgba(255, 255, 255, 0.12));
+    background:
+        linear-gradient(135deg, var(--voyage-accent-surface, rgba(255, 255, 255, 0.06)), rgba(255, 255, 255, 0.03)),
+        rgba(255, 255, 255, 0.04);
     color: #f5fbff;
     text-align: left;
+    box-shadow: inset 3px 0 0 var(--voyage-accent-start, rgba(143, 231, 255, 0.6));
 }
 
 .voyages-sidebar-item.is-active {
-    border-color: rgba(143, 231, 255, 0.36);
-    background: rgba(34, 74, 92, 0.48);
+    border-color: var(--voyage-accent-start, rgba(143, 231, 255, 0.5));
+    background:
+        linear-gradient(135deg, var(--voyage-accent-soft, rgba(143, 231, 255, 0.18)), rgba(34, 74, 92, 0.48)),
+        rgba(34, 74, 92, 0.48);
+    box-shadow: inset 4px 0 0 var(--voyage-accent-start, rgba(143, 231, 255, 0.9)), 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .voyages-sidebar-item__title {
     font-size: 13px;
     font-weight: 700;
+}
+
+.voyages-sidebar-item__status {
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--voyage-accent-soft, rgba(143, 231, 255, 0.18));
+    color: var(--voyage-accent-text, #ccefff);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .voyages-sidebar-item__meta {
@@ -440,6 +540,10 @@ body.sidebar-collapsed #sidebar {
     background: rgba(255, 255, 255, 0.03);
     text-align: center;
     padding: 20px;
+}
+
+.voyage-agenda-empty--draft {
+    min-height: 120px;
 }
 
 .voyage-agenda-voyage {
@@ -661,12 +765,157 @@ body.sidebar-collapsed #sidebar {
     border-bottom: 1px solid rgba(43, 117, 173, 0.14);
 }
 
+.voyage-agenda-panel--overview .voyage-calendar-card {
+    min-height: calc(100vh - 260px);
+    background: linear-gradient(180deg, rgba(18, 31, 46, 0.98), rgba(12, 22, 34, 0.98));
+    border: 1px solid rgba(110, 181, 224, 0.16);
+}
+
 .voyage-calendar-card__header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 12px;
+}
+
+.voyage-calendar-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.voyage-calendar-nav__btn {
+    margin-top: 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.voyage-overview-events {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.voyage-overview-events__editor,
+.voyage-overview-events__list {
+    display: grid;
+    gap: 10px;
+}
+
+.voyage-overview-events__duration {
+    display: grid;
+    gap: 8px;
+}
+
+.voyage-overview-events__duration-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.voyage-duration-chip {
+    margin-top: 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 159, 28, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 240, 222, 0.82);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.voyage-duration-chip.is-active {
+    border-color: rgba(255, 209, 102, 0.48);
+    background: linear-gradient(135deg, rgba(255, 159, 28, 0.3), rgba(255, 107, 53, 0.22));
+    color: #fff6df;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+}
+
+.voyage-event-datetime-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 8px;
+}
+
+.voyage-event-time-select {
+    appearance: none;
+    padding-right: 28px;
+    background-image: linear-gradient(45deg, transparent 50%, rgba(255, 240, 222, 0.78) 50%), linear-gradient(135deg, rgba(255, 240, 222, 0.78) 50%, transparent 50%);
+    background-position: calc(100% - 16px) calc(50% - 3px), calc(100% - 10px) calc(50% - 3px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+}
+
+.voyage-event-date-readable {
+    margin-top: 6px;
+    font-size: 11px;
+    color: rgba(255, 240, 222, 0.78);
+    text-transform: capitalize;
+}
+
+.voyage-event-time-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.voyage-duration-chip--ghost {
+    padding: 6px 10px;
+    font-size: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 640px) {
+    .voyage-event-datetime-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.voyage-overview-event-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 159, 28, 0.18);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.voyage-overview-event-item.is-active {
+    border-color: rgba(255, 159, 28, 0.42);
+    background: rgba(255, 159, 28, 0.12);
+}
+
+.voyage-overview-event-item__title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff5e2;
+}
+
+.voyage-overview-event-item__meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: rgba(255, 240, 222, 0.82);
+}
+
+.voyage-overview-event-item__comment {
+    margin-top: 6px;
+    font-size: 12px;
+    color: rgba(238, 245, 250, 0.72);
+}
+
+.voyage-overview-event-item__actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .voyage-calendar-card__empty {
@@ -682,6 +931,12 @@ body.sidebar-collapsed #sidebar {
     padding: 18px;
 }
 
+.voyage-agenda-panel--overview .voyage-calendar-card__empty {
+    color: rgba(232, 240, 248, 0.8);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(143, 231, 255, 0.18);
+}
+
 .voyage-calendar-weeks {
     display: grid;
     gap: 14px;
@@ -695,6 +950,17 @@ body.sidebar-collapsed #sidebar {
     box-shadow: 0 10px 22px rgba(14, 42, 68, 0.06);
 }
 
+.voyage-agenda-panel--overview .voyage-calendar-week {
+    border-color: rgba(108, 176, 220, 0.18);
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+}
+
+.voyage-agenda-panel--overview .voyage-calendar-week.is-current-week {
+    border-color: rgba(255, 209, 102, 0.52);
+    box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.18), 0 14px 28px rgba(0, 0, 0, 0.24);
+}
+
 .voyage-calendar-week__title {
     padding: 10px 14px;
     font-size: 12px;
@@ -704,11 +970,28 @@ body.sidebar-collapsed #sidebar {
     border-bottom: 1px solid rgba(50, 120, 174, 0.12);
 }
 
+.voyage-agenda-panel--overview .voyage-calendar-week__title {
+    color: #eef8ff;
+    background: linear-gradient(135deg, rgba(33, 58, 84, 0.96), rgba(21, 40, 60, 0.94));
+    border-bottom-color: rgba(143, 231, 255, 0.14);
+}
+
+.voyage-agenda-panel--overview .voyage-calendar-week.is-current-week .voyage-calendar-week__title {
+    color: #fff6d6;
+    background: linear-gradient(135deg, rgba(84, 64, 24, 0.96), rgba(52, 38, 12, 0.94));
+    border-bottom-color: rgba(255, 209, 102, 0.2);
+}
+
 .voyage-calendar-week__header {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
     background: rgba(247, 251, 255, 0.96);
     border-bottom: 1px solid rgba(54, 123, 176, 0.1);
+}
+
+.voyage-agenda-panel--overview .voyage-calendar-week__header {
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom-color: rgba(143, 231, 255, 0.1);
 }
 
 .voyage-calendar-week__day {
@@ -720,6 +1003,11 @@ body.sidebar-collapsed #sidebar {
     border-left: 1px solid rgba(61, 128, 180, 0.12);
 }
 
+.voyage-agenda-panel--overview .voyage-calendar-week__day {
+    color: rgba(234, 244, 252, 0.88);
+    border-left-color: rgba(143, 231, 255, 0.08);
+}
+
 .voyage-calendar-week__day:first-child {
     border-left: 0;
 }
@@ -728,6 +1016,10 @@ body.sidebar-collapsed #sidebar {
     position: relative;
     padding: 14px;
     min-height: 76px;
+}
+
+.voyage-agenda-panel--overview .voyage-calendar-week__body {
+    background: rgba(6, 14, 24, 0.26);
 }
 
 .voyage-calendar-week__body.is-drop-target {
@@ -746,6 +1038,10 @@ body.sidebar-collapsed #sidebar {
     top: 0;
     bottom: 0;
     border-left: 1px dashed rgba(79, 141, 187, 0.18);
+}
+
+.voyage-agenda-panel--overview .voyage-calendar-grid__col {
+    border-left-color: rgba(143, 231, 255, 0.12);
 }
 
 .voyage-calendar-grid__col:first-child {
@@ -770,11 +1066,11 @@ body.sidebar-collapsed #sidebar {
     min-height: 44px;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(21, 96, 152, 0.16);
+    border: 1px solid var(--voyage-accent-soft, rgba(21, 96, 152, 0.2));
     box-sizing: border-box;
     color: #ffffff;
-    background: linear-gradient(135deg, #1481ba, #2b5f9e);
-    box-shadow: 0 10px 18px rgba(20, 71, 110, 0.2);
+    background: linear-gradient(135deg, var(--voyage-accent-start, #1481ba), var(--voyage-accent-end, #2b5f9e));
+    box-shadow: 0 10px 18px color-mix(in srgb, var(--voyage-accent-end, #2b5f9e) 45%, rgba(0, 0, 0, 0.55));
     cursor: default;
     user-select: none;
 }
@@ -791,6 +1087,10 @@ body.sidebar-collapsed #sidebar {
     background: linear-gradient(135deg, #ff9f1c, #f25f29);
 }
 
+.voyage-calendar-item--event {
+    border-style: solid;
+}
+
 .voyage-calendar-item.is-derived {
     border-style: dashed;
     filter: saturate(0.82) brightness(1.03);
@@ -804,6 +1104,68 @@ body.sidebar-collapsed #sidebar {
 .voyage-calendar-item.is-dragging {
     opacity: 0.58;
     cursor: grabbing;
+}
+
+.voyage-calendar-item.is-compact {
+    min-width: 18px;
+    padding: 8px 8px;
+    overflow: visible;
+}
+
+.voyage-calendar-item.is-compact .voyage-calendar-item__title,
+.voyage-calendar-item.is-compact .voyage-calendar-item__meta {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.voyage-calendar-item__compact-marker {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 18px;
+    height: 18px;
+    margin-left: -9px;
+    margin-top: -9px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    color: rgba(255, 250, 244, 0.98);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.voyage-calendar-item.is-compact:hover,
+.voyage-calendar-item.is-compact:focus-visible {
+    z-index: 8;
+}
+
+.voyage-calendar-item.is-compact::after {
+    content: attr(data-compact-popup);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
+    transform: translateX(-50%);
+    min-width: 160px;
+    max-width: 240px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(8, 16, 26, 0.94);
+    color: #fff4dd;
+    font-size: 11px;
+    line-height: 1.35;
+    text-align: center;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+    white-space: normal;
+}
+
+.voyage-calendar-item.is-compact:hover::after,
+.voyage-calendar-item.is-compact:focus-visible::after {
+    opacity: 1;
 }
 
 .voyage-calendar-item__title {
@@ -822,6 +1184,12 @@ body.sidebar-collapsed #sidebar {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+@media (max-width: 900px) {
+    .voyage-overview-events {
+        grid-template-columns: 1fr;
+    }
 }
 
 .voyage-calendar-item__drag-handle {
@@ -1157,6 +1525,83 @@ body.sidebar-collapsed #sidebar {
     min-width: 300px;
     background: rgba(15, 28, 43, 0.96);
     border-color: rgba(143, 231, 255, 0.34);
+}
+
+#routeGuideDockAnswer {
+    margin-top: 10px;
+    max-height: none;
+    min-height: 180px;
+    background: rgba(16, 29, 46, 0.82);
+    border-color: rgba(143, 231, 255, 0.22);
+    color: #eef8ff;
+}
+
+.route-guide-prompt-body {
+    margin-top: 8px;
+    padding: 12px 13px;
+    border-radius: 12px;
+    border: 1px solid rgba(143, 231, 255, 0.14);
+    background: rgba(8, 16, 27, 0.82);
+    color: #dceffd;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: min(38vh, 380px);
+    overflow: auto;
+}
+
+.route-guide-comment-editor {
+    margin-top: 8px;
+    min-height: 220px;
+    padding: 12px 13px;
+    border-radius: 12px;
+    border: 1px solid rgba(143, 231, 255, 0.16);
+    background: rgba(9, 18, 30, 0.84);
+    color: #eaf6ff;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: text;
+}
+
+.route-guide-comment-editor:focus {
+    outline: none;
+    border-color: rgba(143, 231, 255, 0.34);
+    box-shadow: 0 0 0 3px rgba(143, 231, 255, 0.08);
+}
+
+.route-guide-comment-editor:empty::before {
+    content: attr(data-placeholder);
+    color: rgba(220, 239, 253, 0.52);
+}
+
+.route-guide-comment-editor h1,
+.route-guide-comment-editor h2,
+.route-guide-comment-editor h3,
+.route-guide-comment-editor h4,
+.route-guide-comment-editor p,
+.route-guide-comment-editor ul,
+.route-guide-comment-editor ol,
+.route-guide-comment-editor blockquote,
+.route-guide-comment-editor pre {
+    margin: 0 0 10px;
+}
+
+.route-guide-comment-editor ul,
+.route-guide-comment-editor ol {
+    padding-left: 20px;
+}
+
+.route-guide-comment-editor blockquote {
+    padding-left: 12px;
+    border-left: 3px solid rgba(143, 231, 255, 0.28);
+    color: #d5ebfa;
+}
+
+.route-guide-comment-editor a {
+    color: #8fe7ff;
 }
 
 #aiRouteDockPanel .waypoint-dock-panel__list {
@@ -4976,6 +5421,28 @@ button.ai-route-matrix-cell.ai-route-matrix-cell--avoid {
     margin-top: 4px;
 }
 
+.route-comment-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(143, 231, 255, 0.16);
+    border: 1px solid rgba(143, 231, 255, 0.4);
+    color: #bff6ff;
+    font-size: 10px;
+    line-height: 1.1;
+}
+
+.route-comment-indicator::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 3px rgba(143, 231, 255, 0.12);
+}
+
 .route-col__chip {
     display: inline-flex;
     align-items: center;
@@ -5086,6 +5553,48 @@ button.ai-route-matrix-cell.ai-route-matrix-cell--avoid {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(143, 231, 255, 0.3);
     box-shadow: 0 0 0 3px rgba(143, 231, 255, 0.1);
+}
+
+.route-llm-card {
+    margin-top: 12px;
+    border: 1px solid rgba(143, 231, 255, 0.18);
+    background: linear-gradient(180deg, rgba(15, 27, 42, 0.96), rgba(11, 22, 36, 0.96));
+}
+
+.route-llm-editor-panel {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(143, 231, 255, 0.14);
+}
+
+.route-llm-answer {
+    margin-top: 10px;
+    padding: 12px 13px;
+    border-radius: 12px;
+    border: 1px solid rgba(143, 231, 255, 0.12);
+    background: rgba(9, 18, 30, 0.78);
+    color: #dceffd;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+
+#routeSearchInput {
+    width: min(320px, 100%);
+    background: rgba(127, 216, 255, 0.1);
+    border-color: rgba(127, 216, 255, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(127, 216, 255, 0.08);
+}
+
+#routeSearchInput:hover {
+    background: rgba(127, 216, 255, 0.14);
+    border-color: rgba(127, 216, 255, 0.36);
+}
+
+#routeSearchInput:focus {
+    background: rgba(127, 216, 255, 0.16);
+    border-color: rgba(127, 216, 255, 0.48);
+    box-shadow: 0 0 0 3px rgba(127, 216, 255, 0.14);
 }
 
 @media (max-width: 760px) {

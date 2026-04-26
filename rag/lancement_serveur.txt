@@ -32,3 +32,5 @@ source .venv/bin/activate && uvicorn ceibo_finance.main:app --reload --app-dir s
 
 eyJzY29wZSI6InRyZW5kX2ZvbGxvd2luZ192aWV3ZXIiLCJleHAiOjE3NzM2ODU5NzYsIm5vbmNlIjoiY2YyOGJjNTJhYjgxZmJmMCJ9.f87e19f3a3535eff911ac66c14d9effc38708c4a91d5bb5be534878bf785444d
 
+Pour la regate : npm run dev:local
+

@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CEIBO · Version technique</title>
+  <style>
+    :root {
+      --bg: #edf1f4;
+      --panel: #ffffff;
+      --ink: #13202c;
+      --muted: #5b6b7a;
+      --line: #d6dde5;
+      --navy: #10273a;
+      --blue: #235f87;
+      --amber: #bf7a32;
+      --green: #2b7759;
+      --soft: #f7fafc;
+    }
+
+    * { box-sizing: border-box; }
+
+    @page {
+      size: A4;
+      margin: 14mm;
+    }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f3f6f9 0%, #edf1f4 100%);
+      color: var(--ink);
+      font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.48;
+    }
+
+    .document {
+      width: min(1080px, calc(100vw - 32px));
+      margin: 24px auto 40px;
+    }
+
+    .sheet {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 22px 55px rgba(16, 39, 58, 0.08);
+      margin-bottom: 18px;
+    }
+
+    .hero {
+      padding: 34px 38px;
+      background:
+        radial-gradient(circle at 100% 0%, rgba(35, 95, 135, 0.18), transparent 34%),
+        radial-gradient(circle at 0% 100%, rgba(191, 122, 50, 0.14), transparent 28%),
+        linear-gradient(135deg, #f9fbfd 0%, #edf4f9 55%, #f7fbfd 100%);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(16, 39, 58, 0.06);
+      color: var(--navy);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 16px 0 10px;
+      font-size: 38px;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      color: var(--navy);
+    }
+
+    .lead {
+      margin: 0;
+      max-width: 820px;
+      font-size: 18px;
+      color: #30414f;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .meta span {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(16, 39, 58, 0.1);
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .section {
+      padding: 28px 38px;
+      border-top: 1px solid var(--line);
+    }
+
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 24px;
+      letter-spacing: -0.02em;
+      color: var(--navy);
+    }
+
+    .section p {
+      margin: 0 0 12px;
+      color: #31414f;
+    }
+
+    .grid-2,
+    .grid-3 {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #fff 0%, #fbfdff 100%);
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-size: 17px;
+    }
+
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .kpi-item {
+      padding: 16px;
+      border-radius: 18px;
+      background: var(--navy);
+      color: #eef6ff;
+    }
+
+    .kpi-item strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 24px;
+      color: #fff;
+    }
+
+    .band {
+      background: linear-gradient(135deg, var(--navy) 0%, #173852 58%, #24597d 100%);
+      color: #eff7ff;
+    }
+
+    .band h2,
+    .band p,
+    .band li,
+    .band ol,
+    .band strong {
+      color: inherit;
+    }
+
+    .band .card {
+      background: rgba(255, 255, 255, 0.95);
+      color: var(--ink);
+      border-color: rgba(255, 255, 255, 0.4);
+      box-shadow: 0 14px 28px rgba(7, 20, 34, 0.18);
+    }
+
+    .band .card h3,
+    .band .card p,
+    .band .card li,
+    .band .card strong {
+      color: var(--ink);
+    }
+
+    .step-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #33424f;
+    }
+
+    li + li { margin-top: 6px; }
+
+    .schema {
+      display: grid;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .lane-title {
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: var(--navy);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .lane-box {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      color: #31414f;
+    }
+
+    .mono {
+      font-family: "SF Mono", "Menlo", "Consolas", monospace;
+      font-size: 12px;
+    }
+
+    .capture-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    figure {
+      margin: 0;
+      padding: 14px;
+      border-radius: 18px;
+      background: #f8fbfd;
+      border: 1px solid var(--line);
+    }
+
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      border: 1px solid rgba(16, 39, 58, 0.08);
+    }
+
+    figcaption {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .page-break {
+      break-before: page;
+      page-break-before: always;
+    }
+
+    @media print {
+      body { background: #fff; }
+      .document { width: 100%; margin: 0; }
+      .sheet { box-shadow: none; margin: 0 0 10px; }
+    }
+
+    @media (max-width: 900px) {
+      .grid-2,
+      .grid-3,
+      .kpi,
+      .capture-grid,
+      .lane {
+        grid-template-columns: 1fr;
+      }
+
+      .hero,
+      .section { padding: 24px; }
+
+      h1 { font-size: 30px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="document">
+    <section class="sheet">
+      <div class="hero">
+        <div class="eyebrow">Version technique</div>
+        <h1>CEIBO</h1>
+        <p class="lead">CEIBO est une application nautique modulaire qui associe interface cartographique, calcul de route, ingestion de données embarquées, journalisation opérationnelle, maintenance technique, base documentaire assistée par IA et synchronisation cloud.</p>
+        <div class="meta">
+          <span>Auteur : Max Patissier</span>
+          <span>Référence observée : V5</span>
+          <span>Date : 19 avril 2026</span>
+          <span>Orientation : architecture fonctionnelle et technique</span>
+        </div>
+        <div class="kpi">
+          <div class="kpi-item"><strong>Frontend</strong>HTML, CSS, JavaScript modulaire</div>
+          <div class="kpi-item"><strong>Temps réel</strong>SignalK et couches météo</div>
+          <div class="kpi-item"><strong>Persistance</strong>local + Supabase cloud</div>
+          <div class="kpi-item"><strong>IA</strong>RAG local et assistance documentaire</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Objectif technique</h2>
+        <p>Sur le plan logiciel, CEIBO vise à fournir un noyau applicatif unique pour les usages de navigation et d'exploitation du bateau. L'intérêt de cette approche est de partager les mêmes objets de travail entre plusieurs modules : routes, points, traces GPS, documents, dépenses, états techniques, profils polaires et informations issues de l'instrumentation.</p>
+        <p>La cohérence du système repose sur la convergence de quatre couches : interface opérateur, calcul et enrichissement local, flux de données bord, et persistance/synchronisation cloud.</p>
+      </div>
+
+      <div class="section band">
+        <h2>Architecture fonctionnelle</h2>
+        <div class="schema">
+          <div class="lane">
+            <div class="lane-title">Interface</div>
+            <div class="lane-box">Onglets Cloud, Routes, Routage, Document, Journal nav, Maintenance, Arrivée et Waypoint. L'application présente un poste de travail centralisé autour d'une carte Leaflet et de panneaux métier.</div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">Calcul local</div>
+            <div class="lane-box">Calcul de segments de route, exploitation des polaires, estimation météo par fenêtre d'analyse, enrichissement de points de trace, gestion d'alertes de mouillage, prétraitement documentaire et logique RAG locale.</div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">Flux embarqués</div>
+            <div class="lane-box">Connexion possible à SignalK pour récupérer position, vitesse, cap, gîte et variables météo. Le système sait aussi fonctionner en mode autonome iPad sans dépendre du serveur du bord.</div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">Stockage</div>
+            <div class="lane-box">Stockage local navigateur pour la continuité hors réseau, complété par Supabase pour la persistance partagée, l'authentification, la synchronisation et le stockage documentaire.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Modules techniques principaux</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h3>1. Couche cartographique et routage</h3>
+            <ul>
+              <li>Carte interactive basée sur Leaflet avec couches marines, météo, AIS et overlays d'analyse.</li>
+              <li>Gestion des waypoints, édition directe et recentrage de trajectoires.</li>
+              <li>Calcul de route lié à un moteur de polaires et à des paramètres de départ.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>2. Couche logbook et télémétrie</h3>
+            <ul>
+              <li>Capture périodique des positions GPS et constitution de traces exploitables par entrée de journal.</li>
+              <li>Enrichissement du contexte avec vitesse, cap, météo ponctuelle et données de mouvement.</li>
+              <li>Détection et suivi d'états opérationnels tels que l'alarme de garre ou le mode moteur.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>3. Couche maintenance</h3>
+            <ul>
+              <li>Objets métier distincts pour schémas, pastilles, fournisseurs, dépenses et événements moteur.</li>
+              <li>Association entre éléments visuels de maintenance et pièces justificatives.</li>
+              <li>Possibilité de rapprocher les incidents, les coûts et l'état des systèmes techniques.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>4. Couche documentaire et IA</h3>
+            <ul>
+              <li>Indexation locale de documents techniques pour interrogation RAG.</li>
+              <li>Historique de questions, paramétrage de fournisseur externe et modes de réponse.</li>
+              <li>Fonction de capitalisation de connaissance directement réutilisable à bord.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sheet page-break">
+      <div class="section">
+        <h2>Intégrations et flux de données</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h3>SignalK</h3>
+            <p>CEIBO s'appuie sur un connecteur SignalK dédié pour récupérer des données de navigation et d'environnement. Cela permet de faire converger les instruments du bord avec les modules journal, maintenance et monitoring.</p>
+            <ul>
+              <li>Position, vitesse, cap et gîte.</li>
+              <li>Variables météo et capteurs complémentaires.</li>
+              <li>Mode dégradé possible si la source réseau n'est pas disponible.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Supabase</h3>
+            <p>La couche cloud n'est pas seulement un stockage distant. Elle joue un rôle de synchronisation, d'authentification, de partage de données et de continuité opérationnelle entre appareils.</p>
+            <ul>
+              <li>Authentification utilisateur et gestion de rôles.</li>
+              <li>Tables dédiées aux routes, points, documents, journaux et maintenance.</li>
+              <li>Support des fichiers et de la synchronisation différée.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>RAG local</h3>
+            <p>Le module documentaire peut s'appuyer sur un service local pour indexer et interroger des contenus techniques. Cette approche limite la dépendance réseau et permet un usage embarqué plus autonome.</p>
+          </div>
+          <div class="card">
+            <h3>GRIB et météo</h3>
+            <p>Le système accepte des données météo externes via API ou import local. Cela rend possible une exploitation hybride entre services en ligne et fichiers météo embarqués.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Logique de persistance</h2>
+        <ol class="step-list">
+          <li>L'application conserve localement ses états métiers pour garantir la continuité d'usage hors réseau.</li>
+          <li>Les modules critiques peuvent être hydratés depuis le cloud à l'ouverture ou à la demande.</li>
+          <li>Les changements sont ensuite poussés vers Supabase selon des logiques adaptées au type de donnée, par exemple en différé pour les journaux ou automatiquement pour certains objets synchronisés.</li>
+          <li>Cette organisation réduit les pertes de données et limite les écritures réseau inutiles lors d'un usage réel en navigation.</li>
+        </ol>
+      </div>
+
+      <div class="section band">
+        <h2>Exemple de chaîne de traitement</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Préparation</h3>
+            <ul>
+              <li>L'utilisateur charge ou construit une route.</li>
+              <li>Les polaires et la fenêtre météo sont appliquées au calcul.</li>
+              <li>Le routage produit un scénario exploitable et mémorisable.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Exécution</h3>
+            <ul>
+              <li>Le journal nav enregistre la progression, en autonome ou via SignalK.</li>
+              <li>Les points de trace sont enrichis par des données contextuelles.</li>
+              <li>Les alertes et statuts critiques restent accessibles depuis le même poste.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Post-navigation</h3>
+            <ul>
+              <li>Les traces deviennent un historique consultable et exportable.</li>
+              <li>Les événements techniques peuvent être rapprochés des observations de route.</li>
+              <li>Les documents, factures ou manuels peuvent ensuite être réinterrogés pour préparer une intervention.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Capitalisation</h3>
+            <ul>
+              <li>La couche cloud partage ces données entre appareils et utilisateurs.</li>
+              <li>La base documentaire enrichit la connaissance embarquée.</li>
+              <li>L'ensemble constitue une mémoire opérationnelle du bateau.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Captures d'écran</h2>
+        <div class="capture-grid">
+          <figure>
+            <img src="screenshots/02-routage.png" alt="Routage CEIBO">
+            <figcaption>Vue routage : calcul, paramètres de départ et gestion de la polaire active.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/03-journal-nav.png" alt="Journal nav CEIBO">
+            <figcaption>Vue journal nav : bascule autonome ou SignalK et contrôle des sessions de log.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/04-documents-ia.png" alt="Documents IA CEIBO">
+            <figcaption>Vue documentaire : module RAG local et paramétrage du comportement IA.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/05-maintenance-signalk.png" alt="Maintenance SignalK CEIBO">
+            <figcaption>Vue technique SignalK : monitoring, état de connexion et tableau de bord dédié.</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Conclusion technique</h2>
+        <p>CEIBO présente une architecture intéressante parce qu'elle ne juxtapose pas des fonctions isolées. Elle articule des objets métiers communs, des flux temps réel, des traitements locaux et une synchronisation cloud dans un environnement unique centré sur la pratique de la navigation.</p>
+        <p>Techniquement, le programme se distingue surtout par la densité de ses intégrations, la continuité entre usage hors ligne et usage connecté, et la convergence entre données du bord, maintenance et documentation.</p>
+        <p class="mono">Documents connexes observés dans le dépôt : app.js, polarRouter.js, signalk.js, rag/, weather/, supabase/.</p>
+      </div>
+
+      <div class="section footer">
+        <span>Document technique CEIBO</span>
+        <span>Source éditable : HTML</span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

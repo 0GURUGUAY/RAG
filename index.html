@@ -37,8 +37,16 @@
         <div class="route-voyage-card">
             <div class="route-voyage-card__title">Vue voyages</div>
             <div id="voyagesTabIntro" class="route-voyage-summary">Le planning détaillé s'affiche dans la partie principale, à la place de la carte.</div>
+            <label for="voyagesSidebarStatusFilter" class="route-voyage-label">Filtrer:</label>
+            <select id="voyagesSidebarStatusFilter" class="cloud-input">
+                <option value="all">Tous les voyages</option>
+                <option value="planned">Planifiés</option>
+                <option value="completed">Réalisés</option>
+                <option value="cancelled">Annulés</option>
+            </select>
             <div class="button-row" style="margin-top:10px;">
                 <button id="voyagesSidebarNewBtn" type="button" style="flex:1;">Nouveau voyage</button>
+                <button id="voyagesSidebarCalendarBtn" type="button" style="flex:1;" aria-pressed="false">Calendrier</button>
             </div>
             <div id="voyagesSidebarList" class="voyages-sidebar-list"></div>
         </div>
@@ -129,9 +137,27 @@
                 <button id="reverseRouteBtn" style="flex:1;">Route retour</button>
             </div>
 
-            <label id="savedRoutesListLabel" style="display:block; margin-top:12px; font-size:12px;">Routes sauvegardées:</label>
-            <input type="text" id="routeSearchInput" placeholder="Rechercher une route..." class="route-search-input">
+            <label id="savedRoutesListLabel" style="display:block; margin-top:12px; font-size:12px;">🔎</label>
+            <input type="search" id="routeSearchInput" placeholder="🔎 Rechercher une route..." class="route-search-input">
             <div id="savedRoutesList"></div>
+
+            <div class="cloud-config-card route-llm-card">
+                <div class="cloud-config-title" id="routeLlmGuideTitle">Prompt LLM + commentaire route</div>
+                <div id="routeLlmGuideStatus" class="cloud-status">Sélectionne une route puis copie le prompt LLM ou importe une réponse depuis le presse-papiers.</div>
+                <div class="button-row" style="margin-top:8px;">
+                    <button id="routeLlmPromptCopyBtn" type="button" style="flex:1;">Copier prompt LLM</button>
+                    <button id="routeCommentClipboardImportBtn" type="button" style="flex:1;">Importer presse-papiers</button>
+                    <button id="routeCommentToggleBtn" type="button" style="flex:1;">Voir / modifier commentaire</button>
+                </div>
+                <div id="routeCommentPanel" class="route-llm-editor-panel" hidden>
+                    <div id="routeCommentStatus" class="cloud-status" style="margin-top:8px;">Le commentaire externe de la route s’édite ici. Tu peux aussi l’effacer.</div>
+                    <div id="routeCommentEditor" class="route-guide-comment-editor" contenteditable="true" spellcheck="true" data-placeholder="Colle ici la réponse de ChatGPT, Claude ou Gemini pour la sauvegarder avec cette route..."></div>
+                    <div class="button-row" style="margin-top:8px;">
+                        <button id="routeCommentSaveBtn" type="button" style="flex:1;">Enregistrer modifications</button>
+                        <button id="routeCommentClearBtn" type="button" style="flex:1;">Supprimer commentaire</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="routesImportExportPanel" class="page-subpanel">
@@ -139,6 +165,10 @@
                 <button id="exportRouteBtn" style="flex:1;">Exporter JSON</button>
                 <button id="exportRouteGpxBtn" style="flex:1;">Exporter GPX</button>
             </div>
+            <div class="button-row" style="margin-top:8px;">
+                <button id="restoreLastRoutesBackupBtn" type="button" style="flex:1;">Restaurer dernière sauvegarde locale</button>
+            </div>
+            <div id="routesBackupStatus" class="cloud-status" style="margin-top:8px;">Les routes sont maintenant sauvegardées automatiquement en snapshots locaux.</div>
 
             <label for="importRouteInput" style="display: block; margin-top: 12px; font-size: 12px;">Importer (JSON / GPX):</label>
             <input type="file" id="importRouteInput" accept=".json,.gpx,application/json,application/gpx+xml,text/xml,application/xml" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
@@ -594,7 +624,7 @@
         <input type="text" id="waypointBottomTypeInput" placeholder="Ex: sable, vase, herbiers" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
 
         <div class="button-row">
-            <button id="saveWaypointPhotoBtn" style="flex:1; margin-top:8px;">Ajouter ce waypoint photo</button>
+            <button id="saveWaypointPhotoBtn" style="flex:1; margin-top:8px;">Ajouter ce waypoint</button>
             <button id="cancelWaypointPhotoEditBtn" style="flex:1; margin-top:8px; display:none;">Annuler modification</button>
         </div>
 
@@ -1214,7 +1244,7 @@
     </div>
 </div>
 
-<button id="sidebarToggleBtn" type="button" aria-pressed="false" title="Masquer panneau">Masquer panneau</button>
+<button id="sidebarToggleBtn" type="button" aria-pressed="false" title="Masquer panneau" aria-label="Masquer panneau">◀</button>
 
 <div id="navLogDisplayToolbar" class="navlog-display-toolbar" aria-label="Affichage journal navigation">
     <button id="navLogDisplayMenuBtn" type="button" class="navlog-display-toolbar__btn" aria-pressed="true">Menu</button>
@@ -1239,14 +1269,21 @@
                 <button id="emailVoyagePdfBtn" type="button">PDF + email équipage</button>
             </div>
         </div>
+        <div id="voyageAgendaContent" class="voyage-agenda-content"></div>
         <div class="voyage-agenda-builder">
-            <div class="voyage-agenda-builder__card">
+            <div class="voyage-agenda-builder__card voyage-agenda-builder__card--plan">
                 <div id="voyageBuilderCardTitle" class="route-voyage-card__title">Créer / éditer un voyage</div>
                 <div id="voyagePlanActiveDisplay" class="route-voyage-summary">Aucun voyage actif</div>
                 <label for="voyagePlanNameInput" class="route-voyage-label">Nom du voyage:</label>
                 <input id="voyagePlanNameInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: BCN > Minorca">
                 <label for="voyagePlanDescriptionInput" class="route-voyage-label">Description:</label>
                 <textarea id="voyagePlanDescriptionInput" rows="3" class="polar-json-input route-voyage-notes" placeholder="Ex: convoyage de printemps avec escales tranquilles"></textarea>
+                <label for="voyagePlanStatusInput" class="route-voyage-label">État:</label>
+                <select id="voyagePlanStatusInput" class="cloud-input">
+                    <option value="planned">Planifié</option>
+                    <option value="completed">Réalisé</option>
+                    <option value="cancelled">Annulé</option>
+                </select>
                 <div class="button-row">
                     <button id="voyagePlanSaveBtn" type="button" style="flex:1;">Enregistrer voyage</button>
                     <button id="voyagePlanNewBtn" type="button" style="flex:1;">Nouveau</button>
@@ -1255,7 +1292,7 @@
                 </div>
                 <div id="voyagePlanStatus" class="route-voyage-summary">Sélectionne ou crée un voyage pour construire le calendrier.</div>
             </div>
-            <div class="voyage-agenda-builder__card">
+            <div class="voyage-agenda-builder__card voyage-agenda-builder__card--route">
                 <div id="voyageBuilderLegTitle" class="route-voyage-card__title">Ajouter une route existante</div>
                 <label for="voyagePlanRouteSelectInput" class="route-voyage-label">Route disponible:</label>
                 <select id="voyagePlanRouteSelectInput" class="cloud-input"></select>
@@ -1275,7 +1312,7 @@
                     <button id="voyagePlanAddStopBtn" type="button" style="flex:1;">Ajouter mouillage</button>
                 </div>
             </div>
-            <div class="voyage-agenda-builder__card">
+            <div class="voyage-agenda-builder__card voyage-agenda-builder__card--crew">
                 <div id="voyageBuilderCrewTitle" class="route-voyage-card__title">Équipage du voyage</div>
                 <label for="voyageCrewDirectorySelectInput" class="route-voyage-label">Annuaire équipage:</label>
                 <select id="voyageCrewDirectorySelectInput" class="cloud-input"></select>
@@ -1301,7 +1338,6 @@
                 <div id="voyageCrewStatus" class="route-voyage-summary">Sélectionne ou crée un équipier puis affecte-le au voyage.</div>
             </div>
         </div>
-        <div id="voyageAgendaContent" class="voyage-agenda-content"></div>
     </section>
 
     <div id="map">
@@ -1330,9 +1366,11 @@
         </div>
     </aside>
     <aside id="aiRouteDockPanel" class="waypoint-dock-panel">
-        <div id="aiRouteDockTitle" class="waypoint-dock-panel__title">Matrice départ + météo</div>
-        <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Analyse route + météo: en attente</div>
-        <div id="aiRouteSuggestions" class="waypoint-dock-panel__list"></div>
+        <div id="aiRouteMatrixDockSection">
+            <div id="aiRouteDockTitle" class="waypoint-dock-panel__title">Matrice départ + météo</div>
+            <div id="aiRouteSuggestionInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">Analyse route + météo: en attente</div>
+            <div id="aiRouteSuggestions" class="waypoint-dock-panel__list"></div>
+        </div>
         <div id="aiRouteMatrixTooltip" class="ai-route-matrix-tooltip" hidden></div>
     </aside>
 </div>
