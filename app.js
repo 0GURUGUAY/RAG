@@ -3,7 +3,7 @@ import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojso
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260329-41';
+const APP_BUILD_VERSION = '20260426-42';
 const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
 const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
 const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
@@ -577,6 +577,10 @@ function getNextSuggestedDepartureDateTime(referenceDateTime = new Date()) {
     return fallback;
 }
 
+function getPlanningReferenceSpeedKn() {
+    return ROUTE_SCHEDULE_REFERENCE_SPEED_KN;
+}
+
 function getAnchorageEndDateTime(startDateTime, durationDays) {
     if (!(startDateTime instanceof Date) || Number.isNaN(startDateTime.getTime())) return null;
     const safeDurationDays = Math.max(VOYAGE_STOP_MIN_DURATION_DAYS, Number(durationDays || 1) || 1);
@@ -596,17 +600,11 @@ function getEditableVoyageRouteItemId(plan) {
 
 function normalizeVoyagePlanScheduleOverrides(plan, fallbackIndex = 0) {
     const safePlan = sanitizeVoyagePlan(plan || {}, fallbackIndex);
-    let firstRouteSeen = false;
     return {
         ...safePlan,
         items: safePlan.items.map((item, index) => {
             if (item.type === 'route') {
-                const normalizedRoute = sanitizeVoyagePlanItem({
-                    ...item,
-                    departureDateTime: firstRouteSeen ? '' : item.departureDateTime
-                }, index);
-                firstRouteSeen = true;
-                return normalizedRoute;
+                return sanitizeVoyagePlanItem(item, index);
             }
             return sanitizeVoyagePlanItem({
                 ...item,
@@ -705,8 +703,9 @@ function updateDepartureDateTimeInput() {
 function normalizeDateTimeLocalValue(value) {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) {
-        return raw;
+    const isoLikeMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+    if (isoLikeMatch) {
+        return `${isoLikeMatch[1]}T${isoLikeMatch[2]}`;
     }
 
     const parsed = new Date(raw);
@@ -1960,9 +1959,7 @@ function computeRoutePlanningSnapshot(route, referenceDateTime = new Date()) {
     const departure = parseDateTimeLocalValue(safeRoute.agendaDepartureDateTime || '');
     const arrival = parseDateTimeLocalValue(safeRoute.agendaArrivalDateTime || '');
     const distanceNm = getSavedRouteDistanceNm(safeRoute);
-    const baselineSpeedKn = Number.isFinite(navLatestSpeedKn) && navLatestSpeedKn >= 4
-        ? navLatestSpeedKn
-        : ROUTE_SCHEDULE_REFERENCE_SPEED_KN;
+    const baselineSpeedKn = getPlanningReferenceSpeedKn();
     const estimatedHours = Number.isFinite(distanceNm)
         ? distanceNm / Math.max(4.5, baselineSpeedKn)
         : null;
@@ -2814,8 +2811,9 @@ function computeVoyagePlanTimeline(plan) {
         if (item.type === 'route') {
             const route = routesById.get(item.routeId) || null;
             const distanceNm = route ? (getSavedRouteDistanceNm(route) || 0) : 0;
+            const planningSpeedKn = getPlanningReferenceSpeedKn();
             const estimatedHours = Number.isFinite(distanceNm) && distanceNm > 0
-                ? distanceNm / Math.max(4.5, Number.isFinite(navLatestSpeedKn) && navLatestSpeedKn >= 4 ? navLatestSpeedKn : ROUTE_SCHEDULE_REFERENCE_SPEED_KN)
+                ? distanceNm / Math.max(4.5, planningSpeedKn)
                 : null;
             const explicitDeparture = item.id === editableRouteItemId ? parseDateTimeLocalValue(item.departureDateTime || '') : null;
             const departure = explicitDeparture || cursor;
@@ -12657,37 +12655,44 @@ function buildVoyagePrintNotesHtml(timeline) {
         </section>`;
 }
 
-function buildVoyagePrintItineraryHtml(plan, timeline) {
+function buildVoyagePrintItineraryHtml(plan, timeline, stepMapHtmlByIndex = []) {
     return timeline.map((entry, index) => {
+        const stepMapHtml = String(stepMapHtmlByIndex[index] || '').trim();
         if (entry.type === 'route') {
             return `
                 <article class="voyage-print-step voyage-print-step--route">
                     <div class="voyage-print-step__index">${index + 1}</div>
-                    <div class="voyage-print-step__content">
-                        <div class="voyage-print-step__eyebrow">${escapeHtml(t('Navigation', 'Navegación', 'Navigation'))}</div>
-                        <div class="voyage-print-step__title">${escapeHtml(entry.title)}</div>
-                        <div class="voyage-print-step__subtitle">${escapeHtml(entry.subtitle)}</div>
-                        <div class="voyage-print-step__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                    <div class="voyage-print-step__body">
+                        <div class="voyage-print-step__content">
+                            <div class="voyage-print-step__eyebrow">${escapeHtml(t('Navigation', 'Navegación', 'Navigation'))}</div>
+                            <div class="voyage-print-step__title">${escapeHtml(entry.title)}</div>
+                            <div class="voyage-print-step__subtitle">${escapeHtml(entry.subtitle)}</div>
+                            <div class="voyage-print-step__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                        </div>
+                        <div class="voyage-print-step__metrics voyage-print-step__metrics--route">
+                            <div><span>${escapeHtml(t('Distance', 'Distancia', 'Distance'))}</span><strong>${escapeHtml((entry.distanceNm || 0).toFixed(1))} NM</strong></div>
+                            <div><span>${escapeHtml(t('Durée', 'Duración', 'Duration'))}</span><strong>${escapeHtml(Number.isFinite(entry.estimatedHours) ? formatDurationHours(entry.estimatedHours) : 'N/A')}</strong></div>
+                        </div>
                     </div>
-                    <div class="voyage-print-step__metrics">
-                        <div><span>${escapeHtml(t('Distance', 'Distancia', 'Distance'))}</span><strong>${escapeHtml((entry.distanceNm || 0).toFixed(1))} NM</strong></div>
-                        <div><span>${escapeHtml(t('Durée', 'Duración', 'Duration'))}</span><strong>${escapeHtml(Number.isFinite(entry.estimatedHours) ? formatDurationHours(entry.estimatedHours) : 'N/A')}</strong></div>
-                    </div>
+                    <div class="voyage-print-step__aside">${stepMapHtml}</div>
                 </article>`;
         }
 
         return `
             <article class="voyage-print-step voyage-print-step--stop">
                 <div class="voyage-print-step__index">${index + 1}</div>
-                <div class="voyage-print-step__content">
-                    <div class="voyage-print-step__eyebrow">${escapeHtml(t('Mouillage', 'Fondeo', 'Anchorage'))}</div>
-                    <div class="voyage-print-step__title">${escapeHtml(entry.title)}</div>
-                    <div class="voyage-print-step__subtitle">${escapeHtml(entry.subtitle)}</div>
-                    <div class="voyage-print-step__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                <div class="voyage-print-step__body">
+                    <div class="voyage-print-step__content">
+                        <div class="voyage-print-step__eyebrow">${escapeHtml(t('Mouillage', 'Fondeo', 'Anchorage'))}</div>
+                        <div class="voyage-print-step__title">${escapeHtml(entry.title)}</div>
+                        <div class="voyage-print-step__subtitle">${escapeHtml(entry.subtitle)}</div>
+                        <div class="voyage-print-step__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                    </div>
+                    <div class="voyage-print-step__metrics voyage-print-step__metrics--stop">
+                        <div><span>${escapeHtml(t('Durée', 'Duración', 'Duration'))}</span><strong>${escapeHtml(formatDurationHours((entry.durationDays || 0) * 24))}</strong></div>
+                    </div>
                 </div>
-                <div class="voyage-print-step__metrics">
-                    <div><span>${escapeHtml(t('Durée', 'Duración', 'Duration'))}</span><strong>${escapeHtml(formatDurationHours((entry.durationDays || 0) * 24))}</strong></div>
-                </div>
+                <div class="voyage-print-step__aside">${stepMapHtml}</div>
             </article>`;
     }).join('');
 }
@@ -13004,6 +13009,112 @@ function buildVoyageArrivalMapHtml(arrivalContext, options = {}) {
         </div>`;
 }
 
+function buildVoyagePrintStepMapContext(entry) {
+    const anchor = getVoyageEntryAnchorPoint(entry);
+    if (!anchor) return null;
+
+    const viewWidth = 420;
+    const viewHeight = 240;
+    const routePoints = entry?.type === 'route'
+        ? (Array.isArray(entry?.route?.points) ? entry.route.points : [])
+        : [];
+    const approachLatlngs = routePoints
+        .slice(-10)
+        .map(point => {
+            const lat = Number(point?.lat);
+            const lng = Number(point?.lon ?? point?.lng);
+            return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+        })
+        .filter(Boolean);
+    const mapPoints = [{ lat: anchor.lat, lng: anchor.lng }]
+        .concat(approachLatlngs.map(point => ({ lat: Number(point[0]), lng: Number(point[1]) })));
+    let bounds = normalizeVoyagePrintMapBounds(mapPoints, viewWidth / viewHeight);
+    if (bounds) {
+        const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+        const centerLng = (bounds.minLng + bounds.maxLng) / 2;
+        const latSpanMeters = Math.max(1, (bounds.maxLat - bounds.minLat) * 111320);
+        const lngSpanMeters = Math.max(1, (bounds.maxLng - bounds.minLng) * 111320 * Math.max(Math.cos(centerLat * Math.PI / 180), 1e-6));
+        const currentSideMeters = Math.max(latSpanMeters, lngSpanMeters);
+        const minSideMeters = entry?.type === 'route' ? 700 : 500;
+        const maxSideMeters = entry?.type === 'route' ? 2200 : 1200;
+        if (currentSideMeters < minSideMeters || currentSideMeters > maxSideMeters) {
+            const clampedSideMeters = Math.min(maxSideMeters, Math.max(minSideMeters, currentSideMeters));
+            const latHalfSpan = clampedSideMeters / 2 / 111320;
+            const lngHalfSpan = (clampedSideMeters * (viewWidth / viewHeight)) / 2 / Math.max(111320 * Math.cos(centerLat * Math.PI / 180), 1e-6);
+            bounds = {
+                minLat: centerLat - latHalfSpan,
+                maxLat: centerLat + latHalfSpan,
+                minLng: centerLng - lngHalfSpan,
+                maxLng: centerLng + lngHalfSpan
+            };
+        }
+    }
+    if (!bounds) return null;
+
+    return {
+        anchor,
+        bounds,
+        approachLatlngs,
+        viewWidth,
+        viewHeight,
+        badge: t('MAP', 'MAP', 'MAP'),
+        meta: entry?.type === 'route'
+            ? t('Approche finale', 'Aproximación final', 'Final approach')
+            : t('Zone mouillage', 'Zona de fondeo', 'Anchorage area'),
+        label: entry?.type === 'route'
+            ? t('Arrivée', 'Llegada', 'Arrival')
+            : t('Spot', 'Spot', 'Spot')
+    };
+}
+
+function buildVoyagePrintStepMapHtml(stepMapContext, options = {}) {
+    if (!stepMapContext?.anchor || !stepMapContext?.bounds) return '';
+
+    const { anchor, bounds, approachLatlngs, viewWidth, viewHeight, badge, meta, label } = stepMapContext;
+    const minLat = bounds.minLat;
+    const maxLat = bounds.maxLat;
+    const minLng = bounds.minLng;
+    const maxLng = bounds.maxLng;
+    const basemapDataUrl = String(options.basemapDataUrl || '').trim();
+    const projectPoint = (lat, lng) => {
+        const x = ((lng - minLng) / Math.max(0.000001, maxLng - minLng)) * viewWidth;
+        const y = viewHeight - (((lat - minLat) / Math.max(0.000001, maxLat - minLat)) * viewHeight);
+        return {
+            x: Math.max(0, Math.min(viewWidth, x)),
+            y: Math.max(0, Math.min(viewHeight, y))
+        };
+    };
+
+    const approachPolyline = (Array.isArray(approachLatlngs) ? approachLatlngs : [])
+        .map(point => {
+            const lat = Number(point?.[0]);
+            const lng = Number(point?.[1]);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            const projected = projectPoint(lat, lng);
+            return `${projected.x.toFixed(2)},${projected.y.toFixed(2)}`;
+        })
+        .filter(Boolean)
+        .join(' ');
+
+    const markerPoint = projectPoint(anchor.lat, anchor.lng);
+
+    return `
+        <div class="voyage-print-step-map">
+            <div class="voyage-print-step-map__frame">
+                ${basemapDataUrl ? `<img src="${basemapDataUrl}" alt="${escapeHtml(meta)}" class="voyage-print-step-map__image">` : ''}
+                <div class="voyage-print-step-map__badge">${escapeHtml(badge)}</div>
+                <svg viewBox="0 0 ${viewWidth} ${viewHeight}" class="voyage-print-step-map__svg" role="img" aria-label="${escapeHtml(meta)}">
+                    <rect x="0" y="0" width="${viewWidth}" height="${viewHeight}" fill="#eaf4fb" opacity="0.14" />
+                    ${approachPolyline ? `<polyline points="${approachPolyline}" class="voyage-print-step-map__route" />` : ''}
+                    <circle cx="${markerPoint.x.toFixed(2)}" cy="${markerPoint.y.toFixed(2)}" r="9" class="voyage-print-step-map__target-ring" />
+                    <circle cx="${markerPoint.x.toFixed(2)}" cy="${markerPoint.y.toFixed(2)}" r="5.5" class="voyage-print-step-map__target-dot" />
+                    <text x="${markerPoint.x.toFixed(2)}" y="${Math.max(20, markerPoint.y - 13).toFixed(2)}" class="voyage-print-step-map__label">${escapeHtml(label)}</text>
+                </svg>
+            </div>
+            <div class="voyage-print-step-map__meta">${escapeHtml(meta)}</div>
+        </div>`;
+}
+
 function buildVoyagePrintMapHtml(timeline, options = {}) {
     const geometry = buildVoyagePreviewGeometry(timeline || []);
     const allPoints = [];
@@ -13168,7 +13279,7 @@ function buildVoyagePrintDocumentHtml(plan, timeline, options = {}) {
     const weatherHtml = options.weatherHtml || '';
     const introText = String(options.introText || '').trim();
     const mapHtml = String(options.mapHtml || '').trim();
-    const arrivalMapHtml = String(options.arrivalMapHtml || '').trim();
+    const stepMapHtmlByIndex = Array.isArray(options.stepMapHtmlByIndex) ? options.stepMapHtmlByIndex : [];
     const crewHtml = String(options.crewHtml || '').trim();
     const notesHtml = String(options.notesHtml || '').trim();
     const generatedAt = new Date();
@@ -13219,18 +13330,32 @@ function buildVoyagePrintDocumentHtml(plan, timeline, options = {}) {
         .print-section__title, .print-meta { break-after: avoid-page; page-break-after: avoid; }
         .print-meta { font-size: 12px; color: rgba(47, 71, 92, 0.78); }
         .voyage-print-steps { display: grid; gap: 12px; }
-        .voyage-print-step { display: grid; grid-template-columns: 44px minmax(0, 1fr) 190px; gap: 14px; padding: 14px; border-radius: 18px; border: 1px solid rgba(35, 90, 128, 0.1); page-break-inside: avoid; }
+        .voyage-print-step { display: grid; grid-template-columns: 44px minmax(0, 1fr) 250px; gap: 14px; padding: 14px; border-radius: 18px; border: 1px solid rgba(35, 90, 128, 0.1); page-break-inside: avoid; align-items: start; }
         .voyage-print-step--route { background: linear-gradient(180deg, #f5fbff, #eef6fd); }
         .voyage-print-step--stop { background: linear-gradient(180deg, #fff8f0, #fff1e2); }
         .voyage-print-step__index { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: #143a54; color: #fff; font-weight: 700; }
+        .voyage-print-step__body { display: grid; gap: 12px; align-content: space-between; min-height: 100%; }
         .voyage-print-step__eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(61, 89, 112, 0.68); }
         .voyage-print-step__title { margin-top: 4px; font-size: 18px; font-weight: 700; color: #18324a; }
         .voyage-print-step__subtitle { margin-top: 2px; font-size: 12px; color: rgba(64, 82, 100, 0.8); }
         .voyage-print-step__timeline { margin-top: 8px; font-size: 13px; color: #304860; }
+        .voyage-print-step__aside { display: grid; align-content: start; }
         .voyage-print-step__metrics { display: grid; gap: 10px; align-content: start; }
+        .voyage-print-step__metrics--route { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .voyage-print-step__metrics--stop { grid-template-columns: minmax(0, 180px); }
         .voyage-print-step__metrics div { padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.72); }
         .voyage-print-step__metrics span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(80, 95, 111, 0.72); }
         .voyage-print-step__metrics strong { display: block; margin-top: 5px; font-size: 15px; color: #173047; }
+        .voyage-print-step-map { display: grid; gap: 0; }
+        .voyage-print-step-map__frame { position: relative; overflow: hidden; border-radius: 18px; border: 1px solid rgba(29, 76, 109, 0.14); background: linear-gradient(180deg, #edf7ff, #d8eefc 58%, #f2efe6 100%); aspect-ratio: 420 / 240; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28); }
+        .voyage-print-step-map__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+        .voyage-print-step-map__svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+        .voyage-print-step-map__badge { position: absolute; top: 10px; left: 10px; z-index: 1; padding: 5px 9px; border-radius: 999px; background: rgba(20, 58, 84, 0.82); color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; box-shadow: 0 6px 14px rgba(15, 48, 72, 0.18); }
+        .voyage-print-step-map__route { fill: none; stroke: #1f7bb0; stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.92; }
+        .voyage-print-step-map__target-ring { fill: rgba(255,255,255,0.3); stroke: #ffffff; stroke-width: 2.5; }
+        .voyage-print-step-map__target-dot { fill: #ff7a32; stroke: #163147; stroke-width: 2; }
+        .voyage-print-step-map__label { fill: #163147; font-size: 15px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: rgba(255,255,255,0.96); stroke-width: 4px; stroke-linejoin: round; }
+        .voyage-print-step-map__meta { position: absolute; right: 10px; bottom: 10px; z-index: 1; padding: 5px 8px; border-radius: 999px; background: rgba(255,255,255,0.82); color: #25445c; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; box-shadow: 0 4px 12px rgba(15, 48, 72, 0.12); }
         .voyage-print-map { display: grid; gap: 10px; break-inside: avoid-page; page-break-inside: avoid; }
         .voyage-print-map__frame { position: relative; overflow: hidden; border-radius: 20px; border: 1px solid rgba(29, 76, 109, 0.14); background: linear-gradient(180deg, #edf7ff, #d8eefc 58%, #f2efe6 100%); aspect-ratio: 960 / 380; }
         .voyage-print-map__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -13241,15 +13366,6 @@ function buildVoyagePrintDocumentHtml(plan, timeline, options = {}) {
         .voyage-print-map__meta { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: rgba(57, 79, 98, 0.8); }
         .voyage-print-map__legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 11px; color: #264861; }
         .voyage-print-map__legend span { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(29, 76, 109, 0.08); }
-        .voyage-arrival-map { display: grid; gap: 10px; break-inside: avoid-page; page-break-inside: avoid; }
-        .voyage-arrival-map__frame { position: relative; overflow: hidden; border-radius: 20px; border: 1px solid rgba(29, 76, 109, 0.14); background: linear-gradient(180deg, #edf7ff, #d8eefc 58%, #f2efe6 100%); aspect-ratio: 960 / 420; }
-        .voyage-arrival-map__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-        .voyage-arrival-map__svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
-        .voyage-arrival-map__route { fill: none; stroke: #1f7bb0; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.92; }
-        .voyage-arrival-map__target-ring { fill: rgba(255,255,255,0.32); stroke: #ffffff; stroke-width: 3; }
-        .voyage-arrival-map__target-dot { fill: #ff7a32; stroke: #163147; stroke-width: 2; }
-        .voyage-arrival-map__label { fill: #163147; font-size: 18px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: rgba(255,255,255,0.95); stroke-width: 5px; stroke-linejoin: round; }
-        .voyage-arrival-map__meta { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: rgba(57, 79, 98, 0.8); }
         .voyage-calendar-card, .voyage-weather-summary-card { margin: 0; page-break-inside: avoid; }
         .voyage-calendar-weeks { display: grid; gap: 12px; }
         .voyage-calendar-week, .voyage-weather-summary-card, .voyage-calendar-card { break-inside: avoid; }
@@ -13326,11 +13442,10 @@ function buildVoyagePrintDocumentHtml(plan, timeline, options = {}) {
             </div>
         </section>
         ${mapHtml ? `<section class="print-section print-section--break-safe"><h2 class="print-section__title">${escapeHtml(t('Carte du parcours', 'Mapa del recorrido', 'Route map'))}</h2><div class="print-meta">${escapeHtml(t('Lecture rapide du tracé, des arrivées et des mouillages principaux.', 'Lectura rápida de la derrota, llegadas y fondeos principales.', 'Quick reading of the track, arrivals and main anchorages.'))}</div>${mapHtml}</section>` : ''}
-        ${arrivalMapHtml ? `<section class="print-section print-section--break-safe"><h2 class="print-section__title">${escapeHtml(t('Carte du point d’arrivée', 'Mapa del punto de llegada', 'Arrival point map'))}</h2><div class="print-meta">${escapeHtml(t('Zoom d’approche centré sur le dernier point du voyage pour visualiser la zone d’arrivée.', 'Zoom de aproximación centrado en el último punto del viaje para visualizar la zona de llegada.', 'Approach zoom centered on the last trip point to visualize the arrival area.'))}</div>${arrivalMapHtml}</section>` : ''}
         <section class="print-section">
             <h2 class="print-section__title">${escapeHtml(t('Synthèse des étapes', 'Síntesis de etapas', 'Leg summary'))}</h2>
             <div class="print-meta">${escapeHtml(t('Liste courte des routes et mouillages avec uniquement les informations essentielles du voyage.', 'Lista corta de rutas y fondeos con solo la información esencial del viaje.', 'Short list of routes and anchorages with only the essential trip information.'))}</div>
-            <div class="voyage-print-steps">${buildVoyagePrintItineraryHtml(plan, timeline)}</div>
+            <div class="voyage-print-steps">${buildVoyagePrintItineraryHtml(plan, timeline, stepMapHtmlByIndex)}</div>
         </section>
         ${notesHtml}
         ${crewHtml}
@@ -13646,15 +13761,19 @@ async function buildVoyagePdfPackage(plan) {
         ? await buildVoyagePrintMapBasemapDataUrl(mapBounds, 960, 380).catch(() => '')
         : '';
     const mapHtml = buildVoyagePrintMapHtml(timeline, { basemapDataUrl });
-    const arrivalContext = getVoyageFinalArrivalContext(timeline);
-    const arrivalBounds = arrivalContext?.anchor ? buildVoyageArrivalMapBounds(arrivalContext.anchor, 1000) : null;
-    const arrivalBasemapDataUrl = arrivalBounds
-        ? await buildVoyagePrintMapBasemapDataUrl(arrivalBounds, 960, 420).catch(() => '')
-        : '';
-    const arrivalMapHtml = arrivalContext ? buildVoyageArrivalMapHtml(arrivalContext, { basemapDataUrl: arrivalBasemapDataUrl }) : '';
+    const stepMapHtmlByIndex = await Promise.all(timeline.map(async entry => {
+        const stepMapContext = buildVoyagePrintStepMapContext(entry);
+        if (!stepMapContext?.bounds) return '';
+        const stepBasemapDataUrl = await buildVoyagePrintMapBasemapDataUrl(
+            stepMapContext.bounds,
+            stepMapContext.viewWidth,
+            stepMapContext.viewHeight
+        ).catch(() => '');
+        return buildVoyagePrintStepMapHtml(stepMapContext, { basemapDataUrl: stepBasemapDataUrl });
+    }));
     const crewHtml = buildVoyagePrintCrewHtml(safePlan);
     const notesHtml = buildVoyagePrintNotesHtml(timeline);
-    const documentHtml = buildVoyagePrintDocumentHtml(safePlan, timeline, { weatherHtml, introText, mapHtml, arrivalMapHtml, crewHtml, notesHtml });
+    const documentHtml = buildVoyagePrintDocumentHtml(safePlan, timeline, { weatherHtml, introText, mapHtml, stepMapHtmlByIndex, crewHtml, notesHtml });
     const blob = await renderVoyagePdfBlobFromHtml(documentHtml);
     return {
         blob,
@@ -33119,6 +33238,30 @@ function mergeVoyagePlansPreservingDirtyLocal(localList, cloudList) {
         .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
 }
 
+function mergeVoyagePlanLocalCrewAssignments(baseList, localList) {
+    const planKey = (plan) => {
+        const id = String(plan?.id || '').trim();
+        if (id) return `id:${id}`;
+        return `name:${String(plan?.name || '').trim().toLowerCase()}`;
+    };
+
+    const localCrewByPlanKey = new Map();
+    (Array.isArray(localList) ? localList : []).forEach((plan, index) => {
+        const safePlan = sanitizeVoyagePlan(plan, index);
+        if (!safePlan.crewMemberIds.length) return;
+        localCrewByPlanKey.set(planKey(safePlan), safePlan.crewMemberIds);
+    });
+
+    return (Array.isArray(baseList) ? baseList : []).map((plan, index) => {
+        const safePlan = sanitizeVoyagePlan(plan, index);
+        const localCrewMemberIds = localCrewByPlanKey.get(planKey(safePlan));
+        if (!Array.isArray(localCrewMemberIds) || !localCrewMemberIds.length) {
+            return safePlan;
+        }
+        return sanitizeVoyagePlan({ ...safePlan, crewMemberIds: localCrewMemberIds }, index);
+    });
+}
+
 function mergeCrewDirectoryPreservingDirtyLocal(localList, cloudList) {
     const keyForEntry = (entry) => {
         const id = String(entry?.id || '').trim();
@@ -33579,8 +33722,10 @@ async function pullRoutesFromCloud(options = {}) {
     const resolveVoyagePlansToApply = (cloudList) => {
         const safeCloudList = Array.isArray(cloudList) ? cloudList : [];
         const localHasItems = localVoyagePlansBeforePull.some(plan => Array.isArray(plan?.items) && plan.items.length > 0);
+        const localHasCrewLinks = localVoyagePlansBeforePull.some(plan => Array.isArray(plan?.crewMemberIds) && plan.crewMemberIds.length > 0);
         const cloudHasPlans = safeCloudList.length > 0;
         const cloudHasItems = safeCloudList.some(plan => Array.isArray(plan?.items) && plan.items.length > 0);
+        const cloudHasCrewLinks = safeCloudList.some(plan => Array.isArray(plan?.crewMemberIds) && plan.crewMemberIds.length > 0);
         if (!safeCloudList.length && localVoyagePlansBeforePull.length > 0) {
             // Preserve local voyages if the cloud table is empty or not yet populated.
             if (!voyagePlansCloudDirty) {
@@ -33599,8 +33744,20 @@ async function pullRoutesFromCloud(options = {}) {
             shouldPromoteLocalVoyagePlansToCloud = true;
             return mergeVoyagePlansPreservingDirtyLocal(localVoyagePlansBeforePull, safeCloudList);
         }
+        if (cloudHasPlans && !cloudHasCrewLinks && localHasCrewLinks) {
+            // voyage_plans/items exist but voyage_equipage is empty: keep local crew links and repair cloud.
+            if (!voyagePlansCloudDirty) {
+                voyagePlansCloudDirty = true;
+                voyagePlansCloudRevision += 1;
+            }
+            shouldPromoteLocalVoyagePlansToCloud = true;
+            return mergeVoyagePlanLocalCrewAssignments(safeCloudList, localVoyagePlansBeforePull);
+        }
         if (voyagePlansCloudDirty) {
-            return mergeVoyagePlansPreservingDirtyLocal(localVoyagePlansBeforePull, safeCloudList);
+            return mergeVoyagePlanLocalCrewAssignments(
+                mergeVoyagePlansPreservingDirtyLocal(localVoyagePlansBeforePull, safeCloudList),
+                localVoyagePlansBeforePull
+            );
         }
         return safeCloudList;
     };
