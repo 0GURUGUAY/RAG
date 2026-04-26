@@ -7,6 +7,8 @@ const APP_BUILD_VERSION = '20260426-42';
 const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
 const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
 const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
+const VOYAGE_ROUTE_SELECTION_RADIUS_NM = 80;
+const VOYAGE_WAYPOINT_SELECTION_RADIUS_NM = 30;
 const AGENDA_EVENT_DEFAULT_DURATION_MS = 60 * 60 * 1000;
 const AGENDA_EVENT_DURATION_OPTIONS_MS = [30, 60, 120].map(minutes => minutes * 60 * 1000);
 const VOYAGE_PLAN_STATUS_PLANNED = 'planned';
@@ -459,6 +461,7 @@ let agendaEventDefaultDurationMs = AGENDA_EVENT_DEFAULT_DURATION_MS;
 let agendaEventCalendarPrefillTimer = null;
 let voyagePlans = [];
 let selectedVoyagePlanId = '';
+let voyagePlanEditorDraftState = null;
 let crewDirectory = [];
 let selectedCrewMemberId = '';
 let crewEditorDraftState = null;
@@ -875,12 +878,42 @@ function getSavedRoutesVisibleInCurrentMapZone() {
     return getSavedRoutes().filter(route => isSavedRouteVisibleInCurrentMapZone(route, visibleBounds));
 }
 
+function getVoyagePlanSelectionAnchor(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const timeline = computeVoyagePlanTimeline(safePlan);
+    let previousAnchor = null;
+
+    timeline.forEach(entry => {
+        const directAnchor = getVoyageEntryAnchorPoint(entry);
+        if (directAnchor) {
+            previousAnchor = directAnchor;
+        }
+    });
+
+    return previousAnchor;
+}
+
+function getRouteDistanceToVoyageSelectionAnchor(route, anchor) {
+    if (!anchor) return Number.POSITIVE_INFINITY;
+    const start = getSavedRouteStartCoordinates(route);
+    if (!start) return Number.POSITIVE_INFINITY;
+    return distanceNm(anchor.lat, anchor.lng, start.lat, start.lng);
+}
+
+function getWaypointDistanceToVoyageSelectionAnchor(entry, anchor) {
+    if (!anchor) return Number.POSITIVE_INFINITY;
+    const safeEntry = normalizeWaypointPhotoEntry(entry);
+    if (!safeEntry) return Number.POSITIVE_INFINITY;
+    return distanceNm(anchor.lat, anchor.lng, safeEntry.lat, safeEntry.lng);
+}
+
 function getSavedRoutesForVoyagePlanSelection(plan = null, selectedRouteId = '') {
     const allRoutes = getSavedRoutes();
     if (!allRoutes.length) return [];
 
     const visibleRoutes = getSavedRoutesVisibleInCurrentMapZone();
     const selectedPlan = sanitizeVoyagePlan(plan || {}, 0);
+    const selectionAnchor = getVoyagePlanSelectionAnchor(selectedPlan);
     const requiredRouteIds = new Set(
         [String(selectedRouteId || '').trim()]
             .concat((Array.isArray(selectedPlan?.items) ? selectedPlan.items : [])
@@ -889,7 +922,18 @@ function getSavedRoutesForVoyagePlanSelection(plan = null, selectedRouteId = '')
             .filter(Boolean)
     );
 
-    const baseRoutes = visibleRoutes.length ? visibleRoutes : allRoutes;
+    const nearbyRoutes = selectionAnchor
+        ? allRoutes.filter(route => {
+            const routeId = String(route?.id || '').trim();
+            if (requiredRouteIds.has(routeId)) return true;
+            const distanceToAnchorNm = getRouteDistanceToVoyageSelectionAnchor(route, selectionAnchor);
+            return Number.isFinite(distanceToAnchorNm) && distanceToAnchorNm <= VOYAGE_ROUTE_SELECTION_RADIUS_NM;
+        })
+        : [];
+
+    const baseRoutes = nearbyRoutes.length
+        ? nearbyRoutes
+        : (visibleRoutes.length ? visibleRoutes : allRoutes);
     const mergedRoutes = [...baseRoutes];
     allRoutes.forEach(route => {
         const routeId = String(route?.id || '').trim();
@@ -898,7 +942,19 @@ function getSavedRoutesForVoyagePlanSelection(plan = null, selectedRouteId = '')
         mergedRoutes.push(route);
     });
 
-    return mergedRoutes.sort((a, b) => compareSavedRoutesByStartCoordinates(a, b, routesSortOrder));
+    return mergedRoutes.sort((a, b) => {
+        if (selectionAnchor) {
+            const distanceA = getRouteDistanceToVoyageSelectionAnchor(a, selectionAnchor);
+            const distanceB = getRouteDistanceToVoyageSelectionAnchor(b, selectionAnchor);
+            if (Number.isFinite(distanceA) && Number.isFinite(distanceB) && distanceA !== distanceB) {
+                return distanceA - distanceB;
+            }
+            if (Number.isFinite(distanceA) !== Number.isFinite(distanceB)) {
+                return Number.isFinite(distanceA) ? -1 : 1;
+            }
+        }
+        return compareSavedRoutesByStartCoordinates(a, b, routesSortOrder);
+    });
 }
 
 function setRouteLlmGuideStatus(message, isError = false) {
@@ -2504,6 +2560,9 @@ function loadVoyagePlans() {
     } catch (_error) {
         voyagePlans = [];
     }
+    if (isVoyagePlanEditorDraftActive() && !selectedVoyagePlanId) {
+        return;
+    }
     if (!selectedVoyagePlanId || !voyagePlans.some(plan => plan.id === selectedVoyagePlanId)) {
         selectedVoyagePlanId = String(voyagePlans[0]?.id || '');
     }
@@ -2511,7 +2570,9 @@ function loadVoyagePlans() {
 
 function setVoyagePlans(list, { persistLocal = true, markCloudDirty = false } = {}) {
     voyagePlans = (Array.isArray(list) ? list : []).map((plan, index) => normalizeVoyagePlanScheduleOverrides(plan, index));
-    if (!selectedVoyagePlanId || !voyagePlans.some(plan => plan.id === selectedVoyagePlanId)) {
+    if (isVoyagePlanEditorDraftActive() && !selectedVoyagePlanId) {
+        // Preserve new-trip draft mode during background refreshes.
+    } else if (!selectedVoyagePlanId || !voyagePlans.some(plan => plan.id === selectedVoyagePlanId)) {
         selectedVoyagePlanId = String(voyagePlans[0]?.id || '');
     }
     if (persistLocal) {
@@ -2534,6 +2595,31 @@ function setVoyagePlanStatus(message, isError = false) {
     node.textContent = String(message || '');
     node.classList.toggle('is-late', !!isError);
     node.classList.toggle('is-ok', !isError && !!message);
+}
+
+function clearVoyagePlanEditorDraft() {
+    voyagePlanEditorDraftState = null;
+}
+
+function isVoyagePlanEditorDraftActive() {
+    return !!voyagePlanEditorDraftState;
+}
+
+function captureVoyagePlanEditorDraftFromInputs() {
+    const name = String(document.getElementById('voyagePlanNameInput')?.value || '').trim();
+    const description = String(document.getElementById('voyagePlanDescriptionInput')?.value || '').trim();
+    const status = normalizeVoyagePlanStatus(document.getElementById('voyagePlanStatusInput')?.value || '');
+    if (!name && !description && status === VOYAGE_PLAN_STATUS_PLANNED) {
+        voyagePlanEditorDraftState = null;
+        return;
+    }
+    voyagePlanEditorDraftState = {
+        values: {
+            name,
+            description,
+            status
+        }
+    };
 }
 
 function setVoyageCrewStatus(message, isError = false) {
@@ -2658,35 +2744,62 @@ function syncCrewEditorUi() {
     if (commentInput) commentInput.value = String((draftValues?.commentaire ?? selected?.commentaire) || '');
 }
 
-function formatVoyageWaypointOptionLabel(entry) {
+function formatVoyageWaypointOptionLabel(entry, anchor = null) {
     const safeEntry = normalizeWaypointPhotoEntry(entry);
     if (!safeEntry) return '';
     const title = String(safeEntry.placeName || t('Mouillage sans nom', 'Fondeo sin nombre', 'Unnamed anchorage')).trim();
-    return `${title} · ${safeEntry.lat.toFixed(4)}, ${safeEntry.lng.toFixed(4)}`;
+    const distanceToAnchorNm = anchor ? getWaypointDistanceToVoyageSelectionAnchor(safeEntry, anchor) : Number.NaN;
+    const distanceLabel = Number.isFinite(distanceToAnchorNm)
+        ? ` · ${distanceToAnchorNm.toFixed(1)} NM`
+        : '';
+    return `${title}${distanceLabel} · ${safeEntry.lat.toFixed(4)}, ${safeEntry.lng.toFixed(4)}`;
 }
 
-function getWaypointEntriesForVoyagePlanSelection(selectedWaypointId = '') {
+function sortWaypointEntriesForVoyageSelection(entries, anchor = null) {
+    return [...(Array.isArray(entries) ? entries : [])].sort((a, b) => {
+        if (anchor) {
+            const distanceA = getWaypointDistanceToVoyageSelectionAnchor(a, anchor);
+            const distanceB = getWaypointDistanceToVoyageSelectionAnchor(b, anchor);
+            if (Number.isFinite(distanceA) && Number.isFinite(distanceB) && distanceA !== distanceB) {
+                return distanceA - distanceB;
+            }
+            if (Number.isFinite(distanceA) !== Number.isFinite(distanceB)) {
+                return Number.isFinite(distanceA) ? -1 : 1;
+            }
+        }
+        return formatVoyageWaypointOptionLabel(a).localeCompare(formatVoyageWaypointOptionLabel(b));
+    });
+}
+
+function getWaypointEntriesForVoyagePlanSelection(plan = null, selectedWaypointId = '') {
     const allEntries = waypointPhotoEntries
         .map(normalizeWaypointPhotoEntry)
         .filter(Boolean);
     if (!allEntries.length) return [];
 
+    const selectionAnchor = getVoyagePlanSelectionAnchor(plan);
     const visibleBounds = map && typeof map.getBounds === 'function'
         ? map.getBounds()
         : null;
     const visibleEntries = allEntries.filter(entry => !visibleBounds || typeof visibleBounds.contains !== 'function' || visibleBounds.contains([entry.lat, entry.lng]));
-    const baseEntries = visibleEntries.length ? visibleEntries : allEntries;
+    const nearbyEntries = selectionAnchor
+        ? allEntries.filter(entry => {
+            const distanceToAnchorNm = getWaypointDistanceToVoyageSelectionAnchor(entry, selectionAnchor);
+            return Number.isFinite(distanceToAnchorNm) && distanceToAnchorNm <= VOYAGE_WAYPOINT_SELECTION_RADIUS_NM;
+        })
+        : [];
+    const baseEntries = nearbyEntries.length ? nearbyEntries : (visibleEntries.length ? visibleEntries : allEntries);
     const safeSelectedWaypointId = String(selectedWaypointId || '').trim();
     if (!safeSelectedWaypointId) {
-        return baseEntries;
+        return sortWaypointEntriesForVoyageSelection(baseEntries, selectionAnchor);
     }
 
     const selectedEntry = allEntries.find(entry => String(entry?.id || '').trim() === safeSelectedWaypointId);
     if (!selectedEntry || baseEntries.some(entry => String(entry?.id || '').trim() === safeSelectedWaypointId)) {
-        return baseEntries;
+        return sortWaypointEntriesForVoyageSelection(baseEntries, selectionAnchor);
     }
 
-    return [...baseEntries, selectedEntry];
+    return sortWaypointEntriesForVoyageSelection([...baseEntries, selectedEntry], selectionAnchor);
 }
 
 function syncVoyagePlanWaypointSelectOptions() {
@@ -2694,11 +2807,11 @@ function syncVoyagePlanWaypointSelectOptions() {
     if (!waypointSelect) return;
 
     const previousValue = String(waypointSelect.value || '').trim();
-    const safeEntries = getWaypointEntriesForVoyagePlanSelection(previousValue);
+    const safeEntries = getWaypointEntriesForVoyagePlanSelection(getSelectedVoyagePlan(), previousValue);
 
     waypointSelect.innerHTML = safeEntries.length
         ? [`<option value="">${escapeHtml(t('Choisir un waypoint enregistré', 'Elegir un waypoint guardado', 'Choose a saved waypoint'))}</option>`]
-            .concat(safeEntries.map(entry => `<option value="${escapeHtml(entry.id)}">${escapeHtml(formatVoyageWaypointOptionLabel(entry))}</option>`))
+            .concat(safeEntries.map(entry => `<option value="${escapeHtml(entry.id)}">${escapeHtml(formatVoyageWaypointOptionLabel(entry, getVoyagePlanSelectionAnchor(getSelectedVoyagePlan())))}</option>`))
             .join('')
         : `<option value="">${escapeHtml(t('Aucun waypoint enregistré', 'No hay waypoints guardados', 'No saved waypoints'))}</option>`;
 
@@ -2732,9 +2845,12 @@ function syncVoyagePlanEditorUi() {
     const builderNode = document.querySelector('.voyage-agenda-builder');
 
     const selectedPlan = getSelectedVoyagePlan();
-    if (nameInput) nameInput.value = String(selectedPlan?.name || '');
-    if (descriptionInput) descriptionInput.value = String(selectedPlan?.description || '');
-    if (statusInput) statusInput.value = normalizeVoyagePlanStatus(selectedPlan?.status);
+    const draftValues = !selectedPlan && isVoyagePlanEditorDraftActive()
+        ? voyagePlanEditorDraftState?.values || null
+        : null;
+    if (nameInput) nameInput.value = String((draftValues?.name ?? selectedPlan?.name) || '');
+    if (descriptionInput) descriptionInput.value = String((draftValues?.description ?? selectedPlan?.description) || '');
+    if (statusInput) statusInput.value = normalizeVoyagePlanStatus(draftValues?.status ?? selectedPlan?.status);
     if (builderNode) {
         builderNode.classList.toggle('is-new-voyage', !selectedPlan);
     }
@@ -3950,6 +4066,7 @@ function upsertSelectedVoyagePlanFromEditor() {
         ? voyagePlans.map(plan => (plan.id === existing.id ? nextPlan : plan))
         : [...voyagePlans, nextPlan];
     selectedVoyagePlanId = nextPlan.id;
+    clearVoyagePlanEditorDraft();
     setVoyagePlans(nextPlans, { markCloudDirty: true });
     renderVoyageAgendaPanel();
     setVoyagePlanStatus(t('Voyage enregistré.', 'Viaje guardado.', 'Trip saved.'));
@@ -4161,6 +4278,7 @@ function removeCrewMemberFromVoyage(planId, crewMemberId) {
 function resetVoyagePlanEditor() {
     isVoyageOverviewCalendarVisible = false;
     selectedVoyagePlanId = '';
+    clearVoyagePlanEditorDraft();
     syncVoyagePlanEditorUi();
     renderVoyageAgendaPanel();
     setVoyagePlanStatus(t('Statut NOUVEAU. Enregistre le voyage pour créer les lignes.', 'Estado NUEVO. Guarda el viaje para crear etapas.', 'NEW status. Save the trip to create legs.'));
@@ -4861,7 +4979,15 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsAllowedUsersLabel', t('Utilisateurs autorisés (allowed_users)', 'Usuarios autorizados (allowed_users)'));
     setElementText('#cloudStatsRoutesLabel', t('Routes sauvegardées (routes)', 'Rutas guardadas (routes)'));
     setElementText('#cloudStatsRoutePointsLabel', t('Points de route (route_points)', 'Puntos de ruta (route_points)'));
+    setElementText('#cloudStatsRouteCommentsLabel', t('Commentaires route (route_comments)', 'Comentarios ruta (route_comments)', 'Route comments (route_comments)'));
     setElementText('#cloudStatsPhotosLabel', t('Photos waypoint (waypoint_photos)', 'Fotos waypoint (waypoint_photos)'));
+    setElementText('#cloudStatsArrivalAnalysesLabel', t('Analyses d\'arrivée (arrival_analyses)', 'Análisis de llegada (arrival_analyses)', 'Arrival analyses (arrival_analyses)'));
+    setElementText('#cloudStatsAgendaEventsLabel', t('Agenda (agenda_events)', 'Agenda (agenda_events)', 'Agenda events (agenda_events)'));
+    setElementText('#cloudStatsVoyagePlansLabel', t('Voyages (voyage_plans)', 'Viajes (voyage_plans)', 'Voyages (voyage_plans)'));
+    setElementText('#cloudStatsVoyagePlanItemsLabel', t('Étapes voyage (voyage_plan_items)', 'Etapas viaje (voyage_plan_items)', 'Voyage plan items (voyage_plan_items)'));
+    setElementText('#cloudStatsCrewLabel', t('Équipage (equipage)', 'Tripulación (equipage)', 'Crew (equipage)'));
+    setElementText('#cloudStatsVoyageCrewLabel', t('Liaisons équipage-voyage (voyage_equipage)', 'Vínculos tripulación-viaje (voyage_equipage)', 'Voyage crew links (voyage_equipage)'));
+    setElementText('#cloudStatsDocumentsLabel', t('Documents (document_files)', 'Documentos (document_files)', 'Documents (document_files)'));
     setElementText('#cloudStatsMaintenanceSchemasLabel', t('Schémas maintenance (maintenance_schemas)', 'Esquemas mantenimiento (maintenance_schemas)'));
     setElementText('#cloudStatsMaintenancePinsLabel', t('Pastilles maintenance (maintenance_pins)', 'Marcadores mantenimiento (maintenance_pins)'));
     setElementText('#cloudStatsSuppliersLabel', t('Fournisseurs (maintenance_suppliers)', 'Proveedores (maintenance_suppliers)'));
@@ -4869,6 +4995,7 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsNavLabel', t('Journal navigation (nav_log_entries)', 'Diario navegación (nav_log_entries)'));
     setElementText('#cloudStatsEngineLabel', t('Journal moteur (engine_log)', 'Diario motor (engine_log)'));
     setElementText('#cloudStatsEngineSoundLabel', t('Snapshots son moteur (engine_sound_snapshots)', 'Snapshots sonido motor (engine_sound_snapshots)', 'Engine sound snapshots (engine_sound_snapshots)'));
+    setElementText('#cloudStatsPolarsLabel', t('Polaires / voilures (polar_profiles)', 'Polares / velas (polar_profiles)', 'Polars / sail plans (polar_profiles)'));
     setElementText('#cloudStatsTotalLabel', t('Total enregistrements', 'Total registros'));
     setElementText('#cloudStatsStorageLabel', t('Taille utilisée', 'Tamaño usado'));
     setElementText('#cloudStatsQuotaLabel', t('Quota utilisé (500 Mo)', 'Cuota usada (500 MB)'));
@@ -5767,10 +5894,10 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
 
     if (isCloudReady()) {
         try {
-            const shouldPullMaintenance = activeTabName === 'maintenance';
+            const shouldHydrateMaintenanceFromCloud = isAuthRequiredRuntime() && isInitialProtectedLoad;
+            const shouldPullMaintenance = activeTabName === 'maintenance' || shouldHydrateMaintenanceFromCloud;
             const shouldPullNavLog = activeTabName === 'navlog';
-            const shouldPullEngineLog = activeTabName === 'maintenance';
-            const shouldHydrateMaintenanceFromCloud = shouldPullMaintenance && isAuthRequiredRuntime() && isInitialProtectedLoad;
+            const shouldPullEngineLog = activeTabName === 'maintenance' || shouldHydrateMaintenanceFromCloud;
 
             const routes = await pullRoutesFromCloud({
                 allowMaintenanceOverwrite: shouldHydrateMaintenanceFromCloud,
@@ -5779,8 +5906,13 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
                 includeWaypointPhotos: true
             });
             refreshSavedList();
+            if (shouldHydrateMaintenanceFromCloud) {
+                maintenanceCloudHydratedOnce = true;
+            }
+            await importBundledDufourPolarProfilesIfNeeded();
             setCloudStatus(t(`Cloud connecté · ${routes.length} route(s) partagée(s)`, `Nube conectada · ${routes.length} ruta(s) compartida(s)`));
             updateCloudDataSourceStatus('cloud', routes.length, waypointPhotoEntries.length);
+            refreshCloudSyncBadgeFromState();
         } catch (error) {
             console.error('[CEIBO] Cloud pull failed', error);
             setCloudStatus(`Récupération cloud impossible: ${formatCloudError(error)}`, true);
@@ -6019,7 +6151,7 @@ function buildPolarDataFromImportedMatrix(twsList, twaList, matrixRows) {
 async function importBundledDufourPolarProfilesIfNeeded() {
     try {
         const alreadyImported = localStorage.getItem(POLAR_IMPORTED_DUFOUR56_STORAGE_KEY) === '1';
-        if (alreadyImported) return false;
+        const deprecatedBundledProfileIds = new Set(['dufour56-standard']);
 
         const response = await fetch('./polaires_dufour56.json', { cache: 'no-store' });
         if (!response.ok) return false;
@@ -6032,6 +6164,7 @@ async function importBundledDufourPolarProfilesIfNeeded() {
 
         const importedProfiles = Object.entries(polarsMap)
             .map(([rawKey, rows], index) => {
+                if (String(rawKey || '').trim().toLowerCase() === 'standard') return null;
                 const polarData = buildPolarDataFromImportedMatrix(twsList, twaList, rows);
                 if (!polarData) return null;
                 const profileKey = slugifyPolarProfileKey(rawKey) || `profile-${index + 1}`;
@@ -6050,8 +6183,21 @@ async function importBundledDufourPolarProfilesIfNeeded() {
 
         if (!importedProfiles.length) return false;
 
+        const sanitizedLocalProfiles = sanitizePolarProfilesList(polarProfiles).filter(profile => {
+            const profileId = String(profile?.id || '').trim();
+            return !deprecatedBundledProfileIds.has(profileId);
+        });
+        const removedDeprecatedProfiles = sanitizedLocalProfiles.length !== polarProfiles.length;
+        if (removedDeprecatedProfiles) {
+            polarProfiles = sanitizedLocalProfiles;
+        }
+
+        const localProfileIds = new Set((Array.isArray(polarProfiles) ? polarProfiles : []).map(profile => String(profile?.id || '').trim()).filter(Boolean));
+        const hasAllBundledProfilesLocally = importedProfiles.every(profile => localProfileIds.has(profile.id));
+        if (alreadyImported && hasAllBundledProfilesLocally && !removedDeprecatedProfiles) return false;
+
         const existingById = new Map(polarProfiles.map(profile => [profile.id, profile]));
-        let hasChanges = false;
+        let hasChanges = removedDeprecatedProfiles;
 
         importedProfiles.forEach(imported => {
             const existing = existingById.get(imported.id);
@@ -6079,6 +6225,20 @@ async function importBundledDufourPolarProfilesIfNeeded() {
                 polarProfiles.filter(profile => !existingById.has(profile.id))
             ));
             savePolarProfiles();
+            if (isCloudReady()) {
+                const creatorEmail = getCurrentCloudUserEmail();
+                if (creatorEmail) {
+                    polarProfiles = polarProfiles.map(profile => {
+                        if (!String(profile?.id || '').startsWith('dufour56-')) return profile;
+                        return {
+                            ...profile,
+                            creatorEmail
+                        };
+                    });
+                    savePolarProfiles();
+                    await pushPolarProfilesToCloudTable();
+                }
+            }
             populatePolarProfileSelects();
             loadPolarProfileEditor();
             updateRoutingPolarProfileUi();
@@ -6835,9 +6995,21 @@ async function pullPolarProfilesFromCloudTable() {
 function applySyncedPolarProfiles(cloudProfiles) {
     if (!Array.isArray(cloudProfiles)) return;
 
+    const localProfilesBeforeSync = sanitizePolarProfilesList(polarProfiles);
+    const cloudProfilesSafe = sanitizePolarProfilesList(cloudProfiles);
+
+    if (cloudProfilesSafe.length === 0 && localProfilesBeforeSync.length > 0) {
+        setPolarProfileStatus(t(
+            'Alerte: le cloud ne renvoie aucune polaire. Les polaires locales ont été conservées.',
+            'Alerta: la nube no devuelve ninguna polar. Se conservaron las polares locales.',
+            'Warning: the cloud returned no polar profiles. Local polars were preserved.'
+        ), true);
+        return;
+    }
+
     // Cloud is the source of truth for profile membership.
     // This ensures that a profile deleted in SQL/Supabase does not reappear from stale local cache.
-    polarProfiles = sanitizePolarProfilesList(cloudProfiles);
+    polarProfiles = cloudProfilesSafe;
     savePolarProfiles();
     populatePolarProfileSelects();
     updateRoutingPolarProfileUi();
@@ -7316,7 +7488,7 @@ function createIsobarOverlayLayer(appId) {
             isobarGroup.removeLayer(contoursLegacy);
         }
 
-        setCloudStatus(t('Isobares lignes indisponibles (OWM timeout).', 'Isobaras de líneas no disponibles (timeout OWM).'), true);
+        setCloudStatus(t('Isobares lignes indisponibles (OWM timeout).', 'Isobaras de líneas no disponibles (timeout OWM).'), true, { updateBadge: false });
     });
 
     contoursLegacy.on('tileload', () => {
@@ -7340,7 +7512,7 @@ function reportOpenWeatherTileIssue(layerName, contextLabel = '') {
         `OWM key valid but layer ${target} unavailable (OWM tiles permissions).`
     );
     if (status) status.textContent = message;
-    setCloudStatus(message, true);
+    setCloudStatus(message, true, { updateBadge: false });
 }
 
 function createOpenWeatherOverlayLayer(appId, layerNames, attribution, opacity = 0.75, contextLabel = '') {
@@ -21677,6 +21849,26 @@ function tryFlushPendingCloudDataPush() {
     })();
 }
 
+function refreshCloudSyncBadgeFromState() {
+    if (cloudPendingDataPushInFlight || cloudLogbookPushInFlight) {
+        setCloudSyncBadge('syncing', t('Synchro cloud: en cours', 'Sincronización nube: en curso'));
+        return;
+    }
+
+    if (cloudLogbookPushTimer || cloudLogbookPushPendingNav || cloudLogbookPushPendingEngine
+        || routesCloudDirty || arrivalAnalysesCloudDirty || agendaEventsCloudDirty || voyagePlansCloudDirty || crewDirectoryCloudDirty) {
+        setCloudSyncBadge('pending', t('Synchro cloud: en attente', 'Sincronización nube: en espera'));
+        return;
+    }
+
+    if (isCloudReady()) {
+        setCloudSyncBadge('ok', t('Synchro cloud: OK', 'Sincronización nube: OK'));
+        return;
+    }
+
+    setCloudSyncBadge('pending', t('Synchro cloud: en attente', 'Sincronización nube: en espera'));
+}
+
 function sanitizeNavLogEntry(entry, fallbackIndex = 0) {
     if (!entry || typeof entry !== 'object') return null;
 
@@ -27450,7 +27642,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const status = document.getElementById('owmApiKeyStatus');
             if (status) status.textContent = msg;
             setWeatherApiConfigVisibility(true);
-            setCloudStatus(msg, true);
+            setCloudStatus(msg, true, { updateBadge: false });
             return;
         }
 
@@ -28936,6 +29128,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const action = String(planActionTarget.getAttribute('data-voyage-plan-action') || '');
             const planId = String(planActionTarget.getAttribute('data-voyage-plan-id') || '');
             if (action === 'select' && planId) {
+                clearVoyagePlanEditorDraft();
                 isVoyageOverviewCalendarVisible = false;
                 isVoyageCalendarVisible = false;
                 selectedVoyagePlanId = planId;
@@ -28966,6 +29159,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     const voyagePlanDeleteBtn = document.getElementById('voyagePlanDeleteBtn');
     if (voyagePlanDeleteBtn) {
         voyagePlanDeleteBtn.addEventListener('click', () => deleteSelectedVoyagePlan());
+    }
+
+    ['voyagePlanNameInput', 'voyagePlanDescriptionInput'].forEach(inputId => {
+        const inputNode = document.getElementById(inputId);
+        if (!inputNode) return;
+        inputNode.addEventListener('input', () => captureVoyagePlanEditorDraftFromInputs());
+    });
+
+    const voyagePlanStatusInput = document.getElementById('voyagePlanStatusInput');
+    if (voyagePlanStatusInput) {
+        voyagePlanStatusInput.addEventListener('change', () => captureVoyagePlanEditorDraftFromInputs());
     }
 
     const voyagePlanAddRouteBtn = document.getElementById('voyagePlanAddRouteBtn');
@@ -29353,6 +29557,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const action = String(planActionTarget.getAttribute('data-voyage-plan-action') || '');
                 const planId = String(planActionTarget.getAttribute('data-voyage-plan-id') || '');
                 if (action === 'select') {
+                    clearVoyagePlanEditorDraft();
                     isVoyageCalendarVisible = false;
                     isVoyageOverviewCalendarVisible = false;
                     selectedVoyagePlanId = planId;
@@ -31587,14 +31792,20 @@ function saveCloudConfigToStorage(config) {
     localStorage.setItem(CLOUD_CONFIG_STORAGE_KEY, JSON.stringify(config));
 }
 
-function setCloudStatus(message, isError = false) {
+function setCloudStatus(message, isError = false, options = {}) {
     const status = document.getElementById('cloudStatus');
     if (!status) return;
+    const { updateBadge = true } = options || {};
     cloudLastStatusMessage = String(message || '');
     status.textContent = message;
     status.style.color = isError ? '#ff8f8f' : '';
 
     const msg = String(message || '').toLowerCase();
+    if (!updateBadge) {
+        renderCloudStatsTable();
+        return;
+    }
+
     if (isError) {
         setCloudSyncBadge('error', t('Synchro cloud: échec', 'Sincronización nube: error'));
     } else if (msg.includes('en cours') || msg.includes('en curso')) {
@@ -31712,19 +31923,34 @@ async function refreshCloudStatsTableCounts({ force = false } = {}) {
             const projectId = await resolveCloudProjectIdUuid();
             const creatorEmail = getCurrentCloudUserEmail();
             const creatorFilter = creatorEmail ? { eq: { creator_email: creatorEmail } } : {};
+            const projectCreatorFilter = {
+                eq: {
+                    ...(creatorEmail ? { creator_email: creatorEmail } : {}),
+                    ...(projectId ? { project_id: projectId } : {})
+                }
+            };
             const counts = {
                 projects: null,
                 allowedUsers: null,
                 routes: null,
                 routePoints: null,
+                routeComments: null,
                 waypointPhotos: null,
+                arrivalAnalyses: null,
+                agendaEvents: null,
+                voyagePlans: null,
+                voyagePlanItems: null,
+                crew: null,
+                voyageCrew: null,
+                documents: null,
                 maintenanceSchemas: null,
                 maintenancePins: null,
                 maintenanceSuppliers: null,
                 maintenanceExpenses: null,
                 navLog: null,
                 engineLog: null,
-                engineSoundSnapshots: null
+                engineSoundSnapshots: null,
+                polarProfiles: null
             };
 
             counts.projects = await countCloudTableRows(CLOUD_PROJECTS_TABLE, projectId ? { eq: { id: projectId } } : {});
@@ -31732,7 +31958,15 @@ async function refreshCloudStatsTableCounts({ force = false } = {}) {
             counts.routes = await countCloudTableRows(CLOUD_ROUTES_TABLE, creatorFilter);
             // route_points is scoped through routes via route_id (no direct user linkage here).
             counts.routePoints = await countCloudTableRows(CLOUD_ROUTE_POINTS_TABLE);
+            counts.routeComments = await countCloudTableRows(CLOUD_ROUTE_COMMENTS_TABLE, creatorFilter);
             counts.waypointPhotos = await countCloudTableRows(CLOUD_WAYPOINT_PHOTOS_TABLE, creatorFilter);
+            counts.arrivalAnalyses = await countCloudTableRows(CLOUD_ARRIVAL_ANALYSES_TABLE, projectCreatorFilter);
+            counts.agendaEvents = await countCloudTableRows(CLOUD_AGENDA_EVENTS_TABLE, projectCreatorFilter);
+            counts.voyagePlans = await countCloudTableRows(CLOUD_VOYAGE_PLANS_TABLE, projectCreatorFilter);
+            counts.voyagePlanItems = await countCloudTableRows(CLOUD_VOYAGE_PLAN_ITEMS_TABLE, projectCreatorFilter);
+            counts.crew = await countCloudTableRows(CLOUD_CREW_TABLE, projectCreatorFilter);
+            counts.voyageCrew = await countCloudTableRows(CLOUD_VOYAGE_CREW_TABLE, projectCreatorFilter);
+            counts.documents = await countCloudTableRows(CLOUD_DOCUMENTS_TABLE, projectCreatorFilter);
             counts.maintenanceSchemas = await countCloudTableRows(CLOUD_MAINTENANCE_SCHEMAS_TABLE, creatorFilter);
             counts.maintenancePins = await countCloudTableRows(CLOUD_MAINTENANCE_PINS_TABLE, creatorFilter);
             counts.maintenanceSuppliers = await countCloudTableRows(CLOUD_MAINTENANCE_SUPPLIERS_TABLE, creatorFilter);
@@ -31740,6 +31974,7 @@ async function refreshCloudStatsTableCounts({ force = false } = {}) {
             counts.navLog = await countCloudTableRows(CLOUD_NAV_LOG_TABLE, creatorFilter);
             counts.engineLog = await countCloudTableRows(CLOUD_ENGINE_LOG_TABLE, creatorFilter);
             counts.engineSoundSnapshots = await countCloudTableRows(CLOUD_ENGINE_SOUND_SNAPSHOTS_TABLE, creatorFilter);
+            counts.polarProfiles = await countCloudTableRows(CLOUD_POLAR_PROFILES_TABLE);
 
             cloudTableStatsRemoteCounts = counts;
             cloudTableStatsLastRefreshAtMs = Date.now();
@@ -31772,7 +32007,15 @@ function renderCloudStatsTable() {
             const points = Array.isArray(route?.points) ? route.points.length : 0;
             return acc + points;
         }, 0),
+        routeComments: getRouteExternalComments().length,
         waypointPhotos: waypointPhotoEntries.length,
+        arrivalAnalyses: arrivalAnalysisEntries.length,
+        agendaEvents: agendaEvents.length,
+        voyagePlans: voyagePlans.length,
+        voyagePlanItems: voyagePlans.reduce((acc, plan) => acc + (Array.isArray(plan?.items) ? plan.items.length : 0), 0),
+        crew: crewDirectory.length,
+        voyageCrew: voyagePlans.reduce((acc, plan) => acc + (Array.isArray(plan?.crewMemberIds) ? plan.crewMemberIds.length : 0), 0),
+        documents: documentEntries.length,
         maintenanceSchemas: maintenanceBoards.length,
         maintenancePins: maintenanceBoards.reduce((acc, board) => {
             const pins = Array.isArray(board?.annotations) ? board.annotations.length : 0;
@@ -31782,7 +32025,8 @@ function renderCloudStatsTable() {
         maintenanceExpenses: maintenanceExpenses.length,
         navLog: navLogEntries.length,
         engineLog: engineLogEntries.length,
-        engineSoundSnapshots: engineSoundSnapshots.length
+        engineSoundSnapshots: engineSoundSnapshots.length,
+        polarProfiles: polarProfiles.length
     };
 
     const remoteCounts = cloudTableStatsRemoteCounts || {};
@@ -31791,14 +32035,23 @@ function renderCloudStatsTable() {
         allowedUsers: Number.isFinite(remoteCounts.allowedUsers) ? remoteCounts.allowedUsers : localFallbackCounts.allowedUsers,
         routes: Number.isFinite(remoteCounts.routes) ? remoteCounts.routes : localFallbackCounts.routes,
         routePoints: Number.isFinite(remoteCounts.routePoints) ? remoteCounts.routePoints : localFallbackCounts.routePoints,
+        routeComments: Number.isFinite(remoteCounts.routeComments) ? remoteCounts.routeComments : localFallbackCounts.routeComments,
         waypointPhotos: Number.isFinite(remoteCounts.waypointPhotos) ? remoteCounts.waypointPhotos : localFallbackCounts.waypointPhotos,
+        arrivalAnalyses: Number.isFinite(remoteCounts.arrivalAnalyses) ? remoteCounts.arrivalAnalyses : localFallbackCounts.arrivalAnalyses,
+        agendaEvents: Number.isFinite(remoteCounts.agendaEvents) ? remoteCounts.agendaEvents : localFallbackCounts.agendaEvents,
+        voyagePlans: Number.isFinite(remoteCounts.voyagePlans) ? remoteCounts.voyagePlans : localFallbackCounts.voyagePlans,
+        voyagePlanItems: Number.isFinite(remoteCounts.voyagePlanItems) ? remoteCounts.voyagePlanItems : localFallbackCounts.voyagePlanItems,
+        crew: Number.isFinite(remoteCounts.crew) ? remoteCounts.crew : localFallbackCounts.crew,
+        voyageCrew: Number.isFinite(remoteCounts.voyageCrew) ? remoteCounts.voyageCrew : localFallbackCounts.voyageCrew,
+        documents: Number.isFinite(remoteCounts.documents) ? remoteCounts.documents : localFallbackCounts.documents,
         maintenanceSchemas: Number.isFinite(remoteCounts.maintenanceSchemas) ? remoteCounts.maintenanceSchemas : localFallbackCounts.maintenanceSchemas,
         maintenancePins: Number.isFinite(remoteCounts.maintenancePins) ? remoteCounts.maintenancePins : localFallbackCounts.maintenancePins,
         maintenanceSuppliers: Number.isFinite(remoteCounts.maintenanceSuppliers) ? remoteCounts.maintenanceSuppliers : localFallbackCounts.maintenanceSuppliers,
         maintenanceExpenses: Number.isFinite(remoteCounts.maintenanceExpenses) ? remoteCounts.maintenanceExpenses : localFallbackCounts.maintenanceExpenses,
         navLog: Number.isFinite(remoteCounts.navLog) ? remoteCounts.navLog : localFallbackCounts.navLog,
         engineLog: Number.isFinite(remoteCounts.engineLog) ? remoteCounts.engineLog : localFallbackCounts.engineLog,
-        engineSoundSnapshots: Number.isFinite(remoteCounts.engineSoundSnapshots) ? remoteCounts.engineSoundSnapshots : localFallbackCounts.engineSoundSnapshots
+        engineSoundSnapshots: Number.isFinite(remoteCounts.engineSoundSnapshots) ? remoteCounts.engineSoundSnapshots : localFallbackCounts.engineSoundSnapshots,
+        polarProfiles: Number.isFinite(remoteCounts.polarProfiles) ? remoteCounts.polarProfiles : localFallbackCounts.polarProfiles
     };
 
     const totalCount = Object.values(resolvedCounts).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
@@ -31817,7 +32070,15 @@ function renderCloudStatsTable() {
     setText('cloudStatsAllowedUsersValue', resolvedCounts.allowedUsers);
     setText('cloudStatsRoutesValue', resolvedCounts.routes);
     setText('cloudStatsRoutePointsValue', resolvedCounts.routePoints);
+    setText('cloudStatsRouteCommentsValue', resolvedCounts.routeComments);
     setText('cloudStatsPhotosValue', resolvedCounts.waypointPhotos);
+    setText('cloudStatsArrivalAnalysesValue', resolvedCounts.arrivalAnalyses);
+    setText('cloudStatsAgendaEventsValue', resolvedCounts.agendaEvents);
+    setText('cloudStatsVoyagePlansValue', resolvedCounts.voyagePlans);
+    setText('cloudStatsVoyagePlanItemsValue', resolvedCounts.voyagePlanItems);
+    setText('cloudStatsCrewValue', resolvedCounts.crew);
+    setText('cloudStatsVoyageCrewValue', resolvedCounts.voyageCrew);
+    setText('cloudStatsDocumentsValue', resolvedCounts.documents);
     setText('cloudStatsMaintenanceSchemasValue', resolvedCounts.maintenanceSchemas);
     setText('cloudStatsMaintenancePinsValue', resolvedCounts.maintenancePins);
     setText('cloudStatsSuppliersValue', resolvedCounts.maintenanceSuppliers);
@@ -31825,6 +32086,7 @@ function renderCloudStatsTable() {
     setText('cloudStatsNavValue', resolvedCounts.navLog);
     setText('cloudStatsEngineValue', resolvedCounts.engineLog);
     setText('cloudStatsEngineSoundValue', resolvedCounts.engineSoundSnapshots);
+    setText('cloudStatsPolarsValue', resolvedCounts.polarProfiles);
     setText('cloudStatsTotalValue', totalCount);
     setText('cloudStatsStorageValue', formatStorageSize(storageBytes));
     setText('cloudStatsQuotaValue', `${storageQuotaPercent.toFixed(2)} %`);
@@ -33621,10 +33883,19 @@ async function pullRoutesFromCloud(options = {}) {
 
     const localRoutesBeforePull = [...getSavedRoutes()];
     const localRouteCommentsBeforePull = [...getRouteExternalComments()];
+    const localWaypointPhotosBeforePull = waypointPhotoEntries
+        .map(normalizeWaypointPhotoEntry)
+        .filter(Boolean);
     const localArrivalAnalysesBeforePull = [...arrivalAnalysisEntries];
     const localAgendaEventsBeforePull = agendaEvents.map((entry, index) => sanitizeAgendaEvent(entry, index));
     const localCrewDirectoryBeforePull = crewDirectory.map((entry, index) => sanitizeCrewMember(entry, index));
     const localVoyagePlansBeforePull = voyagePlans.map((plan, index) => sanitizeVoyagePlan(plan, index));
+    const localMaintenanceBoardsBeforePull = maintenanceBoards.map((board, index) => sanitizeMaintenanceBoard(board, index));
+    const localMaintenanceExpensesBeforePull = maintenanceExpenses.map((entry, index) => sanitizeMaintenanceExpense(entry, index));
+    const localMaintenanceSuppliersBeforePull = maintenanceSuppliers.map((entry, index) => sanitizeMaintenanceSupplier(entry, index));
+    const localNavEntriesBeforePull = sanitizeNavLogEntriesList(navLogEntries);
+    const localEngineEntriesBeforePull = sanitizeEngineLogEntriesList(engineLogEntries);
+    const localEngineSoundSnapshotsBeforePull = sanitizeEngineSoundSnapshotsList(engineSoundSnapshots);
     let shouldPromoteLocalAgendaEventsToCloud = false;
     let shouldPromoteLocalVoyagePlansToCloud = false;
     const cloudRoutesV2 = await pullRoutesFromCloudV2();
@@ -33647,6 +33918,24 @@ async function pullRoutesFromCloud(options = {}) {
         ), true);
         return localRoutesBeforePull;
     }
+
+    const preservedLocalCollections = [];
+    const preserveLocalCollectionWhenCloudEmpty = (cloudList, localList, label) => {
+        if (!Array.isArray(cloudList)) return cloudList;
+        if (cloudList.length > 0 || !Array.isArray(localList) || localList.length === 0) {
+            return cloudList;
+        }
+        preservedLocalCollections.push(label);
+        return localList;
+    };
+
+    const effectiveWaypointPhotos = preserveLocalCollectionWhenCloudEmpty(cloudWaypointPhotosV2, localWaypointPhotosBeforePull, 'waypointPhotos');
+    const effectiveMaintenanceBoards = preserveLocalCollectionWhenCloudEmpty(cloudMaintenanceBoardsV2, localMaintenanceBoardsBeforePull, 'maintenanceBoards');
+    const effectiveMaintenanceExpenses = preserveLocalCollectionWhenCloudEmpty(cloudMaintenanceExpensesV2, localMaintenanceExpensesBeforePull, 'maintenanceExpenses');
+    const effectiveMaintenanceSuppliers = preserveLocalCollectionWhenCloudEmpty(cloudMaintenanceSuppliersV2, localMaintenanceSuppliersBeforePull, 'maintenanceSuppliers');
+    const effectiveNavEntries = preserveLocalCollectionWhenCloudEmpty(cloudNavEntriesFromTable, localNavEntriesBeforePull, 'navLog');
+    const effectiveEngineEntries = preserveLocalCollectionWhenCloudEmpty(cloudEngineEntriesFromTable, localEngineEntriesBeforePull, 'engineLog');
+    const effectiveEngineSoundSnapshots = preserveLocalCollectionWhenCloudEmpty(cloudEngineSoundSnapshotsFromTable, localEngineSoundSnapshotsBeforePull, 'engineSound');
 
     const mergeRoutesPreservingDirtyLocal = (localList, cloudList) => {
         const routeKey = (route) => {
@@ -33804,8 +34093,8 @@ async function pullRoutesFromCloud(options = {}) {
         setRouteExternalComments(resolveRouteCommentsToApply(cloudRouteCommentsV2, merged), { persistLocal: true });
         updateCloudDataSourceStatus('local (non synchronisé)', merged.length, waypointPhotoEntries.length);
 
-        if (includeWaypointPhotos && Array.isArray(cloudWaypointPhotosV2)) {
-            setWaypointPhotoEntries(cloudWaypointPhotosV2, { persistLocal: true, refreshUi: true });
+        if (includeWaypointPhotos && Array.isArray(effectiveWaypointPhotos)) {
+            setWaypointPhotoEntries(effectiveWaypointPhotos, { persistLocal: true, refreshUi: true });
         }
         if (includeArrivalAnalyses && Array.isArray(cloudArrivalAnalysesV2)) {
             const mergedArrivalAnalyses = arrivalAnalysesCloudDirty
@@ -33835,25 +34124,25 @@ async function pullRoutesFromCloud(options = {}) {
             renderVoyageAgendaPanel();
         }
         if (allowMaintenanceOverwrite) {
-            setMaintenanceBoards(cloudMaintenanceBoardsV2, { persistLocal: true, refreshUi: true, syncCloud: false });
-            setMaintenanceExpenses(cloudMaintenanceExpensesV2, { refreshUi: true });
+            setMaintenanceBoards(effectiveMaintenanceBoards, { persistLocal: true, refreshUi: true, syncCloud: false });
+            setMaintenanceExpenses(effectiveMaintenanceExpenses, { refreshUi: true });
             const preserveSupplierEditor = isMaintenanceSupplierEditorFocused();
-            setMaintenanceSuppliers(cloudMaintenanceSuppliersV2, { refreshUi: !preserveSupplierEditor });
+            setMaintenanceSuppliers(effectiveMaintenanceSuppliers, { refreshUi: !preserveSupplierEditor });
         }
 
-        if (Array.isArray(cloudNavEntriesFromTable)) {
-            navLogEntries = cloudNavEntriesFromTable;
+        if (Array.isArray(effectiveNavEntries)) {
+            navLogEntries = effectiveNavEntries;
             saveArrayToStorage(NAV_LOG_STORAGE_KEY, navLogEntries);
             renderNavLogList();
         }
 
-        if (Array.isArray(cloudEngineEntriesFromTable)) {
-            engineLogEntries = cloudEngineEntriesFromTable;
+        if (Array.isArray(effectiveEngineEntries)) {
+            engineLogEntries = effectiveEngineEntries;
             renderEngineLogList();
         }
 
-        if (Array.isArray(cloudEngineSoundSnapshotsFromTable)) {
-            engineSoundSnapshots = cloudEngineSoundSnapshotsFromTable;
+        if (Array.isArray(effectiveEngineSoundSnapshots)) {
+            engineSoundSnapshots = effectiveEngineSoundSnapshots;
             saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
         }
 
@@ -33864,8 +34153,8 @@ async function pullRoutesFromCloud(options = {}) {
     setSavedRoutes(effectiveRoutes);
     setRouteExternalComments(resolveRouteCommentsToApply(cloudRouteCommentsV2, effectiveRoutes), { persistLocal: true });
 
-    if (includeWaypointPhotos && Array.isArray(cloudWaypointPhotosV2)) {
-        setWaypointPhotoEntries(cloudWaypointPhotosV2, { persistLocal: true, refreshUi: true });
+    if (includeWaypointPhotos && Array.isArray(effectiveWaypointPhotos)) {
+        setWaypointPhotoEntries(effectiveWaypointPhotos, { persistLocal: true, refreshUi: true });
     }
     if (includeArrivalAnalyses && Array.isArray(cloudArrivalAnalysesV2)) {
         const arrivalEntriesToApply = arrivalAnalysesCloudDirty
@@ -33895,29 +34184,32 @@ async function pullRoutesFromCloud(options = {}) {
         renderVoyageAgendaPanel();
     }
     if (allowMaintenanceOverwrite) {
-        setMaintenanceBoards(cloudMaintenanceBoardsV2, { persistLocal: true, refreshUi: true, syncCloud: false });
-        setMaintenanceExpenses(cloudMaintenanceExpensesV2, { refreshUi: true });
+        setMaintenanceBoards(effectiveMaintenanceBoards, { persistLocal: true, refreshUi: true, syncCloud: false });
+        setMaintenanceExpenses(effectiveMaintenanceExpenses, { refreshUi: true });
         const preserveSupplierEditor = isMaintenanceSupplierEditorFocused();
-        setMaintenanceSuppliers(cloudMaintenanceSuppliersV2, { refreshUi: !preserveSupplierEditor });
+        setMaintenanceSuppliers(effectiveMaintenanceSuppliers, { refreshUi: !preserveSupplierEditor });
     }
 
-    if (Array.isArray(cloudNavEntriesFromTable)) {
-        navLogEntries = cloudNavEntriesFromTable;
+    if (Array.isArray(effectiveNavEntries)) {
+        navLogEntries = effectiveNavEntries;
         saveArrayToStorage(NAV_LOG_STORAGE_KEY, navLogEntries);
         renderNavLogList();
     }
 
-    if (Array.isArray(cloudEngineEntriesFromTable)) {
-        engineLogEntries = cloudEngineEntriesFromTable;
+    if (Array.isArray(effectiveEngineEntries)) {
+        engineLogEntries = effectiveEngineEntries;
         renderEngineLogList();
     }
 
-    if (Array.isArray(cloudEngineSoundSnapshotsFromTable)) {
-        engineSoundSnapshots = cloudEngineSoundSnapshotsFromTable;
+    if (Array.isArray(effectiveEngineSoundSnapshots)) {
+        engineSoundSnapshots = effectiveEngineSoundSnapshots;
         saveArrayToStorage(ENGINE_SOUND_SNAPSHOTS_STORAGE_KEY, engineSoundSnapshots);
     }
 
     applySyncedPolarProfiles(cloudPolarProfilesFromCloud);
+    if (preservedLocalCollections.length > 0) {
+        console.warn('[CEIBO] Preserved local collections after empty cloud pull:', preservedLocalCollections.join(', '));
+    }
     updateCloudDataSourceStatus('cloud (routes v2)', effectiveRoutes.length, waypointPhotoEntries.length);
 
     return effectiveRoutes;
@@ -34158,7 +34450,9 @@ async function connectCloud(config, { silent = false } = {}) {
                 includeWaypointPhotos: true
             });
             refreshSavedList();
+            await importBundledDufourPolarProfilesIfNeeded();
             setCloudStatus(t(`Cloud connecté · ${routes.length} route(s) partagée(s)`, `Nube conectada · ${routes.length} ruta(s) compartida(s)`));
+            refreshCloudSyncBadgeFromState();
             if (activeCloudSubtab === 'stats') {
                 void refreshCloudStatsTableCounts({ force: true });
             }
