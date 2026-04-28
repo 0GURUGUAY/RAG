@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEIBO · Carte du ciel</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg-1: #06101d;
+            --bg-2: #0a1b31;
+            --card: rgba(9, 19, 35, 0.82);
+            --border: rgba(144, 213, 255, 0.2);
+            --text: #eef8ff;
+            --muted: rgba(210, 229, 245, 0.76);
+            --accent: #8fe7ff;
+            --accent-2: #ffe08a;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            background:
+                radial-gradient(circle at top, rgba(48, 97, 168, 0.28), transparent 38%),
+                linear-gradient(180deg, var(--bg-2), var(--bg-1));
+            color: var(--text);
+            font-family: "Avenir Next", Montserrat, "Segoe UI", sans-serif;
+        }
+
+        body {
+            padding: 14px;
+        }
+
+        .sky-shell {
+            display: grid;
+            gap: 12px;
+            min-height: calc(100vh - 28px);
+            grid-template-rows: auto 1fr auto;
+        }
+
+        .sky-meta {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: linear-gradient(180deg, rgba(8, 20, 37, 0.94), rgba(8, 17, 30, 0.78));
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+        }
+
+        .sky-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: linear-gradient(180deg, rgba(8, 20, 37, 0.9), rgba(8, 17, 30, 0.72));
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+        }
+
+        .sky-toolbar__label {
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .sky-toolbar__btn {
+            min-width: 38px;
+            height: 34px;
+            border: 1px solid rgba(143, 231, 255, 0.22);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .sky-toolbar__btn:hover {
+            background: rgba(143, 231, 255, 0.14);
+        }
+
+        .sky-toolbar__range {
+            width: min(240px, 52vw);
+            accent-color: var(--accent);
+        }
+
+        .sky-toolbar__value {
+            min-width: 88px;
+            color: #ffefbd;
+            font-weight: 700;
+        }
+
+        .sky-meta__item strong {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--accent);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .sky-meta__item span {
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .sky-stage {
+            position: relative;
+            overflow: hidden;
+            border-radius: 18px;
+            border: 1px solid rgba(143, 231, 255, 0.24);
+            background: rgba(3, 8, 18, 0.92);
+            box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
+            min-height: 420px;
+        }
+
+        .sky-stage__viewport {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+        }
+
+        .sky-stage__boat-axis {
+            position: absolute;
+            left: 50%;
+            top: 18px;
+            bottom: 28px;
+            width: 0;
+            pointer-events: none;
+            transform: translateX(-50%);
+            z-index: 4;
+        }
+
+        .sky-stage__boat-axis::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 44px;
+            width: 2px;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, rgba(255, 224, 138, 0), rgba(255, 224, 138, 0.95) 22%, rgba(143, 231, 255, 0.88) 100%);
+            box-shadow: 0 0 16px rgba(143, 231, 255, 0.35);
+            opacity: 0.92;
+        }
+
+        .sky-stage__boat-axis::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 14px;
+            width: 14px;
+            height: 14px;
+            transform: translateX(-50%) rotate(45deg);
+            border-top: 2px solid rgba(255, 224, 138, 0.96);
+            border-right: 2px solid rgba(255, 224, 138, 0.96);
+            filter: drop-shadow(0 0 8px rgba(255, 224, 138, 0.36));
+        }
+
+        .sky-stage__boat-label {
+            position: absolute;
+            left: 50%;
+            top: 18px;
+            transform: translateX(-50%);
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: rgba(5, 16, 30, 0.76);
+            border: 1px solid rgba(255, 224, 138, 0.26);
+            color: #ffefbd;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .sky-stage__boat-marker {
+            position: absolute;
+            left: 50%;
+            bottom: 18px;
+            width: 78px;
+            height: 94px;
+            transform: translateX(-50%);
+            z-index: 5;
+            pointer-events: none;
+            filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.28));
+        }
+
+        .sky-stage__boat-hull {
+            position: absolute;
+            left: 50%;
+            bottom: 0;
+            width: 34px;
+            height: 72px;
+            transform: translateX(-50%);
+            border-radius: 18px 18px 8px 8px;
+            background: linear-gradient(180deg, rgba(207, 234, 255, 0.98), rgba(109, 167, 212, 0.9));
+            clip-path: polygon(50% 0%, 82% 18%, 92% 58%, 70% 100%, 30% 100%, 8% 58%, 18% 18%);
+            border: 1px solid rgba(255, 255, 255, 0.24);
+        }
+
+        .sky-stage__boat-cockpit {
+            position: absolute;
+            left: 50%;
+            bottom: 18px;
+            width: 12px;
+            height: 24px;
+            transform: translateX(-50%);
+            border-radius: 8px;
+            background: rgba(6, 16, 28, 0.84);
+            border: 1px solid rgba(143, 231, 255, 0.28);
+        }
+
+        .sky-stage__boat-wake {
+            position: absolute;
+            left: 50%;
+            bottom: -2px;
+            width: 62px;
+            height: 30px;
+            transform: translateX(-50%);
+            background: radial-gradient(ellipse at center, rgba(143, 231, 255, 0.42), rgba(143, 231, 255, 0) 72%);
+            opacity: 0.68;
+        }
+
+        .sky-stage__beam-label {
+            position: absolute;
+            left: 50%;
+            bottom: 112px;
+            transform: translateX(-50%);
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(5, 16, 30, 0.72);
+            border: 1px solid rgba(143, 231, 255, 0.22);
+            color: rgba(222, 241, 255, 0.94);
+            font-size: 11px;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        #starmap {
+            width: 100%;
+            height: 100%;
+            min-height: 420px;
+            transform-origin: 50% 50%;
+            transition: transform 180ms ease-out;
+        }
+
+        .sky-status {
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: var(--card);
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .sky-status strong {
+            color: var(--accent-2);
+        }
+
+        @media (max-width: 720px) {
+            body {
+                padding: 10px;
+            }
+
+            .sky-stage,
+            #starmap {
+                min-height: 360px;
+            }
+        }
+    </style>
+    <script src="https://slowe.github.io/VirtualSky/stuquery.min.js"></script>
+    <script src="https://slowe.github.io/VirtualSky/virtualsky.min.js"></script>
+</head>
+<body>
+    <div class="sky-shell">
+        <section class="sky-toolbar">
+            <span class="sky-toolbar__label">Zoom voûte</span>
+            <button class="sky-toolbar__btn" id="skyZoomOutBtn" type="button" aria-label="Zoom arrière">-</button>
+            <input class="sky-toolbar__range" id="skyZoomRange" type="range" min="25" max="140" step="5" value="90" aria-label="Zoom voûte céleste">
+            <button class="sky-toolbar__btn" id="skyZoomInBtn" type="button" aria-label="Zoom avant">+</button>
+            <span class="sky-toolbar__value" id="skyZoomValue">90°</span>
+        </section>
+
+        <section class="sky-meta">
+            <div class="sky-meta__item">
+                <strong>Position</strong>
+                <span id="skyPositionValue">-</span>
+            </div>
+            <div class="sky-meta__item">
+                <strong>Source</strong>
+                <span id="skySourceValue">-</span>
+            </div>
+            <div class="sky-meta__item">
+                <strong>Heure du ciel</strong>
+                <span id="skyTimeValue">-</span>
+            </div>
+            <div class="sky-meta__item">
+                <strong>Orientation</strong>
+                <span id="skyHeadingValue">Vue sud</span>
+            </div>
+        </section>
+
+        <section class="sky-stage">
+            <div class="sky-stage__viewport">
+                <div id="starmap"></div>
+            </div>
+            <div class="sky-stage__boat-axis" aria-hidden="true"></div>
+            <div class="sky-stage__boat-label" id="skyBoatLabel">Axe de l'étrave</div>
+            <div class="sky-stage__beam-label" id="skyBeamLabel">Devant le bateau</div>
+            <div class="sky-stage__boat-marker" aria-hidden="true">
+                <div class="sky-stage__boat-wake"></div>
+                <div class="sky-stage__boat-hull"></div>
+                <div class="sky-stage__boat-cockpit"></div>
+            </div>
+        </section>
+
+        <section class="sky-status" id="skyStatus">
+            <strong>Conseil :</strong> zoome et déplace la voûte céleste pour repérer planètes, Voie lactée, constellations et orientation du ciel depuis la position du bateau.
+        </section>
+    </div>
+
+    <script>
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            const lat = Number(params.get('lat'));
+            const lng = Number(params.get('lng'));
+            const heading = Number(params.get('heading'));
+            const source = String(params.get('source') || 'Carte').trim() || 'Carte';
+            const timeParam = String(params.get('time') || '').trim();
+            const skyTime = timeParam ? new Date(timeParam) : new Date();
+
+            const positionValue = document.getElementById('skyPositionValue');
+            const sourceValue = document.getElementById('skySourceValue');
+            const timeValue = document.getElementById('skyTimeValue');
+            const headingValue = document.getElementById('skyHeadingValue');
+            const status = document.getElementById('skyStatus');
+            const boatLabel = document.getElementById('skyBoatLabel');
+            const beamLabel = document.getElementById('skyBeamLabel');
+            const zoomRange = document.getElementById('skyZoomRange');
+            const zoomValue = document.getElementById('skyZoomValue');
+            const zoomInBtn = document.getElementById('skyZoomInBtn');
+            const zoomOutBtn = document.getElementById('skyZoomOutBtn');
+            const zoomMin = 25;
+            const zoomMax = 140;
+            let currentFov = 90;
+            let skyInstance = null;
+
+            function setStatus(message) {
+                if (status) status.innerHTML = message;
+            }
+
+            function clampFov(value) {
+                const numeric = Number(value);
+                if (!Number.isFinite(numeric)) return currentFov;
+                return Math.max(zoomMin, Math.min(zoomMax, numeric));
+            }
+
+            function syncZoomUi() {
+                if (zoomRange) zoomRange.value = String(currentFov);
+                if (zoomValue) zoomValue.textContent = `${Math.round(currentFov)}°`;
+            }
+
+            function getZoomScaleForFov(fov) {
+                const safeFov = clampFov(fov);
+                return Math.max(0.9, Math.min(2.8, 90 / safeFov));
+            }
+
+            function applyZoomScale() {
+                const stage = document.getElementById('starmap');
+                if (!stage) return;
+                stage.style.transform = `scale(${getZoomScaleForFov(currentFov).toFixed(3)})`;
+            }
+
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                setStatus('<strong>Position indisponible :</strong> la carte du ciel a besoin d\'une latitude et d\'une longitude valides.');
+                return;
+            }
+
+            positionValue.textContent = lat.toFixed(4) + ', ' + lng.toFixed(4);
+            sourceValue.textContent = source;
+            timeValue.textContent = Number.isNaN(skyTime.getTime())
+                ? 'Maintenant'
+                : skyTime.toLocaleString();
+            headingValue.textContent = Number.isFinite(heading)
+                ? 'Cap ' + Math.round(((heading % 360) + 360) % 360) + '°'
+                : 'Vue sud';
+            if (boatLabel) {
+                boatLabel.textContent = Number.isFinite(heading)
+                    ? 'Axe de l\'étrave'
+                    : 'Axe simulé';
+            }
+            if (beamLabel) {
+                beamLabel.textContent = Number.isFinite(heading)
+                    ? 'Devant le bateau'
+                    : 'Avant simulé';
+            }
+
+            function initSkyMap() {
+                if (!window.S || typeof window.S.virtualsky !== 'function') {
+                    setStatus('<strong>Chargement impossible :</strong> le moteur de carte du ciel n\'a pas pu être initialisé.');
+                    return;
+                }
+
+                const stage = document.getElementById('starmap');
+                if (!stage) return;
+                stage.innerHTML = '';
+
+                skyInstance = window.S.virtualsky({
+                    id: 'starmap',
+                    projection: 'stereo',
+                    keyboard: true,
+                    mouse: true,
+                    ground: true,
+                    constellations: true,
+                    constellationlabels: true,
+                    showplanetlabels: true,
+                    showgalaxy: true,
+                    meteorshowers: true,
+                    meridian: true,
+                    ecliptic: true,
+                    cardinalpoints: true,
+                    gridlines_az: true,
+                    showposition: true,
+                    showdate: true,
+                    live: true,
+                    magnitude: 5.8,
+                    scalestars: 1.1,
+                    fontsize: '14px',
+                    fontfamily: 'Avenir Next, Montserrat, Segoe UI, sans-serif',
+                    background: 'rgba(0,0,0,0)',
+                    gradient: true,
+                    fov: 90,
+                    az: Number.isFinite(heading) ? (((heading % 360) + 360) % 360) : 180,
+                    latitude: lat,
+                    longitude: lng,
+                    clock: Number.isNaN(skyTime.getTime()) ? new Date() : skyTime
+                });
+
+                syncZoomUi();
+                applyZoomScale();
+                setStatus('<strong>Repère bateau :</strong> la ligne lumineuse et le voilier en bas matérialisent l\'axe de l\'étrave. Ce qui apparaît au centre de cette ligne se trouve droit devant le bateau. Utilise le zoom pour serrer la zone observée.');
+            }
+
+            function updateZoom(nextFov) {
+                const clamped = clampFov(nextFov);
+                if (clamped === currentFov) {
+                    syncZoomUi();
+                    applyZoomScale();
+                    return;
+                }
+                currentFov = clamped;
+                syncZoomUi();
+                applyZoomScale();
+            }
+
+            if (zoomRange) {
+                zoomRange.addEventListener('input', event => {
+                    updateZoom(event.target.value);
+                });
+            }
+
+            if (zoomInBtn) {
+                zoomInBtn.addEventListener('click', () => updateZoom(currentFov - 10));
+            }
+
+            if (zoomOutBtn) {
+                zoomOutBtn.addEventListener('click', () => updateZoom(currentFov + 10));
+            }
+
+            syncZoomUi();
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initSkyMap, { once: true });
+            } else {
+                initSkyMap();
+            }
+        })();
+    </script>
+</body>
+</html>

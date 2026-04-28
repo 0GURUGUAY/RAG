@@ -106,14 +106,19 @@
                     <option value="7">7 jours</option>
                 </select>
             </div>
-            <button id="openWeatherFromRoutingBtn" style="margin-top:8px;">Ouvrir météo routage</button>
+            <div class="button-row" style="margin-top:8px;">
+                <button id="openWeatherFromRoutingBtn" style="flex:1;">Ouvrir météo routage</button>
+                <button id="openSkyMapBtn" style="flex:1;">Carte du ciel</button>
+            </div>
             <div id="routingWeatherHint" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo est accessible depuis Routage.</div>
+            <div id="routingSkyHint" style="margin-top:4px; font-size:12px; opacity:0.9;">Utilise le GPS actuel si disponible, sinon le centre de la carte.</div>
             <div class="button-row" style="margin-top:8px;">
                 <button id="suggestAiRoutesBtn" style="flex:1;">Calculer matrice départ (5 j)</button>
                 <button id="refreshAiRoutesBtn" style="flex:1;" disabled>Rafraîchir</button>
             </div>
         </div>
         <div id="windSpeedLegend"></div>
+        <div id="routingDecisionSummary"></div>
         <div id="selectedWpInfo" style="margin-top:6px; font-size:12px; opacity:0.9;">WP sélectionné: aucun · clic sur WP pour sélectionner · clic droit pour supprimer</div>
 
         <div id="waypointWeatherInfo"></div>
@@ -1253,6 +1258,8 @@
     </div>
 </div>
 
+<div id="sidebarResizeHandle" aria-hidden="true"></div>
+
 <button id="sidebarToggleBtn" type="button" aria-pressed="false" title="Masquer panneau" aria-label="Masquer panneau">◀</button>
 
 <div id="navLogDisplayToolbar" class="navlog-display-toolbar" aria-label="Affichage journal navigation">
@@ -1337,6 +1344,21 @@
                 <input id="voyageCrewEmailInput" type="email" class="route-search-input route-voyage-input" placeholder="Ex: luc@example.com">
                 <label for="voyageCrewPhoneInput" class="route-voyage-label">Téléphone:</label>
                 <input id="voyageCrewPhoneInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: +33 6 00 00 00 00">
+                <label for="voyageCrewDietTypeInput" class="route-voyage-label">Profil alimentaire:</label>
+                <select id="voyageCrewDietTypeInput" class="cloud-input">
+                    <option value="omnivore">Omnivore</option>
+                    <option value="pescatarian">Pescetarien</option>
+                    <option value="vegetarian">Végétarien</option>
+                    <option value="vegan">Vegan</option>
+                    <option value="glutenfree">Sans gluten</option>
+                    <option value="custom">Autre</option>
+                </select>
+                <label for="voyageCrewAllergiesInput" class="route-voyage-label">Allergies / intolérances:</label>
+                <input id="voyageCrewAllergiesInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: arachide, lactose">
+                <label for="voyageCrewDislikesInput" class="route-voyage-label">Aliments à éviter:</label>
+                <input id="voyageCrewDislikesInput" type="text" class="route-search-input route-voyage-input" placeholder="Ex: coriandre, sardines">
+                <label for="voyageCrewBreakfastInput" class="route-voyage-label">Petit-déjeuner / habitudes:</label>
+                <textarea id="voyageCrewBreakfastInput" rows="2" class="polar-json-input route-voyage-notes" placeholder="Ex: café noir, yaourt, fruit"></textarea>
                 <label for="voyageCrewCommentInput" class="route-voyage-label">Commentaire:</label>
                 <textarea id="voyageCrewCommentInput" rows="3" class="polar-json-input route-voyage-notes" placeholder="Ex: veille de nuit, régime, préférences..."></textarea>
                 <div class="button-row">
@@ -1346,6 +1368,10 @@
                 <div id="voyagePlanCrewList" class="voyage-crew-list"></div>
                 <div id="voyageCrewStatus" class="route-voyage-summary">Sélectionne ou crée un équipier puis affecte-le au voyage.</div>
             </div>
+        </div>
+        <div class="voyage-agenda-footer">
+            <div id="voyageAgendaProvisioningStatus" class="voyage-agenda-footer__status">Liste mensuelle calculée sur l'agenda visible.</div>
+            <button id="voyageAgendaProvisioningPdfBtn" type="button">Générer PDF courses mensuelles</button>
         </div>
     </section>
 
@@ -1825,7 +1851,7 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=20260425-anchorage-waypoint-fix2"></script>
+<script type="module" src="app.js?v=20260426-42"></script>
 
 </body>
 </html>

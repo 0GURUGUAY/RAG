@@ -9,6 +9,7 @@ body {
     height: 100%;
     font-family: Arial, sans-serif;
     overflow: hidden;
+    --sidebar-width: 620px;
 }
 
 body.night-mode {
@@ -20,7 +21,7 @@ body.night-mode #map {
 }
 
 #sidebar {
-    width: 620px;
+    width: var(--sidebar-width);
     min-width: 320px;
     max-width: 68vw;
     background: #111;
@@ -94,11 +95,49 @@ body.navlog-layout-controls-active #sidebarToggleBtn {
 }
 
 body:not(.sidebar-collapsed) #sidebarToggleBtn {
-    left: min(632px, calc(68vw + 12px));
+    left: calc(var(--sidebar-width) + 12px);
 }
 
 body.sidebar-collapsed #sidebar {
     display: none;
+}
+
+#sidebarResizeHandle {
+    position: fixed;
+    top: 0;
+    left: calc(var(--sidebar-width) - 4px);
+    width: 10px;
+    height: 100vh;
+    z-index: 35;
+    cursor: ew-resize;
+    background: transparent;
+}
+
+#sidebarResizeHandle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 72px;
+    border-radius: 999px;
+    background: rgba(143, 231, 255, 0.28);
+    box-shadow: 0 0 0 1px rgba(8, 20, 32, 0.32);
+}
+
+body.sidebar-collapsed #sidebarResizeHandle {
+    display: none;
+}
+
+body.is-resizing-sidebar {
+    cursor: ew-resize;
+    user-select: none;
+}
+
+body.is-resizing-sidebar #sidebarResizeHandle::before,
+#sidebarResizeHandle:hover::before {
+    background: rgba(143, 231, 255, 0.62);
 }
 
 .creator-credit {
@@ -363,6 +402,34 @@ body.sidebar-collapsed #sidebar {
     display: none;
 }
 
+.voyage-agenda-footer {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.voyage-agenda-footer__status {
+    flex: 1 1 280px;
+    color: rgba(233, 247, 255, 0.82);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.voyage-agenda-footer__status.is-error {
+    color: #ffb8b8;
+}
+
+.voyage-agenda-footer__status.is-ok {
+    color: #bff3d2;
+}
+
 .voyage-crew-list {
     margin-top: 12px;
     display: grid;
@@ -438,6 +505,10 @@ body.sidebar-collapsed #sidebar {
         grid-template-areas:
             "plan"
             "crew";
+    }
+
+    .voyage-agenda-footer {
+        align-items: stretch;
     }
 }
 
@@ -590,6 +661,73 @@ body.sidebar-collapsed #sidebar {
     color: #ffd166;
 }
 
+.voyage-detail-tabs-shell {
+    padding: 14px 18px 0;
+    background: linear-gradient(180deg, rgba(241, 247, 252, 0.98), rgba(235, 244, 251, 0.96));
+    border-bottom: 1px solid rgba(51, 122, 179, 0.1);
+}
+
+.voyage-detail-tabs__label {
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #5d7a93;
+}
+
+.voyage-detail-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.voyage-detail-tabs__btn {
+    margin-top: 0;
+    display: grid;
+    gap: 4px;
+    text-align: left;
+    min-width: 0;
+    min-width: 220px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(29, 97, 147, 0.18);
+    background: rgba(255, 255, 255, 0.92);
+    color: #1c496d;
+    box-shadow: 0 8px 18px rgba(17, 54, 84, 0.06);
+}
+
+.voyage-detail-tabs__btn strong {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.voyage-detail-tabs__btn span {
+    display: block;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #55748e;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.voyage-detail-tabs__btn.is-active {
+    background: linear-gradient(135deg, #15456d, #2477a8);
+    border-color: rgba(21, 69, 109, 0.4);
+    color: #f8fbff;
+    box-shadow: 0 12px 24px rgba(16, 53, 82, 0.18);
+}
+
+.voyage-detail-tabs__btn.is-active span {
+    color: #f8fbff;
+}
+
+.voyage-detail-tabs__btn.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 .voyage-agenda-display-toolbar {
     display: flex;
     justify-content: flex-end;
@@ -615,6 +753,382 @@ body.sidebar-collapsed #sidebar {
     border-color: rgba(192, 82, 16, 0.42);
     color: #fffdf8;
     box-shadow: 0 10px 20px rgba(226, 96, 22, 0.24);
+}
+
+.voyage-ops-card {
+    padding: 18px;
+    border-top: 1px solid rgba(42, 108, 154, 0.12);
+    background: linear-gradient(180deg, #f8fbfd 0%, #eef5f8 100%);
+}
+
+.voyage-doc-card {
+    padding: 18px;
+    border-top: 1px solid rgba(42, 108, 154, 0.12);
+    background: linear-gradient(180deg, #f8fbfd 0%, #eef5f8 100%);
+}
+
+.voyage-doc-card__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.voyage-doc-card__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.voyage-doc-card__stats span {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(17, 72, 112, 0.08);
+    color: #214663;
+    font-size: 11px;
+}
+
+.voyage-doc-grid {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+}
+
+.voyage-doc-block {
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(34, 96, 140, 0.12);
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 10px 22px rgba(25, 62, 92, 0.06);
+}
+
+.voyage-doc-block__title {
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 800;
+    color: #173a59;
+}
+
+.voyage-doc-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.voyage-doc-form-grid label {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: #4a6780;
+}
+
+.voyage-doc-form-grid__full {
+    grid-column: 1 / -1;
+}
+
+.voyage-doc-form-grid input,
+.voyage-doc-form-grid textarea {
+    margin-top: 0;
+}
+
+.voyage-doc-inline-note {
+    margin-top: 10px;
+    font-size: 11px;
+    color: rgba(37, 64, 87, 0.72);
+}
+
+.voyage-doc-list {
+    margin-top: 16px;
+    display: grid;
+    gap: 10px;
+}
+
+.voyage-doc-config-panel {
+    margin-top: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(34, 96, 140, 0.12);
+    background: rgba(255, 255, 255, 0.54);
+}
+
+.voyage-doc-config-panel__summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 14px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.voyage-doc-config-panel__summary::-webkit-details-marker {
+    display: none;
+}
+
+.voyage-doc-config-panel__title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #214663;
+}
+
+.voyage-doc-config-panel__meta {
+    font-size: 11px;
+    color: rgba(37, 64, 87, 0.74);
+}
+
+.voyage-doc-config-panel__body {
+    margin: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top: 1px solid rgba(34, 96, 140, 0.08);
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.78);
+}
+
+.voyage-doc-entry {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(34, 96, 140, 0.12);
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 10px 22px rgba(25, 62, 92, 0.06);
+}
+
+.voyage-doc-entry__title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #173a59;
+}
+
+.voyage-doc-entry__meta,
+.voyage-doc-entry__desc,
+.voyage-doc-entry__path {
+    margin-top: 4px;
+    font-size: 11px;
+    color: rgba(37, 64, 87, 0.78);
+    line-height: 1.5;
+}
+
+.voyage-doc-entry__path {
+    word-break: break-all;
+    color: #35607f;
+}
+
+.voyage-ops-card__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.voyage-ops-card__actions,
+.voyage-ops-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.voyage-ops-card__actions button,
+.voyage-ops-inline-actions button,
+.voyage-budget-form button,
+.voyage-provision-row button,
+.voyage-budget-row button {
+    margin-top: 0;
+    padding: 8px 10px;
+    font-size: 11px;
+}
+
+.voyage-ops-card__stats {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.voyage-ops-card__stats span {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(17, 72, 112, 0.08);
+    color: #214663;
+    font-size: 11px;
+}
+
+.voyage-ops-grid {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+}
+
+.voyage-ops-block {
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(34, 96, 140, 0.12);
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 10px 22px rgba(25, 62, 92, 0.06);
+}
+
+.voyage-ops-block__title {
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 800;
+    color: #173a59;
+}
+
+.voyage-ops-empty {
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px dashed rgba(38, 112, 164, 0.24);
+    color: rgba(37, 64, 87, 0.72);
+    font-size: 12px;
+}
+
+.voyage-meal-card {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(249, 251, 252, 0.96), rgba(238, 245, 249, 0.9));
+    border: 1px solid rgba(40, 108, 151, 0.1);
+}
+
+.voyage-meal-card:first-of-type {
+    margin-top: 0;
+}
+
+.voyage-meal-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.voyage-meal-card__badge {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255, 159, 28, 0.14);
+    color: #ad5f00;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.voyage-meal-card label {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: #4a6780;
+}
+
+.voyage-meal-card textarea,
+.voyage-meal-card input,
+.voyage-provision-row input,
+.voyage-provision-row select,
+.voyage-budget-form input,
+.voyage-budget-form select,
+.voyage-budget-row input,
+.voyage-budget-row select {
+    margin-top: 0;
+}
+
+.voyage-meal-card textarea {
+    min-height: 56px;
+    resize: vertical;
+}
+
+.voyage-meal-card__ingredients {
+    font-size: 11px;
+    color: rgba(44, 68, 89, 0.74);
+    line-height: 1.5;
+}
+
+.voyage-provision-row,
+.voyage-budget-row {
+    display: grid;
+    grid-template-columns: auto minmax(120px, 1.4fr) minmax(70px, 0.5fr) minmax(68px, 0.45fr) minmax(110px, 0.9fr) minmax(110px, 0.9fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.voyage-budget-row {
+    grid-template-columns: minmax(115px, 0.9fr) minmax(140px, 1.4fr) minmax(80px, 0.7fr) minmax(120px, 0.9fr) minmax(110px, 0.9fr) auto;
+}
+
+.voyage-budget-form {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr)) auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.voyage-provision-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+}
+
+@media (max-width: 1200px) {
+    .voyage-ops-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .voyage-doc-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .voyage-budget-form {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .voyage-detail-tabs-shell {
+        padding: 12px 14px 0;
+    }
+
+    .voyage-detail-tabs__btn {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .voyage-ops-card__header {
+        flex-direction: column;
+    }
+
+    .voyage-doc-card__header,
+    .voyage-doc-entry {
+        flex-direction: column;
+    }
+
+    .voyage-doc-config-panel__summary {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .voyage-doc-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .routing-decision-summary__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .voyage-provision-row,
+    .voyage-budget-row,
+    .voyage-budget-form {
+        grid-template-columns: 1fr;
+    }
 }
 
 .voyage-agenda-map-card {
@@ -4113,6 +4627,55 @@ button:focus-visible {
     line-height: 1.4;
 }
 
+.weather-astro-card {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(9, 20, 38, 0.92), rgba(13, 28, 48, 0.82));
+    border: 1px solid rgba(143, 231, 255, 0.26);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.weather-astro-card__title {
+    margin-bottom: 8px;
+    color: #d7f0ff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.weather-astro-card__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+}
+
+.weather-astro-card__item {
+    display: grid;
+    gap: 3px;
+    padding: 8px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #edf7ff;
+}
+
+.weather-astro-card__item strong {
+    color: #fff0b3;
+    font-size: 11px;
+}
+
+.weather-astro-card__item--night strong {
+    color: #cabdff;
+}
+
+.weather-astro-card__source {
+    margin-top: 8px;
+    color: rgba(214, 232, 247, 0.72);
+    font-size: 10px;
+}
+
 .flow-favorable {
     color: #5ee27a;
     font-weight: 700;
@@ -6672,16 +7235,228 @@ button.ai-route-matrix-cell.ai-route-matrix-cell--avoid {
     border: none;
 }
 
-.wind-direction-waypoint__arrow {
-    width: 16px;
-    height: 16px;
+.wind-needle {
+    position: relative;
+    display: block;
+    filter: drop-shadow(0 2px 7px rgba(0, 0, 0, 0.45));
+    transform-origin: 50% 50%;
+}
+
+.wind-needle__backdrop {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 50%;
+    height: calc(var(--wind-needle-head-half-height) * 2.6);
+    transform: translateY(-50%);
     border-radius: 999px;
-    background: rgba(17, 17, 17, 0.85);
-    color: #57c7ff;
+    opacity: 0.96;
+    box-shadow: 0 0 0 1px rgba(5, 12, 20, 0.28), 0 3px 8px rgba(5, 12, 20, 0.24);
+}
+
+.wind-needle__backdrop--na {
+    background: rgba(203, 213, 225, 0.94);
+}
+
+.wind-needle__backdrop--0 {
+    background: rgba(96, 165, 250, 0.94);
+}
+
+.wind-needle__backdrop--2 {
+    background: rgba(37, 99, 235, 0.94);
+}
+
+.wind-needle__backdrop--4 {
+    background: rgba(22, 163, 74, 0.95);
+}
+
+.wind-needle__backdrop--5 {
+    background: rgba(234, 179, 8, 0.95);
+}
+
+.wind-needle__backdrop--6 {
+    background: rgba(249, 115, 22, 0.95);
+}
+
+.wind-needle__backdrop--7 {
+    background: rgba(234, 88, 12, 0.95);
+}
+
+.wind-needle__backdrop--8 {
+    background: rgba(220, 38, 38, 0.95);
+}
+
+.wind-needle__backdrop--9 {
+    background: rgba(190, 24, 93, 0.95);
+}
+
+.wind-needle__backdrop--10 {
+    background: rgba(136, 19, 55, 0.96);
+}
+
+.wind-needle__backdrop--12 {
+    background: rgba(91, 33, 182, 0.96);
+}
+
+.wind-needle__shaft {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    width: var(--wind-needle-length);
+    height: var(--wind-needle-thickness);
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(8, 21, 34, 0.52) 0%, var(--wind-needle-color) 36%, rgba(214, 233, 244, 0.82) 100%);
+    box-shadow: 0 0 0 1px rgba(4, 13, 23, 0.7), 0 0 10px color-mix(in srgb, var(--wind-needle-color) 20%, transparent);
+}
+
+.wind-needle__head {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    width: 0;
+    height: 0;
+    transform: translateY(-50%);
+    border-top: var(--wind-needle-head-half-height) solid transparent;
+    border-bottom: var(--wind-needle-head-half-height) solid transparent;
+    border-left: var(--wind-needle-head-length) solid var(--wind-needle-color);
+    filter: drop-shadow(0 0 3px rgba(4, 13, 23, 0.55));
+}
+
+.wind-needle--compact .wind-needle__shaft {
+    left: 3px;
+}
+
+.wind-needle--compact .wind-needle__head {
+    right: 1px;
+}
+
+.routing-wind-marker {
+    background: transparent;
+    border: none;
+}
+
+.routing-wind-marker__core {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: rgba(8, 16, 26, 0.88);
+    border: 2px solid currentColor;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.routing-wind-marker .wind-needle {
+    margin: 0 auto;
+}
+
+.marine-poi-icon-wrapper {
+    background: transparent;
+    border: none;
+}
+
+.marine-poi-marker {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 4px 12px rgba(4, 12, 20, 0.35);
+    color: #f8fbff;
     font-size: 11px;
-    line-height: 16px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    backdrop-filter: blur(3px);
+}
+
+.marine-poi-marker--anchorages {
+    background: radial-gradient(circle at 35% 30%, rgba(168, 233, 255, 0.98), rgba(29, 118, 155, 0.96));
+}
+
+.marine-poi-marker--ports {
+    background: radial-gradient(circle at 35% 30%, rgba(255, 214, 153, 0.98), rgba(180, 99, 24, 0.96));
+}
+
+.marine-poi-marker--services {
+    background: radial-gradient(circle at 35% 30%, rgba(196, 255, 204, 0.98), rgba(40, 142, 84, 0.96));
+}
+
+.marine-poi-popup {
+    min-width: 160px;
+    color: #10223a;
+    line-height: 1.35;
+}
+
+.marine-poi-popup__type {
+    margin-top: 2px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1d5d83;
+}
+
+.marine-poi-popup__meta {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #35556f;
+}
+
+.marine-poi-popup__details {
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(29, 93, 131, 0.16);
+}
+
+.marine-poi-popup__row {
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.marine-poi-popup__label {
+    min-width: 62px;
+    color: #547086;
+    font-weight: 700;
+}
+
+.marine-poi-popup__value {
+    flex: 1;
+    text-align: right;
+    color: #17354c;
+}
+
+.marine-poi-popup__value a {
+    color: #0f4f78;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.marine-poi-popup__value a:hover {
+    text-decoration: underline;
+}
+
+.marine-poi-popup__coords {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #55748c;
+}
+
+.routing-wind-marker__badge {
+    position: absolute;
+    right: -8px;
+    top: -6px;
+    min-width: 18px;
+    padding: 1px 4px;
+    border-radius: 999px;
+    background: #f7d046;
+    color: #10223a;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1.2;
     text-align: center;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .wave-direction-segment {
@@ -6724,15 +7499,200 @@ button.ai-route-matrix-cell.ai-route-matrix-cell--avoid {
     border: 1px solid rgba(255, 255, 255, 0.12);
     font-size: 12px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
-    flex-wrap: nowrap;
-    white-space: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    white-space: normal;
 }
 
 #windSpeedLegend > strong {
     flex: 0 0 auto;
+}
+
+.routing-wind-toolbar {
+    flex: 1 1 100%;
+    display: grid;
+    gap: 8px;
+}
+
+.routing-wind-toolbar__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.routing-wind-toolbar__offset {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(127, 216, 255, 0.14);
+    color: #8fe7ff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.routing-wind-toolbar__slider {
+    display: grid;
+    gap: 6px;
+}
+
+.routing-wind-toolbar__slider input[type="range"] {
+    width: 100%;
+}
+
+.routing-wind-toolbar__ticks {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.routing-wind-toolbar__ticks span.is-active {
+    color: #8fe7ff;
+    font-weight: 800;
+}
+
+.wind-legend-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #f7d046;
+    color: #10223a;
+    font-weight: 800;
+    font-size: 10px;
+}
+
+.beaufort-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(9, 17, 27, 0.18);
+    color: #0d1b2a;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.45;
+    vertical-align: middle;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+}
+
+.beaufort-badge--na {
+    background: #d7dde5;
+    color: #425466;
+}
+
+.beaufort-badge--0 {
+    background: #dbeafe;
+    color: #123b63;
+}
+
+.beaufort-badge--2 {
+    background: #bfdbfe;
+    color: #143d67;
+}
+
+.beaufort-badge--4 {
+    background: #a7f3d0;
+    color: #0f5132;
+}
+
+.beaufort-badge--5 {
+    background: #fde68a;
+    color: #6b4f00;
+}
+
+.beaufort-badge--6 {
+    background: #fdba74;
+    color: #6e2f00;
+}
+
+.beaufort-badge--7 {
+    background: #fb923c;
+    color: #ffffff;
+}
+
+.beaufort-badge--8 {
+    background: #f97316;
+    color: #ffffff;
+}
+
+.beaufort-badge--9 {
+    background: #ef4444;
+    color: #ffffff;
+}
+
+.beaufort-badge--10 {
+    background: #dc2626;
+    color: #ffffff;
+}
+
+.beaufort-badge--12 {
+    background: #7f1d1d;
+    color: #ffffff;
+}
+
+#routingDecisionSummary {
+    margin-top: 10px;
+    display: none;
+}
+
+.routing-decision-summary__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.routing-decision-summary__card {
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.routing-decision-summary__eyebrow {
+    margin-bottom: 4px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(143, 231, 255, 0.78);
+}
+
+.routing-decision-summary__note {
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.76);
+}
+
+.routing-decision-summary__pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.routing-decision-summary__pill--ok {
+    background: rgba(46, 204, 113, 0.18);
+    color: #7ef0a8;
+}
+
+.routing-decision-summary__pill--warn {
+    background: rgba(241, 196, 15, 0.18);
+    color: #ffd964;
+}
+
+.routing-decision-summary__pill--danger {
+    background: rgba(231, 76, 60, 0.18);
+    color: #ff8e83;
 }
 
 #weatherOverlayLegend {

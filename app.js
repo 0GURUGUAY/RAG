@@ -14,6 +14,58 @@ const AGENDA_EVENT_DURATION_OPTIONS_MS = [30, 60, 120].map(minutes => minutes * 
 const VOYAGE_PLAN_STATUS_PLANNED = 'planned';
 const VOYAGE_PLAN_STATUS_COMPLETED = 'completed';
 const VOYAGE_PLAN_STATUS_CANCELLED = 'cancelled';
+const CREW_DIET_TYPES = ['omnivore', 'pescatarian', 'vegetarian', 'vegan', 'glutenfree', 'custom'];
+const VOYAGE_MEAL_DAY_TYPES = ['navigation', 'mouillage'];
+const VOYAGE_PROVISIONING_SCOPES = ['voyage_food', 'monthly_boat'];
+const VOYAGE_PROVISIONING_STAGES = ['predeparture', 'escale', 'stock'];
+const VOYAGE_BUDGET_SCOPES = ['voyage_food', 'monthly_boat'];
+const VOYAGE_BUDGET_CATEGORIES = ['food', 'drinks', 'household', 'water', 'market', 'other'];
+const VOYAGE_MONTHLY_PROVISIONING_DEFAULTS = Object.freeze([
+    { name: 'Papier hygienique', category: 'household', quantity: 12, unit: 'rouleaux', scope: 'monthly_boat', stage: 'predeparture', notes: '' },
+    { name: 'Liquide vaisselle', category: 'cleaning', quantity: 2, unit: 'flacons', scope: 'monthly_boat', stage: 'predeparture', notes: '' },
+    { name: 'Eponges', category: 'cleaning', quantity: 3, unit: 'pieces', scope: 'monthly_boat', stage: 'predeparture', notes: '' },
+    { name: 'Sacs poubelle', category: 'household', quantity: 2, unit: 'paquets', scope: 'monthly_boat', stage: 'predeparture', notes: '' },
+    { name: 'Essuie-tout', category: 'household', quantity: 4, unit: 'rouleaux', scope: 'monthly_boat', stage: 'predeparture', notes: '' },
+    { name: 'Savon mains', category: 'household', quantity: 2, unit: 'flacons', scope: 'monthly_boat', stage: 'predeparture', notes: '' }
+]);
+const AGENDA_MONTHLY_BOAT_SUPPLY_RULES = Object.freeze([
+    { name: 'Eau potable', category: 'water', unit: 'L', scope: 'monthly_boat', stage: 'predeparture', quantityPerPersonDay: 4, notes: 'Boisson et cuisine a bord.' },
+    { name: 'Cafe', category: 'drinks', unit: 'g', scope: 'monthly_boat', stage: 'predeparture', quantityPerPersonDay: 18, notes: 'Base quart et reveil a bord.' },
+    { name: 'Snacks de quart', category: 'food', unit: 'paquets', scope: 'monthly_boat', stage: 'predeparture', quantityPerPersonDay: 0.2, notes: 'Biscuits, fruits secs, barres cereales.' },
+    { name: 'Gaz cuisine', category: 'household', unit: 'bouteilles', scope: 'monthly_boat', stage: 'stock', quantityPerBoatDay: 1 / 21, notes: 'Reserve cuisson pour voilier.' },
+    { name: 'Papier hygienique', category: 'household', unit: 'rouleaux', scope: 'monthly_boat', stage: 'stock', quantityPerPersonDay: 0.22, notes: 'Ajuste selon ports et escales.' },
+    { name: 'Essuie-tout', category: 'household', unit: 'rouleaux', scope: 'monthly_boat', stage: 'stock', quantityPerBoatDay: 1 / 8, notes: 'Cuisine et nettoyage rapide.' },
+    { name: 'Liquide vaisselle', category: 'cleaning', unit: 'flacons', scope: 'monthly_boat', stage: 'stock', quantityPerBoatDay: 1 / 18, notes: 'Preferer un produit biodegradable.' },
+    { name: 'Eponges', category: 'cleaning', unit: 'pieces', scope: 'monthly_boat', stage: 'stock', quantityPerBoatDay: 1 / 12, notes: 'Cuisine et entretien quotidien.' },
+    { name: 'Sacs poubelle', category: 'household', unit: 'paquets', scope: 'monthly_boat', stage: 'stock', quantityPerBoatDay: 1 / 18, notes: 'Tri et stockage jusqu a l escale.' },
+    { name: 'Savon mains', category: 'household', unit: 'flacons', scope: 'monthly_boat', stage: 'stock', quantityPerBoatDay: 1 / 20, notes: 'Bloc cuisine + salle d eau.' }
+]);
+const VOYAGE_MEAL_TEMPLATE_LIBRARY = Object.freeze({
+    navigation: Object.freeze({
+        midday: Object.freeze([
+            { title: 'Wrap thon crudites', diet: 'pescatarian', notes: 'Repas froid rapide en navigation.', ingredients: [{ name: 'Wraps', category: 'pantry', unit: 'pieces', quantityPerPerson: 2 }, { name: 'Thon en boite', category: 'protein', unit: 'boites', quantityPerPerson: 0.5 }, { name: 'Tomates', category: 'fresh', unit: 'pieces', quantityPerPerson: 1 }, { name: 'Salade', category: 'fresh', unit: 'sachets', quantityPerPerson: 0.25 }] },
+            { title: 'Sandwich poulet mayo', diet: 'omnivore', notes: 'Facile a preparer la veille.', ingredients: [{ name: 'Pain de mie', category: 'pantry', unit: 'paquets', quantityPerPerson: 0.25 }, { name: 'Poulet cuit', category: 'protein', unit: 'g', quantityPerPerson: 120 }, { name: 'Mayonnaise', category: 'pantry', unit: 'pots', quantityPerPerson: 0.05 }, { name: 'Concombres', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.25 }] },
+            { title: 'Salade de pois chiches', diet: 'vegan', notes: 'Stable et nourrissant pour la traversee.', ingredients: [{ name: 'Pois chiches', category: 'pantry', unit: 'boites', quantityPerPerson: 0.5 }, { name: 'Poivrons', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.5 }, { name: 'Oignons rouges', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.25 }, { name: 'Citrons', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.25 }] }
+        ]),
+        evening: Object.freeze([
+            { title: 'Pates sauce tomate parmesan', diet: 'vegetarian', notes: 'Repas simple et rassurant apres quart.', ingredients: [{ name: 'Pates', category: 'pantry', unit: 'g', quantityPerPerson: 110 }, { name: 'Sauce tomate', category: 'pantry', unit: 'pots', quantityPerPerson: 0.33 }, { name: 'Parmesan', category: 'fresh', unit: 'g', quantityPerPerson: 25 }] },
+            { title: 'Riz thon petits pois', diet: 'pescatarian', notes: 'Un plat unique facile a portionner.', ingredients: [{ name: 'Riz', category: 'pantry', unit: 'g', quantityPerPerson: 90 }, { name: 'Thon en boite', category: 'protein', unit: 'boites', quantityPerPerson: 0.5 }, { name: 'Petits pois', category: 'pantry', unit: 'boites', quantityPerPerson: 0.33 }] },
+            { title: 'Lentilles coco curry', diet: 'vegan', notes: 'Option chaude sans viande.', ingredients: [{ name: 'Lentilles corail', category: 'pantry', unit: 'g', quantityPerPerson: 90 }, { name: 'Lait de coco', category: 'pantry', unit: 'boites', quantityPerPerson: 0.33 }, { name: 'Curry', category: 'pantry', unit: 'pots', quantityPerPerson: 0.03 }, { name: 'Riz', category: 'pantry', unit: 'g', quantityPerPerson: 70 }] }
+        ])
+    }),
+    mouillage: Object.freeze({
+        midday: Object.freeze([
+            { title: 'Salade grecque + pain', diet: 'vegetarian', notes: 'Dejeuner frais au mouillage.', ingredients: [{ name: 'Tomates', category: 'fresh', unit: 'pieces', quantityPerPerson: 1 }, { name: 'Concombres', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.3 }, { name: 'Feta', category: 'fresh', unit: 'g', quantityPerPerson: 50 }, { name: 'Pain', category: 'bakery', unit: 'baguettes', quantityPerPerson: 0.25 }] },
+            { title: 'Poke bowl saumon', diet: 'pescatarian', notes: 'Bon quand on peut cuisiner tranquille.', ingredients: [{ name: 'Riz', category: 'pantry', unit: 'g', quantityPerPerson: 90 }, { name: 'Saumon', category: 'fresh', unit: 'g', quantityPerPerson: 120 }, { name: 'Avocats', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.5 }, { name: 'Concombres', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.25 }] },
+            { title: 'Omelette pommes de terre', diet: 'vegetarian', notes: 'Classique de bord rassurant.', ingredients: [{ name: 'Oeufs', category: 'fresh', unit: 'pieces', quantityPerPerson: 2 }, { name: 'Pommes de terre', category: 'fresh', unit: 'g', quantityPerPerson: 180 }, { name: 'Oignons', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.25 }] }
+        ]),
+        evening: Object.freeze([
+            { title: 'Poisson plancha legumes', diet: 'pescatarian', notes: 'Repas d escale plus convivial.', ingredients: [{ name: 'Filets de poisson', category: 'fresh', unit: 'g', quantityPerPerson: 160 }, { name: 'Courgettes', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.5 }, { name: 'Riz', category: 'pantry', unit: 'g', quantityPerPerson: 80 }] },
+            { title: 'Chili sin carne', diet: 'vegan', notes: 'Bonne option pour groupe melange.', ingredients: [{ name: 'Haricots rouges', category: 'pantry', unit: 'boites', quantityPerPerson: 0.5 }, { name: 'Mais', category: 'pantry', unit: 'boites', quantityPerPerson: 0.25 }, { name: 'Sauce tomate', category: 'pantry', unit: 'pots', quantityPerPerson: 0.33 }, { name: 'Riz', category: 'pantry', unit: 'g', quantityPerPerson: 70 }] },
+            { title: 'Poulet riz citron', diet: 'omnivore', notes: 'Diner simple apres ravitaillement.', ingredients: [{ name: 'Poulet', category: 'protein', unit: 'g', quantityPerPerson: 160 }, { name: 'Riz', category: 'pantry', unit: 'g', quantityPerPerson: 80 }, { name: 'Citrons', category: 'fresh', unit: 'pieces', quantityPerPerson: 0.25 }, { name: 'Salade', category: 'fresh', unit: 'sachets', quantityPerPerson: 0.25 }] }
+        ])
+    })
+});
 const VOYAGE_ACCENT_PALETTE = [
     { start: '#ff6b6b', end: '#c44569', surface: 'rgba(255, 107, 107, 0.18)', soft: 'rgba(255, 107, 107, 0.28)', text: '#ffe5e5' },
     { start: '#ff8c42', end: '#ff3d54', surface: 'rgba(255, 140, 66, 0.18)', soft: 'rgba(255, 140, 66, 0.28)', text: '#fff0e2' },
@@ -38,8 +90,12 @@ let standardTileLayer;
 let satelliteTileLayer;
 let marineDepthLayer;
 let marineHazardLayer;
+let marineAnchoragesLayer;
+let marinePortsLayer;
+let marineServicesLayer;
 let isobarLayer;
 let weatherWindLayer;
+let weatherWindDirectionLayer;
 let weatherRainLayer;
 let weatherCloudLayer;
 let weatherTempLayer;
@@ -62,6 +118,7 @@ let activeVoyageMapItemId = '';
 let isVoyageMapExpanded = false;
 let isVoyageCalendarVisible = false;
 let isVoyageWeatherVisible = false;
+let activeVoyageDetailTab = 'itinerary';
 let draggedVoyageCalendarItemId = '';
 let activeVoyageCalendarResize = null;
 let voyageAgendaWeatherHydrationToken = 0;
@@ -75,14 +132,22 @@ let sailMode = 'auto';
 const weatherCache = new Map();
 const weatherDailyCache = new Map();
 const weatherDailyInFlight = new Map();
+const weatherPressureSampleCache = new Map();
+const weatherPressureSampleInFlight = new Map();
+const astronomyDailyCache = new Map();
+const astronomyDailyInFlight = new Map();
 const weatherRequestQueue = [];
 let activeWeatherRequestCount = 0;
 let lastWeatherUpdateAt = null;
+let sunriseSunsetCooldownUntil = 0;
 let waypointWindDirectionLayers = [];
 let waveDirectionSegmentLayers = [];
 let waypointPassageSlots = new Map();
 let lastRouteBounds = null;
 let generatedWaypointMarkers = [];
+const ROUTING_DECISION_OFFSETS_HOURS = [0, 3, 6, 12];
+let routingDecisionOffsetIndex = 0;
+let lastRoutingDecisionSnapshot = null;
 let measureModeEnabled = false;
 let measurePoints = [];
 let measurePolylineLayer = null;
@@ -101,6 +166,13 @@ let documentRagQuestionHistory = [];
 let documentSearchTerm = '';
 let editingDocumentId = null;
 let activeDocumentSubtab = 'files';
+let voyageDocumentGithubSettings = null;
+let voyageDocumentDraft = {
+    planId: '',
+    file: null,
+    title: '',
+    description: ''
+};
 let documentRagLlmSettings = {
     mode: 'local',
     provider: 'gemini',
@@ -144,12 +216,22 @@ const OVERPASS_URLS = [
 const OVERPASS_MIN_INTERVAL_MS = 900;
 const OVERPASS_CACHE_TTL_MS = 8 * 60 * 1000;
 const OVERPASS_429_COOLDOWN_MS = 10 * 60 * 1000;
+const OVERPASS_BROWSER_BLOCK_COOLDOWN_MS = 30 * 60 * 1000;
+const MARINE_POI_REFRESH_DEBOUNCE_MS = 280;
+const MARINE_POI_REFRESH_COOLDOWN_MS = 20 * 1000;
+const MARINE_POI_OVERLAY_MIN_ZOOM = 9;
+const MARINE_POI_OVERLAY_LIMITS = Object.freeze({
+    anchorages: 36,
+    ports: 42,
+    services: 56
+});
 const MAX_ARRIVAL_ANALYSIS_CACHE_ENTRIES = 24;
 const ARRIVAL_ANALYSIS_MATCH_RADIUS_NM = 2;
 const WAYPOINT_PHOTOS_STORAGE_KEY = 'ceiboWaypointPhotos';
 const DOCUMENTS_STORAGE_KEY = 'ceiboDocumentsV1';
 const DOCUMENT_RAG_HISTORY_SESSION_KEY = 'ceiboDocumentRagHistoryV1';
 const DOCUMENT_RAG_LLM_SETTINGS_STORAGE_KEY = 'ceiboDocumentRagLlmSettingsV1';
+const VOYAGE_DOCUMENT_GITHUB_SETTINGS_STORAGE_KEY = 'ceiboVoyageDocumentGithubSettingsV1';
 const SAVED_ROUTES_STORAGE_KEY = 'savedRoutes';
 const ROUTES_BACKUP_SNAPSHOTS_STORAGE_KEY = 'ceiboRoutesBackupSnapshotsV1';
 const ROUTES_BACKUP_SNAPSHOTS_MAX = 12;
@@ -261,8 +343,10 @@ let agendaEventsCloudRevision = 0;
 let voyagePlansCloudDirty = false;
 let voyagePlansCloudRevision = 0;
 let cloudVoyagePlansHasStatusColumn = true;
+let cloudVoyagePlansHasFoodColumns = true;
 let crewDirectoryCloudDirty = false;
 let crewDirectoryCloudRevision = 0;
+let cloudCrewHasDietaryProfileColumn = true;
 let cloudResolvedProjectIdUuid = '';
 let cloudAuthSubscription = null;
 let cloudAutoPullTimer = null;
@@ -414,6 +498,7 @@ let weatherOutlookBootstrapped = false;
 let lastWeatherDiagnosticPayload = null;
 let weatherCenterStageDismissed = false;
 let owmKeyValidationBootstrapped = false;
+let weatherWindDirectionRefreshToken = 0;
 let maintenanceCloudHydrationInFlight = false;
 let maintenanceCloudHydratedOnce = false;
 let navLogCloudHydrationInFlight = false;
@@ -424,6 +509,7 @@ let navLogLayoutState = { showMap: true, showLog: true, showChecklist: true };
 let navSwellProfile = 'balanced';
 let mapWebOverlayElement = null;
 let mapWebOverlayFrame = null;
+let mapWebOverlayTitleElement = null;
 let maintenanceBoards = [];
 let selectedMaintenanceBoardId = null;
 let activeMaintenanceAnnotationId = null;
@@ -489,12 +575,21 @@ let overpassLastRequestAt = 0;
 const overpassQueryCache = new Map();
 const overpassEndpointCooldownUntil = new Map();
 let overpassPreferredEndpoint = OVERPASS_URLS[0];
+let marinePoiOverlayRefreshToken = 0;
+let overpassDisabledUntil = 0;
+let overpassDisabledReason = '';
+const overpassIssueFlags = new Set();
+let marinePoiOverlayRefreshTimer = null;
+let marinePoiOverlayRefreshPromise = null;
+let marinePoiOverlayLastRequestSignature = '';
+let marinePoiOverlayLastRequestAt = 0;
 const MAP_STYLE_STORAGE_KEY = 'ceiboMapStyle';
 const MAP_VIEW_STORAGE_KEY = 'ceiboMapView';
 const APP_LANGUAGE_STORAGE_KEY = 'ceiboAppLanguage';
 const ROUTING_DEPARTURE_DATETIME_STORAGE_KEY = 'ceiboRoutingDepartureDateTimeV1';
 const NIGHT_MODE_STORAGE_KEY = 'ceiboNightModeV1';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'ceiboSidebarCollapsedV1';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'ceiboSidebarWidthV1';
 const TRANSPARENT_TILE_DATA_URI = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 const OWM_TILE_APPID_STORAGE_KEY = 'ceiboOwmTileAppId';
 const MAINTENANCE_BOARDS_STORAGE_KEY = 'ceiboMaintenanceBoardsV1';
@@ -536,6 +631,7 @@ const ROUTE_SCHEDULE_REFERENCE_SPEED_KN = 6.5;
 let autoWpMinSpacingNm = null;
 let currentLanguage = 'fr';
 let isSidebarCollapsed = false;
+let sidebarWidthPx = 620;
 const owmTileIssueFlags = new Set();
 
 let landGeometry = null;
@@ -694,6 +790,9 @@ function clearWeatherForecastCache() {
     weatherCache.clear();
     weatherDailyCache.clear();
     weatherDailyInFlight.clear();
+    astronomyDailyCache.clear();
+    astronomyDailyInFlight.clear();
+    sunriseSunsetCooldownUntil = 0;
     lastWeatherUpdateAt = null;
 }
 
@@ -2127,6 +2226,301 @@ function sanitizeVoyagePlanItem(item, fallbackIndex = 0) {
     };
 }
 
+function sanitizeCrewDietaryProfile(profile) {
+    const safeDietType = CREW_DIET_TYPES.includes(String(profile?.dietType || '').trim())
+        ? String(profile.dietType).trim()
+        : 'omnivore';
+    return {
+        dietType: safeDietType,
+        allergiesText: String(profile?.allergiesText || profile?.allergies || '').trim(),
+        dislikesText: String(profile?.dislikesText || profile?.dislikes || '').trim(),
+        breakfastText: String(profile?.breakfastText || profile?.breakfast || '').trim(),
+        galleyNotes: String(profile?.galleyNotes || profile?.notes || '').trim()
+    };
+}
+
+function normalizeVoyageMealDayType(value) {
+    return VOYAGE_MEAL_DAY_TYPES.includes(String(value || '').trim())
+        ? String(value).trim()
+        : 'navigation';
+}
+
+function sanitizeVoyageMealIngredient(entry, fallbackIndex = 0) {
+    return {
+        id: String(entry?.id || `voyage-meal-ingredient-${Date.now()}-${fallbackIndex}`),
+        name: String(entry?.name || '').trim(),
+        category: String(entry?.category || 'pantry').trim(),
+        unit: String(entry?.unit || 'pieces').trim(),
+        quantity: Math.max(0, Number(entry?.quantity || 0) || 0)
+    };
+}
+
+function sanitizeVoyageMealEntry(entry, fallbackIndex = 0) {
+    return {
+        id: String(entry?.id || `voyage-meal-${Date.now()}-${fallbackIndex}`),
+        date: String(entry?.date || '').trim(),
+        dayType: normalizeVoyageMealDayType(entry?.dayType),
+        middayTitle: String(entry?.middayTitle || '').trim(),
+        middayNotes: String(entry?.middayNotes || '').trim(),
+        middayIngredients: Array.isArray(entry?.middayIngredients)
+            ? entry.middayIngredients.map((item, index) => sanitizeVoyageMealIngredient(item, index)).filter(item => item.name)
+            : [],
+        eveningTitle: String(entry?.eveningTitle || '').trim(),
+        eveningNotes: String(entry?.eveningNotes || '').trim(),
+        eveningIngredients: Array.isArray(entry?.eveningIngredients)
+            ? entry.eveningIngredients.map((item, index) => sanitizeVoyageMealIngredient(item, index)).filter(item => item.name)
+            : [],
+        notes: String(entry?.notes || '').trim()
+    };
+}
+
+function normalizeVoyageProvisioningScope(value) {
+    return VOYAGE_PROVISIONING_SCOPES.includes(String(value || '').trim())
+        ? String(value).trim()
+        : 'voyage_food';
+}
+
+function normalizeVoyageProvisioningStage(value) {
+    return VOYAGE_PROVISIONING_STAGES.includes(String(value || '').trim())
+        ? String(value).trim()
+        : 'predeparture';
+}
+
+function sanitizeVoyageProvisioningItem(entry, fallbackIndex = 0) {
+    return {
+        id: String(entry?.id || `voyage-provisioning-${Date.now()}-${fallbackIndex}`),
+        name: String(entry?.name || '').trim(),
+        category: String(entry?.category || 'pantry').trim(),
+        scope: normalizeVoyageProvisioningScope(entry?.scope),
+        quantity: Math.max(0, Number(entry?.quantity || 0) || 0),
+        unit: String(entry?.unit || 'pieces').trim(),
+        stage: normalizeVoyageProvisioningStage(entry?.stage),
+        source: String(entry?.source || 'manual').trim() === 'auto' ? 'auto' : 'manual',
+        checked: !!entry?.checked,
+        notes: String(entry?.notes || '').trim()
+    };
+}
+
+function normalizeVoyageBudgetScope(value) {
+    return VOYAGE_BUDGET_SCOPES.includes(String(value || '').trim())
+        ? String(value).trim()
+        : 'voyage_food';
+}
+
+function normalizeVoyageBudgetCategory(value) {
+    return VOYAGE_BUDGET_CATEGORIES.includes(String(value || '').trim())
+        ? String(value).trim()
+        : 'other';
+}
+
+function sanitizeVoyageBudgetItem(entry, fallbackIndex = 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+        id: String(entry?.id || `voyage-budget-${Date.now()}-${fallbackIndex}`),
+        date: String(entry?.date || today).trim() || today,
+        label: String(entry?.label || '').trim(),
+        scope: normalizeVoyageBudgetScope(entry?.scope),
+        category: normalizeVoyageBudgetCategory(entry?.category),
+        amount: Math.max(0, Number(entry?.amount || 0) || 0),
+        currency: String(entry?.currency || 'EUR').trim() || 'EUR',
+        payer: String(entry?.payer || '').trim(),
+        notes: String(entry?.notes || '').trim()
+    };
+}
+
+function sanitizeVoyageDocumentEntry(entry, fallbackIndex = 0) {
+    const nowIso = new Date().toISOString();
+    const fileName = String(entry?.fileName || entry?.file_name || '').trim();
+    const title = String(entry?.title || fileName || `${t('Document', 'Documento', 'Document')} ${fallbackIndex + 1}`).trim();
+    return {
+        id: String(entry?.id || generateClientUuid()),
+        title,
+        fileName,
+        mimeType: String(entry?.mimeType || entry?.mime_type || 'application/octet-stream').trim() || 'application/octet-stream',
+        sizeBytes: Math.max(0, Number(entry?.sizeBytes || entry?.size_bytes || 0) || 0),
+        description: String(entry?.description || '').trim(),
+        githubPath: String(entry?.githubPath || entry?.github_path || entry?.path || '').trim().replace(/^\/+/, ''),
+        downloadUrl: String(entry?.downloadUrl || entry?.download_url || '').trim(),
+        htmlUrl: String(entry?.htmlUrl || entry?.html_url || '').trim(),
+        sha: String(entry?.sha || '').trim(),
+        createdAt: String(entry?.createdAt || entry?.created_at || nowIso),
+        updatedAt: String(entry?.updatedAt || entry?.updated_at || nowIso)
+    };
+}
+
+function buildVoyageDocumentEntryFromDocumentEntry(entry, fallbackIndex = 0) {
+    const safe = sanitizeDocumentEntry(entry, fallbackIndex);
+    return sanitizeVoyageDocumentEntry({
+        id: safe.id,
+        title: safe.title,
+        fileName: safe.fileName,
+        mimeType: safe.mimeType,
+        sizeBytes: safe.sizeBytes,
+        description: safe.description,
+        githubPath: safe.storagePath,
+        downloadUrl: safe.publicUrl,
+        sha: safe.externalSha,
+        createdAt: safe.createdAt,
+        updatedAt: safe.updatedAt
+    }, fallbackIndex);
+}
+
+function buildDocumentEntryFromVoyageDocument(planId, entry, options = {}) {
+    const safe = sanitizeVoyageDocumentEntry(entry, 0);
+    return sanitizeDocumentEntry({
+        id: safe.id,
+        title: safe.title,
+        fileName: safe.fileName,
+        mimeType: safe.mimeType,
+        sizeBytes: safe.sizeBytes,
+        category: 'voyage',
+        subcategory: 'attachment',
+        description: safe.description,
+        creatorEmail: options.creatorEmail || getCurrentCloudUserEmail() || '',
+        creatorName: options.creatorName || cloudUserProfile?.name || '',
+        voyagePlanId: String(planId || '').trim(),
+        externalProvider: 'github',
+        externalSha: safe.sha,
+        storagePath: safe.githubPath,
+        publicUrl: safe.downloadUrl || safe.htmlUrl || '',
+        createdAt: safe.createdAt,
+        updatedAt: safe.updatedAt
+    });
+}
+
+function getVoyageDocumentEntries(planOrId) {
+    const planId = typeof planOrId === 'string'
+        ? String(planOrId || '').trim()
+        : String(sanitizeVoyagePlan(planOrId || {}, 0).id || '').trim();
+    if (!planId) return [];
+    const syncedDocuments = documentEntries
+        .filter(entry => String(entry?.voyagePlanId || '').trim() === planId)
+        .map((entry, index) => buildVoyageDocumentEntryFromDocumentEntry(entry, index));
+
+    return syncedDocuments
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function getVoyageDocumentDraft(planId = '') {
+    const safePlanId = String(planId || '').trim();
+    if (!safePlanId || voyageDocumentDraft.planId !== safePlanId) {
+        return { planId: safePlanId, file: null, title: '', description: '' };
+    }
+    return {
+        planId: safePlanId,
+        file: voyageDocumentDraft.file || null,
+        title: String(voyageDocumentDraft.title || ''),
+        description: String(voyageDocumentDraft.description || '')
+    };
+}
+
+function setVoyageDocumentDraft(nextDraft) {
+    const safePlanId = String(nextDraft?.planId || '').trim();
+    voyageDocumentDraft = {
+        planId: safePlanId,
+        file: nextDraft?.file instanceof File ? nextDraft.file : null,
+        title: String(nextDraft?.title || ''),
+        description: String(nextDraft?.description || '')
+    };
+    return getVoyageDocumentDraft(safePlanId);
+}
+
+function clearVoyageDocumentDraft(planId = '') {
+    const safePlanId = String(planId || '').trim();
+    if (!safePlanId || voyageDocumentDraft.planId === safePlanId) {
+        voyageDocumentDraft = { planId: '', file: null, title: '', description: '' };
+    }
+}
+
+function readVoyageDocumentDraftFromDom(planId = '') {
+    const safePlanId = String(planId || '').trim();
+    const fileInput = document.getElementById('voyageDocumentFileInput');
+    const titleInput = document.getElementById('voyageDocumentTitleInput');
+    const descriptionInput = document.getElementById('voyageDocumentDescriptionInput');
+    const previous = getVoyageDocumentDraft(safePlanId);
+    return setVoyageDocumentDraft({
+        planId: safePlanId,
+        file: fileInput?.files?.[0] || previous.file || null,
+        title: String(titleInput?.value || previous.title || ''),
+        description: String(descriptionInput?.value || previous.description || '')
+    });
+}
+
+function applyVoyageDocumentDraftToDom(planId = '') {
+    const safePlanId = String(planId || '').trim();
+    const draft = getVoyageDocumentDraft(safePlanId);
+    if (!safePlanId || draft.planId !== safePlanId) return;
+
+    const titleInput = document.getElementById('voyageDocumentTitleInput');
+    const descriptionInput = document.getElementById('voyageDocumentDescriptionInput');
+    const fileInput = document.getElementById('voyageDocumentFileInput');
+
+    if (titleInput && !titleInput.value && draft.title) {
+        titleInput.value = draft.title;
+    }
+    if (descriptionInput && !descriptionInput.value && draft.description) {
+        descriptionInput.value = draft.description;
+    }
+    if (fileInput && draft.file instanceof File) {
+        try {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(draft.file);
+            fileInput.files = dataTransfer.files;
+        } catch (_error) {
+            // Ignore browsers that forbid programmatic file restoration.
+        }
+    }
+}
+
+function renderVoyageDocumentsStatsHtml(planOrId) {
+    const documents = getVoyageDocumentEntries(planOrId);
+    return `<span>${escapeHtml(t('Documents', 'Documentos', 'Documents'))}: <strong>${documents.length}</strong></span>`;
+}
+
+function renderVoyageDocumentsListHtml(planOrId) {
+    const safePlan = typeof planOrId === 'string'
+        ? sanitizeVoyagePlan(voyagePlans.find(entry => entry.id === String(planOrId || '').trim()) || {}, 0)
+        : sanitizeVoyagePlan(planOrId || {}, 0);
+    const documents = getVoyageDocumentEntries(safePlan.id);
+
+    return documents.length ? documents.map(entry => `
+        <article class="voyage-doc-entry">
+            <div>
+                <div class="voyage-doc-entry__title">${escapeHtml(entry.title || entry.fileName || t('Document sans titre', 'Documento sin título', 'Untitled document'))}</div>
+                <div class="voyage-doc-entry__meta">${escapeHtml(entry.fileName || '')}${entry.sizeBytes ? ` · ${escapeHtml(formatDocumentSize(entry.sizeBytes))}` : ''}${entry.updatedAt ? ` · ${escapeHtml(formatDateTimeLocalLabel(entry.updatedAt))}` : ''}</div>
+                ${entry.description ? `<div class="voyage-doc-entry__desc">${escapeHtml(entry.description)}</div>` : ''}
+                ${entry.githubPath ? `<div class="voyage-doc-entry__path">${escapeHtml(entry.githubPath)}</div>` : ''}
+            </div>
+            <div class="voyage-ops-inline-actions">
+                <button type="button" data-voyage-document-action="open" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-document-id="${escapeHtml(entry.id)}">${escapeHtml(t('Voir', 'Ver', 'View'))}</button>
+                <button type="button" data-voyage-document-action="delete" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-document-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
+            </div>
+        </article>
+    `).join('') : `<div class="voyage-ops-empty">${escapeHtml(t('Aucun document rattaché à ce voyage.', 'No hay documentos vinculados a este viaje.', 'No documents attached to this trip.'))}</div>`;
+}
+
+function refreshVoyageDocumentsSectionDom(planId) {
+    const safePlanId = String(planId || '').trim();
+    if (!safePlanId) return false;
+
+    const statsNode = document.getElementById(`voyageDocumentsStats-${safePlanId}`);
+    const listNode = document.getElementById(`voyageDocumentsList-${safePlanId}`);
+    if (!statsNode && !listNode) return false;
+
+    if (statsNode) {
+        const countNode = statsNode.querySelector('[data-voyage-doc-stat="count"]');
+        if (countNode) {
+            countNode.outerHTML = renderVoyageDocumentsStatsHtml(safePlanId);
+        } else {
+            statsNode.innerHTML = `${renderVoyageDocumentsStatsHtml(safePlanId)}${statsNode.innerHTML}`;
+        }
+    }
+    if (listNode) {
+        listNode.innerHTML = renderVoyageDocumentsListHtml(safePlanId);
+    }
+    return true;
+}
+
 function sanitizeCrewMember(entry, fallbackIndex = 0) {
     const firstName = String(entry?.prenom || entry?.firstName || '').trim();
     const lastName = String(entry?.nom || entry?.lastName || '').trim();
@@ -2140,6 +2534,7 @@ function sanitizeCrewMember(entry, fallbackIndex = 0) {
         email: normalizedEmail,
         telephone: normalizePhoneValue(entry?.telephone || entry?.phone || ''),
         commentaire: String(entry?.commentaire || entry?.comment || '').trim(),
+        dietaryProfile: sanitizeCrewDietaryProfile(entry?.dietaryProfile || entry?.dietary_profile || entry?.foodProfile || {}),
         creatorEmail: normalizeEmailForCompare(entry?.creatorEmail || ''),
         creatorName: String(entry?.creatorName || '').trim(),
         createdAt: String(entry?.createdAt || nowIso),
@@ -2152,6 +2547,22 @@ function getCrewMemberDisplayName(entry) {
     const safeEntry = sanitizeCrewMember(entry || {}, 0);
     const fullName = `${safeEntry.prenom} ${safeEntry.nom}`.trim();
     return fullName || safeEntry.email || t('Équipier sans nom', 'Tripulante sin nombre', 'Unnamed crew member');
+}
+
+function formatCrewDietaryProfileLabel(profile) {
+    const safeProfile = sanitizeCrewDietaryProfile(profile || {});
+    const dietLabels = {
+        omnivore: t('Omnivore', 'Omnívoro', 'Omnivore'),
+        pescatarian: t('Pescetarien', 'Pescetariano', 'Pescatarian'),
+        vegetarian: t('Vegetarien', 'Vegetariano', 'Vegetarian'),
+        vegan: t('Vegan', 'Vegano', 'Vegan'),
+        glutenfree: t('Sans gluten', 'Sin gluten', 'Gluten free'),
+        custom: t('Autre profil', 'Otro perfil', 'Custom profile')
+    };
+    const parts = [dietLabels[safeProfile.dietType] || dietLabels.omnivore];
+    if (safeProfile.allergiesText) parts.push(`${t('Allergies', 'Alergias', 'Allergies')}: ${safeProfile.allergiesText}`);
+    if (safeProfile.dislikesText) parts.push(`${t('Evite', 'Evita', 'Avoids')}: ${safeProfile.dislikesText}`);
+    return parts.join(' · ');
 }
 
 function normalizeVoyagePlanStatus(value) {
@@ -2192,6 +2603,15 @@ function sanitizeVoyagePlan(plan, fallbackIndex = 0) {
         status: normalizeVoyagePlanStatus(plan?.status),
         crewMemberIds,
         items: Array.isArray(plan?.items) ? plan.items.map((item, index) => sanitizeVoyagePlanItem(item, index)) : [],
+        mealPlan: Array.isArray(plan?.mealPlan || plan?.meal_plan)
+            ? (plan.mealPlan || plan.meal_plan).map((entry, index) => sanitizeVoyageMealEntry(entry, index)).filter(entry => entry.date)
+            : [],
+        provisioningItems: Array.isArray(plan?.provisioningItems || plan?.provisioning_items)
+            ? (plan.provisioningItems || plan.provisioning_items).map((entry, index) => sanitizeVoyageProvisioningItem(entry, index)).filter(entry => entry.name)
+            : [],
+        budgetItems: Array.isArray(plan?.budgetItems || plan?.budget_items)
+            ? (plan.budgetItems || plan.budget_items).map((entry, index) => sanitizeVoyageBudgetItem(entry, index)).filter(entry => entry.label || entry.amount > 0)
+            : [],
         createdAt: String(plan?.createdAt || nowIso),
         updatedAt: String(plan?.updatedAt || nowIso)
     };
@@ -2649,6 +3069,10 @@ function isVoyageCrewEditorFocused() {
         || activeElement.id === 'voyageCrewLastNameInput'
         || activeElement.id === 'voyageCrewEmailInput'
         || activeElement.id === 'voyageCrewPhoneInput'
+        || activeElement.id === 'voyageCrewDietTypeInput'
+        || activeElement.id === 'voyageCrewAllergiesInput'
+        || activeElement.id === 'voyageCrewDislikesInput'
+        || activeElement.id === 'voyageCrewBreakfastInput'
         || activeElement.id === 'voyageCrewCommentInput'
     );
 }
@@ -2661,7 +3085,13 @@ function captureCrewEditorDraftFromInputs() {
             nom: String(document.getElementById('voyageCrewLastNameInput')?.value || ''),
             email: String(document.getElementById('voyageCrewEmailInput')?.value || ''),
             telephone: String(document.getElementById('voyageCrewPhoneInput')?.value || ''),
-            commentaire: String(document.getElementById('voyageCrewCommentInput')?.value || '')
+            commentaire: String(document.getElementById('voyageCrewCommentInput')?.value || ''),
+            dietaryProfile: sanitizeCrewDietaryProfile({
+                dietType: document.getElementById('voyageCrewDietTypeInput')?.value || 'omnivore',
+                allergiesText: document.getElementById('voyageCrewAllergiesInput')?.value || '',
+                dislikesText: document.getElementById('voyageCrewDislikesInput')?.value || '',
+                breakfastText: document.getElementById('voyageCrewBreakfastInput')?.value || ''
+            })
         }
     };
 }
@@ -2720,6 +3150,7 @@ function renderVoyageAssignedCrewList(plan) {
             <div>
                 <strong>${escapeHtml(getCrewMemberDisplayName(entry))}</strong>
                 <div class="voyage-crew-chip__meta">${escapeHtml(entry.email || entry.telephone || t('Sans contact', 'Sin contacto', 'No contact'))}</div>
+                <div class="voyage-crew-chip__meta">${escapeHtml(formatCrewDietaryProfileLabel(entry.dietaryProfile))}</div>
             </div>
             <div class="voyage-crew-chip__actions">
                 <button type="button" data-voyage-crew-action="edit-member" data-crew-member-id="${escapeHtml(entry.id)}">${escapeHtml(t('Éditer', 'Editar', 'Edit'))}</button>
@@ -2735,12 +3166,21 @@ function syncCrewEditorUi() {
     const lastNameInput = document.getElementById('voyageCrewLastNameInput');
     const emailInput = document.getElementById('voyageCrewEmailInput');
     const phoneInput = document.getElementById('voyageCrewPhoneInput');
+    const dietTypeInput = document.getElementById('voyageCrewDietTypeInput');
+    const allergiesInput = document.getElementById('voyageCrewAllergiesInput');
+    const dislikesInput = document.getElementById('voyageCrewDislikesInput');
+    const breakfastInput = document.getElementById('voyageCrewBreakfastInput');
     const commentInput = document.getElementById('voyageCrewCommentInput');
+    const foodProfile = sanitizeCrewDietaryProfile(draftValues?.dietaryProfile ?? selected?.dietaryProfile ?? {});
 
     if (firstNameInput) firstNameInput.value = String((draftValues?.prenom ?? selected?.prenom) || '');
     if (lastNameInput) lastNameInput.value = String((draftValues?.nom ?? selected?.nom) || '');
     if (emailInput) emailInput.value = String((draftValues?.email ?? selected?.email) || '');
     if (phoneInput) phoneInput.value = String((draftValues?.telephone ?? selected?.telephone) || '');
+    if (dietTypeInput) dietTypeInput.value = String(foodProfile.dietType || 'omnivore');
+    if (allergiesInput) allergiesInput.value = String(foodProfile.allergiesText || '');
+    if (dislikesInput) dislikesInput.value = String(foodProfile.dislikesText || '');
+    if (breakfastInput) breakfastInput.value = String(foodProfile.breakfastText || '');
     if (commentInput) commentInput.value = String((draftValues?.commentaire ?? selected?.commentaire) || '');
 }
 
@@ -3046,6 +3486,37 @@ function formatVoyageAgendaTimeLabel(date) {
     return date.toLocaleTimeString(getCurrentLocale(), {
         hour: '2-digit',
         minute: '2-digit'
+    });
+}
+
+function setVoyageAgendaProvisioningStatus(message, isError = false) {
+    const node = document.getElementById('voyageAgendaProvisioningStatus');
+    if (!node) return;
+    node.textContent = String(message || '');
+    node.classList.toggle('is-error', !!isError);
+    node.classList.toggle('is-ok', !!message && !isError);
+}
+
+function getFilteredVoyagePlanEntries() {
+    const planEntries = voyagePlans.map(plan => ({
+        plan,
+        timeline: computeVoyagePlanTimeline(plan)
+    }));
+
+    return planEntries.filter(({ plan, timeline }) => {
+        if (voyagePlanStatusFilter !== 'all' && normalizeVoyagePlanStatus(plan.status) !== voyagePlanStatusFilter) {
+            return false;
+        }
+        const crewNames = getVoyageAssignedCrewMembers(plan).map(entry => getCrewMemberDisplayName(entry)).join(' ');
+        const haystack = [
+            plan.name,
+            plan.description,
+            plan.status,
+            getVoyagePlanStatusLabel(plan.status),
+            crewNames,
+            ...timeline.map(entry => `${entry.title} ${entry.subtitle} ${entry.item?.notes || ''}`)
+        ].join(' ').toLowerCase();
+        return !voyageAgendaSearchTerm.trim() || haystack.includes(voyageAgendaSearchTerm.toLowerCase().trim());
     });
 }
 
@@ -3833,6 +4304,1458 @@ function renderVoyagePreviewMap(timeline) {
     }, 0);
 }
 
+function formatLocalDateKey(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    return `${String(date.getFullYear()).padStart(4, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatVoyageMealDateLabel(dateKey) {
+    const parsed = parseDateTimeLocalValue(`${String(dateKey || '').trim()}T12:00`);
+    if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return String(dateKey || '');
+    return parsed.toLocaleDateString(getCurrentLocale(), {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short'
+    });
+}
+
+function splitFoodTerms(rawText) {
+    return String(rawText || '')
+        .toLowerCase()
+        .split(/[;,/\n]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
+function getVoyageMealPlanningDays(timeline) {
+    const scheduledEntries = (Array.isArray(timeline) ? timeline : []).filter(entry => entry.departure instanceof Date || entry.arrival instanceof Date);
+    const firstEntry = scheduledEntries.find(entry => entry.departure instanceof Date || entry.arrival instanceof Date) || null;
+    const lastEntry = [...scheduledEntries].reverse().find(entry => entry.arrival instanceof Date || entry.departure instanceof Date) || null;
+    const firstDate = startOfLocalDay(firstEntry?.departure || firstEntry?.arrival || null);
+    const lastDate = startOfLocalDay(lastEntry?.arrival || lastEntry?.departure || null);
+    if (!(firstDate instanceof Date) || !(lastDate instanceof Date)) return [];
+
+    const days = [];
+    for (let cursor = new Date(firstDate.getTime()); cursor <= lastDate; cursor = addDays(cursor, 1)) {
+        const dayStart = new Date(cursor.getTime());
+        const dayEnd = addDays(dayStart, 1);
+        const hasNavigation = scheduledEntries.some(entry => entry.type === 'route'
+            && entry.departure instanceof Date
+            && entry.arrival instanceof Date
+            && entry.arrival > dayStart
+            && entry.departure < dayEnd);
+        days.push({
+            date: formatLocalDateKey(dayStart),
+            dayType: hasNavigation ? 'navigation' : 'mouillage'
+        });
+    }
+    return days;
+}
+
+function resolveVoyageCommonDietType(assignedCrew) {
+    const dietTypes = (Array.isArray(assignedCrew) ? assignedCrew : []).map(entry => sanitizeCrewDietaryProfile(entry?.dietaryProfile || {}).dietType);
+    if (dietTypes.includes('vegan')) return 'vegan';
+    if (dietTypes.includes('vegetarian')) return 'vegetarian';
+    if (dietTypes.includes('pescatarian')) return 'pescatarian';
+    if (dietTypes.includes('glutenfree')) return 'glutenfree';
+    return 'omnivore';
+}
+
+function collectVoyageForbiddenFoodTerms(assignedCrew) {
+    return Array.from(new Set((Array.isArray(assignedCrew) ? assignedCrew : []).flatMap(entry => {
+        const profile = sanitizeCrewDietaryProfile(entry?.dietaryProfile || {});
+        return splitFoodTerms(`${profile.allergiesText};${profile.dislikesText}`);
+    })));
+}
+
+function templateSupportsDiet(template, dietType) {
+    const safeDiet = String(template?.diet || 'omnivore').trim();
+    if (dietType === 'vegan') return safeDiet === 'vegan';
+    if (dietType === 'vegetarian') return ['vegan', 'vegetarian'].includes(safeDiet);
+    if (dietType === 'pescatarian') return ['vegan', 'vegetarian', 'pescatarian'].includes(safeDiet);
+    if (dietType === 'glutenfree') {
+        const ingredientBlob = (Array.isArray(template?.ingredients) ? template.ingredients : []).map(item => String(item?.name || '').toLowerCase()).join(' ');
+        return !/(wrap|pain|pates|pasta|baguette)/.test(ingredientBlob);
+    }
+    return true;
+}
+
+function templateMatchesRestrictions(template, forbiddenTerms) {
+    const haystack = `${String(template?.title || '')} ${(Array.isArray(template?.ingredients) ? template.ingredients.map(item => item?.name || '').join(' ') : '')}`.toLowerCase();
+    return !(Array.isArray(forbiddenTerms) ? forbiddenTerms : []).some(term => term && haystack.includes(term));
+}
+
+function pickVoyageMealTemplate(dayType, serviceKey, assignedCrew, usedTitles = new Set()) {
+    const safeDayType = normalizeVoyageMealDayType(dayType);
+    const templates = VOYAGE_MEAL_TEMPLATE_LIBRARY?.[safeDayType]?.[serviceKey] || [];
+    const dominantDiet = resolveVoyageCommonDietType(assignedCrew);
+    const forbiddenTerms = collectVoyageForbiddenFoodTerms(assignedCrew);
+    const filtered = templates.filter(template => templateSupportsDiet(template, dominantDiet) && templateMatchesRestrictions(template, forbiddenTerms));
+    const candidateList = filtered.length ? filtered : templates;
+    const notUsed = candidateList.filter(template => !usedTitles.has(String(template?.title || '')));
+    return (notUsed[0] || candidateList[0] || null);
+}
+
+function buildVoyageMealIngredientsFromTemplate(template, crewCount) {
+    const safeCrewCount = Math.max(1, Number(crewCount || 0) || 1);
+    return (Array.isArray(template?.ingredients) ? template.ingredients : []).map((ingredient, index) => sanitizeVoyageMealIngredient({
+        id: `generated-${String(template?.title || 'meal').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index}`,
+        name: ingredient?.name,
+        category: ingredient?.category,
+        unit: ingredient?.unit,
+        quantity: Math.round((Number(ingredient?.quantityPerPerson || 0) * safeCrewCount) * 100) / 100
+    }, index)).filter(item => item.name);
+}
+
+function generateVoyageMealPlanEntries(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const assignedCrew = getVoyageAssignedCrewMembers(safePlan);
+    const days = getVoyageMealPlanningDays(computeVoyagePlanTimeline(safePlan));
+    const usedTitles = new Set();
+    return days.map((day, index) => {
+        const middayTemplate = pickVoyageMealTemplate(day.dayType, 'midday', assignedCrew, usedTitles);
+        if (middayTemplate?.title) usedTitles.add(middayTemplate.title);
+        const eveningTemplate = pickVoyageMealTemplate(day.dayType, 'evening', assignedCrew, usedTitles);
+        if (eveningTemplate?.title) usedTitles.add(eveningTemplate.title);
+        return sanitizeVoyageMealEntry({
+            id: `voyage-meal-${safePlan.id}-${index}`,
+            date: day.date,
+            dayType: day.dayType,
+            middayTitle: middayTemplate?.title || '',
+            middayNotes: middayTemplate?.notes || '',
+            middayIngredients: buildVoyageMealIngredientsFromTemplate(middayTemplate, assignedCrew.length),
+            eveningTitle: eveningTemplate?.title || '',
+            eveningNotes: eveningTemplate?.notes || '',
+            eveningIngredients: buildVoyageMealIngredientsFromTemplate(eveningTemplate, assignedCrew.length),
+            notes: ''
+        }, index);
+    });
+}
+
+function mergeVoyageProvisioningItems(items) {
+    const merged = new Map();
+    (Array.isArray(items) ? items : []).forEach((entry, index) => {
+        const safeEntry = sanitizeVoyageProvisioningItem(entry, index);
+        const key = `${safeEntry.scope}|${safeEntry.name.toLowerCase()}|${safeEntry.unit.toLowerCase()}|${safeEntry.stage}`;
+        const existing = merged.get(key);
+        if (!existing) {
+            merged.set(key, safeEntry);
+            return;
+        }
+        merged.set(key, sanitizeVoyageProvisioningItem({
+            ...existing,
+            quantity: Math.round((existing.quantity + safeEntry.quantity) * 100) / 100,
+            checked: existing.checked && safeEntry.checked,
+            source: existing.source === 'manual' || safeEntry.source === 'manual' ? 'manual' : 'auto'
+        }, index));
+    });
+    return Array.from(merged.values()).sort((a, b) => a.scope.localeCompare(b.scope) || a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
+
+function buildVoyageProvisioningItemsFromPlan(plan, { includeMonthlyDefaults = false } = {}) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const autoMealItems = safePlan.mealPlan.flatMap((meal, mealIndex) => {
+        const ingredients = [];
+        (meal.middayIngredients || []).forEach((entry, index) => {
+            ingredients.push(sanitizeVoyageProvisioningItem({
+                id: `meal-midday-${meal.id}-${index}`,
+                name: entry.name,
+                category: entry.category,
+                quantity: entry.quantity,
+                unit: entry.unit,
+                scope: 'voyage_food',
+                stage: 'predeparture',
+                source: 'auto',
+                checked: false,
+                notes: meal.middayTitle || ''
+            }, mealIndex + index));
+        });
+        (meal.eveningIngredients || []).forEach((entry, index) => {
+            ingredients.push(sanitizeVoyageProvisioningItem({
+                id: `meal-evening-${meal.id}-${index}`,
+                name: entry.name,
+                category: entry.category,
+                quantity: entry.quantity,
+                unit: entry.unit,
+                scope: 'voyage_food',
+                stage: 'predeparture',
+                source: 'auto',
+                checked: false,
+                notes: meal.eveningTitle || ''
+            }, mealIndex + index));
+        });
+        return ingredients;
+    });
+
+    const monthlyItems = includeMonthlyDefaults
+        ? VOYAGE_MONTHLY_PROVISIONING_DEFAULTS.map((entry, index) => sanitizeVoyageProvisioningItem({
+            ...entry,
+            id: `monthly-default-${index}`,
+            source: 'auto'
+        }, index))
+        : [];
+
+    return mergeVoyageProvisioningItems(autoMealItems.concat(monthlyItems));
+}
+
+function updateVoyagePlanManagedData(planId, updater, { rerender = true, statusMessage = '', markCloudDirty = true } = {}) {
+    let didUpdate = false;
+    const nextPlans = voyagePlans.map((plan, index) => {
+        if (plan.id !== planId) return plan;
+        didUpdate = true;
+        const safePlan = sanitizeVoyagePlan(plan, index);
+        const nextPlan = typeof updater === 'function' ? updater(safePlan) : safePlan;
+        return sanitizeVoyagePlan({
+            ...nextPlan,
+            updatedAt: new Date().toISOString()
+        }, index);
+    });
+    if (!didUpdate) return false;
+    setVoyagePlans(nextPlans, { markCloudDirty });
+    if (rerender) renderVoyageAgendaPanel();
+    if (statusMessage) setVoyagePlanStatus(statusMessage);
+    return true;
+}
+
+function regenerateVoyageMealPlan(planId) {
+    const plan = voyagePlans.find(entry => entry.id === planId) || null;
+    if (!plan) return false;
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        mealPlan: generateVoyageMealPlanEntries(safePlan)
+    }), { statusMessage: t('Menus midi/soir générés pour le voyage.', 'Menús comida/cena generados para el viaje.', 'Lunch/dinner menus generated for the trip.') });
+}
+
+function regenerateVoyageProvisioning(planId, { includeMonthlyDefaults = false } = {}) {
+    const plan = voyagePlans.find(entry => entry.id === planId) || null;
+    if (!plan) return false;
+    return updateVoyagePlanManagedData(planId, safePlan => {
+        const manualItems = safePlan.provisioningItems.filter(item => item.source !== 'auto');
+        return {
+            ...safePlan,
+            provisioningItems: mergeVoyageProvisioningItems(manualItems.concat(buildVoyageProvisioningItemsFromPlan(safePlan, { includeMonthlyDefaults })))
+        };
+    }, { statusMessage: t('Liste d\'avitaillement recalculée.', 'Lista de avituallamiento recalculada.', 'Provisioning list recalculated.') });
+}
+
+function roundAgendaProvisioningQuantity(quantity, unit) {
+    const safeUnit = String(unit || '').toLowerCase();
+    const value = Number(quantity || 0);
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    if (['pieces', 'piece', 'rouleaux', 'rouleau', 'paquets', 'paquet', 'flacons', 'flacon', 'bouteilles', 'bouteille', 'sachets', 'sachet', 'boites', 'boite'].includes(safeUnit)) {
+        return Math.ceil(value);
+    }
+    if (safeUnit === 'g') {
+        return Math.ceil(value / 50) * 50;
+    }
+    if (safeUnit === 'l') {
+        return Math.ceil(value * 2) / 2;
+    }
+    return Math.round(value * 10) / 10;
+}
+
+function mergeAgendaProvisioningItems(items) {
+    const merged = new Map();
+    (Array.isArray(items) ? items : []).forEach((entry, index) => {
+        const safeEntry = sanitizeVoyageProvisioningItem(entry, index);
+        if (!safeEntry.name || safeEntry.quantity <= 0) return;
+        const key = `${safeEntry.scope}|${safeEntry.stage}|${safeEntry.category}|${safeEntry.name.toLowerCase()}|${safeEntry.unit.toLowerCase()}`;
+        const existing = merged.get(key);
+        if (!existing) {
+            merged.set(key, safeEntry);
+            return;
+        }
+        merged.set(key, sanitizeVoyageProvisioningItem({
+            ...existing,
+            quantity: existing.quantity + safeEntry.quantity,
+            notes: [existing.notes, safeEntry.notes].filter(Boolean).join(' | ')
+        }, index));
+    });
+
+    return Array.from(merged.values()).map((entry, index) => sanitizeVoyageProvisioningItem({
+        ...entry,
+        quantity: roundAgendaProvisioningQuantity(entry.quantity, entry.unit)
+    }, index)).sort((a, b) => a.scope.localeCompare(b.scope) || a.stage.localeCompare(b.stage) || a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
+
+function buildAgendaMonthlyBoatSupplyItems({ personDays = 0, boatDays = 0 } = {}) {
+    return AGENDA_MONTHLY_BOAT_SUPPLY_RULES.map((rule, index) => sanitizeVoyageProvisioningItem({
+        id: `agenda-monthly-${index}`,
+        name: rule.name,
+        category: rule.category,
+        unit: rule.unit,
+        scope: rule.scope,
+        stage: rule.stage,
+        source: 'auto',
+        checked: false,
+        quantity: (Number(rule.quantityPerPersonDay || 0) * Math.max(0, personDays)) + (Number(rule.quantityPerBoatDay || 0) * Math.max(0, boatDays)),
+        notes: rule.notes
+    }, index)).filter(entry => entry.quantity > 0);
+}
+
+function formatProvisioningQuantityLabel(quantity, unit) {
+    const safeQuantity = Number(quantity || 0);
+    const safeUnit = String(unit || '').trim();
+    const decimals = Number.isInteger(safeQuantity) ? 0 : 1;
+    return `${safeQuantity.toFixed(decimals)} ${safeUnit}`.trim();
+}
+
+function getAgendaProvisioningScopeLabel(scope) {
+    if (scope === 'monthly_boat') return t('Vie a bord', 'Vida a bordo', 'Life on board');
+    return t('Cuisine equipage', 'Comida tripulacion', 'Crew meals');
+}
+
+function getAgendaProvisioningStageLabel(stage) {
+    if (stage === 'escale') return t('A recharger en escale', 'A reponer en escala', 'Restock at stopover');
+    if (stage === 'stock') return t('Stock permanent du bord', 'Stock permanente a bordo', 'Permanent onboard stock');
+    return t('A embarquer avant depart', 'A embarcar antes de salir', 'Load before departure');
+}
+
+function getAgendaProvisioningCategoryLabel(category) {
+    const labels = {
+        pantry: t('Epicerie', 'Despensa', 'Pantry'),
+        protein: t('Proteines', 'Proteinas', 'Protein'),
+        fresh: t('Frais', 'Fresco', 'Fresh'),
+        bakery: t('Boulangerie', 'Panaderia', 'Bakery'),
+        household: t('Vie de bord', 'Vida a bordo', 'Household'),
+        cleaning: t('Entretien', 'Limpieza', 'Cleaning'),
+        water: t('Eau', 'Agua', 'Water'),
+        drinks: t('Boissons', 'Bebidas', 'Drinks'),
+        food: t('Snacks', 'Snacks', 'Snacks')
+    };
+    return labels[String(category || '').trim()] || String(category || '').trim() || t('Divers', 'Varios', 'Misc');
+}
+
+function buildAgendaProvisioningMonthLabel(dateKeys) {
+    const labels = Array.from(new Set((Array.isArray(dateKeys) ? dateKeys : []).map(value => {
+        const date = parseDateTimeLocalValue(`${value}T12:00`);
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+        return date.toLocaleDateString(getCurrentLocale(), { month: 'long', year: 'numeric' });
+    }).filter(Boolean)));
+    return labels.join(' + ');
+}
+
+function buildAgendaProvisioningSnapshot() {
+    const entries = getFilteredVoyagePlanEntries().filter(({ plan, timeline }) => normalizeVoyagePlanStatus(plan.status) === 'planned' && timeline.length > 0);
+    const tripSummaries = [];
+    const agendaItems = [];
+    const dayKeys = new Set();
+    let totalPersonDays = 0;
+    let totalCrewSlots = 0;
+
+    entries.forEach(({ plan, timeline }, planIndex) => {
+        const safePlan = sanitizeVoyagePlan(plan, planIndex);
+        const crewMembers = getVoyageAssignedCrewMembers(safePlan);
+        const effectiveCrewCount = Math.max(1, crewMembers.length || 0);
+        const planningDays = getVoyageMealPlanningDays(timeline);
+        planningDays.forEach(day => dayKeys.add(day.date));
+        const personDays = planningDays.length * effectiveCrewCount;
+        totalPersonDays += personDays;
+        totalCrewSlots += effectiveCrewCount;
+
+        const mealPlan = safePlan.mealPlan.length ? safePlan.mealPlan : generateVoyageMealPlanEntries(safePlan);
+        const generatedPlan = sanitizeVoyagePlan({
+            ...safePlan,
+            mealPlan,
+            provisioningItems: safePlan.provisioningItems.filter(item => item.source === 'manual')
+        }, planIndex);
+
+        const generatedItems = buildVoyageProvisioningItemsFromPlan(generatedPlan, { includeMonthlyDefaults: false }).map((item, itemIndex) => sanitizeVoyageProvisioningItem({
+            ...item,
+            notes: [item.notes, safePlan.name].filter(Boolean).join(' · ')
+        }, itemIndex));
+        const manualItems = safePlan.provisioningItems.filter(item => item.source === 'manual').map((item, itemIndex) => sanitizeVoyageProvisioningItem({
+            ...item,
+            notes: [item.notes, safePlan.name].filter(Boolean).join(' · ')
+        }, itemIndex));
+        agendaItems.push(...generatedItems, ...manualItems);
+
+        tripSummaries.push({
+            id: safePlan.id,
+            name: safePlan.name,
+            crewNames: crewMembers.map(entry => getCrewMemberDisplayName(entry)),
+            startDate: timeline.find(entry => entry.departure instanceof Date)?.departure || null,
+            endDate: [...timeline].reverse().find(entry => entry.arrival instanceof Date)?.arrival || null,
+            days: planningDays.length,
+            personDays,
+            mealEntries: mealPlan.length
+        });
+    });
+
+    const sortedDayKeys = Array.from(dayKeys).sort();
+    const boatDays = sortedDayKeys.length;
+    const monthlyBoatItems = buildAgendaMonthlyBoatSupplyItems({ personDays: totalPersonDays, boatDays });
+    const mergedItems = mergeAgendaProvisioningItems(agendaItems.concat(monthlyBoatItems));
+    const distinctCrew = Array.from(new Set(entries.flatMap(({ plan }) => getVoyageAssignedCrewMembers(plan).map(entry => getCrewMemberDisplayName(entry))))).sort();
+
+    return {
+        tripSummaries,
+        items: mergedItems,
+        totalTrips: tripSummaries.length,
+        totalPersonDays,
+        totalCrewSlots,
+        boatDays,
+        distinctCrew,
+        monthLabel: buildAgendaProvisioningMonthLabel(sortedDayKeys),
+        generatedAt: new Date(),
+        dateKeys: sortedDayKeys
+    };
+}
+
+function buildAgendaProvisioningPdfFileName(snapshot) {
+    const monthPart = String(snapshot?.monthLabel || 'agenda')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\-_]+/gi, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 40);
+    const dateLabel = new Date().toISOString().slice(0, 10);
+    return `ceibo_courses_mensuelles_${monthPart || 'agenda'}_${dateLabel}.pdf`;
+}
+
+function buildAgendaProvisioningPdfHtml(snapshot) {
+    const safeSnapshot = snapshot || {};
+    const tripCardsHtml = (Array.isArray(safeSnapshot.tripSummaries) ? safeSnapshot.tripSummaries : []).map((trip, index) => {
+        const subtitle = trip.startDate && trip.endDate
+            ? String(formatDateTimeLocalLabel(trip.startDate)) + ' -> ' + String(formatDateTimeLocalLabel(trip.endDate))
+            : t('Dates a confirmer', 'Fechas por confirmar', 'Dates to confirm');
+        const crewLabel = trip.crewNames.length
+            ? trip.crewNames.join(', ')
+            : t('Aucun profil equipage, calcul base sur 1 personne.', 'Sin perfil de tripulacion, calculo basado en 1 persona.', 'No crew profile, calculation based on 1 person.');
+        const loadLabel = String(trip.days) + ' ' + t('jour(s)', 'dia(s)', 'day(s)') + ' · ' + String(trip.personDays) + ' ' + t('jour(s)-personne', 'dia(s)-persona', 'person-day(s)');
+        return [
+            '<article class="voyage-print-note-card">',
+            '<div class="voyage-print-note-card__header">',
+            '<div>',
+            '<div class="voyage-print-note-card__eyebrow">',
+            escapeHtml(t('Voyage planifie', 'Viaje planificado', 'Planned trip')),
+            '</div>',
+            '<div class="voyage-print-note-card__title">',
+            escapeHtml(trip.name),
+            '</div>',
+            '<div class="voyage-print-note-card__subtitle">',
+            escapeHtml(subtitle),
+            '</div>',
+            '</div>',
+            '<div class="voyage-print-note-card__index">',
+            escapeHtml(String(index + 1).padStart(2, '0')),
+            '</div>',
+            '</div>',
+            '<div class="voyage-print-note-card__body">',
+            '<p><strong>',
+            escapeHtml(t('Equipage', 'Tripulacion', 'Crew')),
+            ':</strong> ',
+            escapeHtml(crewLabel),
+            '</p>',
+            '<p><strong>',
+            escapeHtml(t('Charge avitaillement', 'Carga avituallamiento', 'Provisioning load')),
+            ':</strong> ',
+            escapeHtml(loadLabel),
+            '</p>',
+            '</div>',
+            '</article>'
+        ].join('');
+    }).join('');
+    const emptyTripCardsHtml = '<article class="voyage-print-note-card"><div class="voyage-print-note-card__body"><p>'
+        + escapeHtml(t('Aucun voyage planifie visible.', 'No hay viajes planificados visibles.', 'No visible planned trips.'))
+        + '</p></div></article>';
+
+    const groupedItems = (Array.isArray(safeSnapshot.items) ? safeSnapshot.items : []).reduce((accumulator, item) => {
+        const groupKey = `${item.scope}|${item.stage}`;
+        if (!accumulator[groupKey]) accumulator[groupKey] = [];
+        accumulator[groupKey].push(item);
+        return accumulator;
+    }, {});
+
+    const shoppingCardsHtml = Object.entries(groupedItems).map(([groupKey, items]) => {
+        const [scope, stage] = groupKey.split('|');
+        const bodyHtml = items.map(item => [
+            '<li><strong>',
+            escapeHtml(item.name),
+            '</strong> · ',
+            escapeHtml(formatProvisioningQuantityLabel(item.quantity, item.unit)),
+            ' · ',
+            escapeHtml(getAgendaProvisioningCategoryLabel(item.category)),
+            item.notes ? ' · ' + escapeHtml(item.notes) : '',
+            '</li>'
+        ].join('')).join('');
+        return [
+            '<article class="voyage-print-note-card">',
+            '<div class="voyage-print-note-card__header">',
+            '<div>',
+            '<div class="voyage-print-note-card__eyebrow">',
+            escapeHtml(getAgendaProvisioningScopeLabel(scope)),
+            '</div>',
+            '<div class="voyage-print-note-card__title">',
+            escapeHtml(getAgendaProvisioningStageLabel(stage)),
+            '</div>',
+            '<div class="voyage-print-note-card__subtitle">',
+            escapeHtml(String(items.length) + ' ' + t('poste(s)', 'elemento(s)', 'item(s)')),
+            '</div>',
+            '</div>',
+            '</div>',
+            '<div class="voyage-print-note-card__body"><ul>',
+            bodyHtml,
+            '</ul></div>',
+            '</article>'
+        ].join('');
+    }).join('');
+
+    return [
+        '<!DOCTYPE html>',
+        '<html lang="',
+        escapeHtml(currentLanguage),
+        '">',
+        '<head>',
+        '<meta charset="utf-8">',
+        '<title>',
+        escapeHtml(t('Courses mensuelles CEIBO', 'Compras mensuales CEIBO', 'CEIBO monthly shopping')),
+        '</title>',
+        '<style>',
+        ':root { color-scheme: light; }',
+        '* { box-sizing: border-box; }',
+        "body { margin: 0; font: 14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color: #173047; background: #f3f7fb; }",
+        '.print-shell { display: block; width: 790px; margin: 0 auto; padding: 24px; }',
+        '.print-shell > * { margin-bottom: 18px; }',
+        '.print-shell > *:last-child { margin-bottom: 0; }',
+        '.print-hero { padding: 24px; border-radius: 24px; background: linear-gradient(135deg, #0f395a, #1f628f 58%, #7ab6d8); color: #fff; }',
+        '.print-hero__eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.78; }',
+        '.print-hero__title { margin-top: 10px; font: 700 30px/1.08 Georgia, serif; }',
+        '.print-hero__desc { margin-top: 10px; max-width: 640px; color: rgba(255,255,255,0.82); }',
+        '.print-stats { margin-top: 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }',
+        '.print-stat { padding: 12px 14px; border-radius: 18px; background: rgba(255,255,255,0.13); border: 1px solid rgba(255,255,255,0.18); }',
+        '.print-stat span { display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.72; }',
+        '.print-stat strong { display: block; margin-top: 6px; font-size: 17px; }',
+        '.print-section { padding: 18px 20px; border-radius: 20px; background: #fff; border: 1px solid rgba(25, 67, 96, 0.08); }',
+        '.print-section__title { margin: 0; font: 700 22px/1.18 Georgia, serif; color: #14324b; }',
+        '.print-meta { margin-top: 6px; color: rgba(52, 76, 96, 0.75); font-size: 12px; }',
+        '.voyage-print-note-list { display: grid; gap: 18px; }',
+        '.voyage-print-note-card { padding: 0; background: transparent; border: 0; border-top: 1px solid rgba(35, 90, 128, 0.14); break-inside: avoid-page; page-break-inside: avoid; }',
+        '.voyage-print-note-card:first-child { border-top: 0; }',
+        '.voyage-print-note-card__header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; margin-bottom: 8px; padding-top: 14px; }',
+        '.voyage-print-note-card__eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(27, 72, 104, 0.56); }',
+        '.voyage-print-note-card__title { margin-top: 3px; font: 700 17px/1.25 Georgia, serif; color: #12314a; }',
+        '.voyage-print-note-card__subtitle { margin-top: 3px; font-size: 12px; color: rgba(64, 82, 100, 0.72); }',
+        '.voyage-print-note-card__index { min-width: 28px; padding-top: 2px; font-size: 11px; letter-spacing: 0.08em; color: rgba(20, 58, 84, 0.56); text-align: right; }',
+        '.voyage-print-note-card__body { font-size: 12px; line-height: 1.72; color: #193548; padding-right: 6px; }',
+        '.voyage-print-note-card__body ul { margin: 8px 0 8px 18px; padding: 0; }',
+        '.voyage-print-note-card__body li { margin: 0 0 4px; }',
+        '.print-footer { font-size: 11px; color: rgba(61, 83, 103, 0.74); text-align: right; break-inside: avoid-page; page-break-inside: avoid; }',
+        '</style>',
+        '</head>',
+        '<body>',
+        '<main class="print-shell">',
+        '<section class="print-hero">',
+        '<div class="print-hero__eyebrow">',
+        escapeHtml(t('AVITAILLEMENT MENSUEL - CEIBO', 'AVITUALLAMIENTO MENSUAL - CEIBO', 'MONTHLY PROVISIONING - CEIBO')),
+        '</div>',
+        '<div class="print-hero__title">',
+        escapeHtml(safeSnapshot.monthLabel || t('Agenda courant', 'Agenda actual', 'Current agenda')),
+        '</div>',
+        '<div class="print-hero__desc">',
+        escapeHtml(t('Liste de courses construite a partir de l agenda visible, des durees de navigation, des escales et de l equipage affecte a chaque voyage.', 'Lista de compras construida a partir de la agenda visible, las duraciones de navegacion, las escalas y la tripulacion asignada a cada viaje.', 'Shopping list built from the visible agenda, sailing durations, stopovers, and crew assigned to each trip.')),
+        '</div>',
+        '<div class="print-stats">',
+        '<div class="print-stat"><span>', escapeHtml(t('Voyages', 'Viajes', 'Trips')), '</span><strong>', escapeHtml(String(safeSnapshot.totalTrips || 0)), '</strong></div>',
+        '<div class="print-stat"><span>', escapeHtml(t('Jours bateau', 'Dias barco', 'Boat days')), '</span><strong>', escapeHtml(String(safeSnapshot.boatDays || 0)), '</strong></div>',
+        '<div class="print-stat"><span>', escapeHtml(t('Jours-personne', 'Dias-persona', 'Person-days')), '</span><strong>', escapeHtml(String(safeSnapshot.totalPersonDays || 0)), '</strong></div>',
+        '<div class="print-stat"><span>', escapeHtml(t('Equipage concerne', 'Tripulacion cubierta', 'Crew covered')), '</span><strong>', escapeHtml(String((safeSnapshot.distinctCrew || []).length || safeSnapshot.totalCrewSlots || 0)), '</strong></div>',
+        '</div>',
+        '</section>',
+        '<section class="print-section">',
+        '<h2 class="print-section__title">', escapeHtml(t('Voyages pris en compte', 'Viajes tenidos en cuenta', 'Trips included')), '</h2>',
+        '<div class="print-meta">', escapeHtml(t('Le calcul suit les voyages visibles dans l agenda et actuellement filtres.', 'El calculo sigue los viajes visibles en la agenda y actualmente filtrados.', 'The calculation follows the trips currently visible in the filtered agenda.')), '</div>',
+        '<div class="voyage-print-note-list">', tripCardsHtml || emptyTripCardsHtml, '</div>',
+        '</section>',
+        '<section class="print-section">',
+        '<h2 class="print-section__title">', escapeHtml(t('Liste de courses', 'Lista de compras', 'Shopping list')), '</h2>',
+        '<div class="print-meta">', escapeHtml(t('Inclut la nourriture calculee depuis les repas de voyage et les essentiels de vie a bord pour un voilier.', 'Incluye la comida calculada desde las comidas del viaje y los esenciales de vida a bordo para un velero.', 'Includes food calculated from trip meals and sailing-boat life essentials.')), '</div>',
+        '<div class="voyage-print-note-list">', shoppingCardsHtml, '</div>',
+        '</section>',
+        '<div class="print-footer">',
+        escapeHtml(t('Document genere le', 'Documento generado el', 'Document generated on')),
+        ' ',
+        escapeHtml(safeSnapshot.generatedAt instanceof Date ? safeSnapshot.generatedAt.toLocaleString(getCurrentLocale()) : new Date().toLocaleString(getCurrentLocale())),
+        '</div>',
+        '</main>',
+        '</body>',
+        '</html>'
+    ].join('');
+}
+
+async function exportAgendaProvisioningPdfReport() {
+    const button = document.getElementById('voyageAgendaProvisioningPdfBtn');
+    if (button) {
+        button.disabled = true;
+        button.textContent = t('Préparation PDF courses...', 'Preparando PDF compras...', 'Preparing shopping PDF...');
+    }
+
+    try {
+        const snapshot = buildAgendaProvisioningSnapshot();
+        if (!snapshot.totalTrips || !snapshot.items.length) {
+            throw new Error('agenda-provisioning-empty');
+        }
+        const html = buildAgendaProvisioningPdfHtml(snapshot);
+        const blob = await renderVoyagePdfBlobFromHtml(html);
+        const fileName = buildAgendaProvisioningPdfFileName(snapshot);
+        downloadBlobAsFile(blob, fileName);
+        setVoyageAgendaProvisioningStatus(t(
+            `PDF généré pour ${snapshot.totalTrips} voyage(s) et ${snapshot.items.length} poste(s) de courses.`,
+            `PDF generado para ${snapshot.totalTrips} viaje(s) y ${snapshot.items.length} elemento(s) de compras.`,
+            `PDF generated for ${snapshot.totalTrips} trip(s) and ${snapshot.items.length} shopping items.`
+        ));
+    } catch (error) {
+        console.error('Unable to export agenda provisioning PDF:', error);
+        setVoyageAgendaProvisioningStatus(t(
+            'Impossible de générer la liste mensuelle. Vérifie qu au moins un voyage planifié est visible dans l agenda.',
+            'No se puede generar la lista mensual. Verifica que al menos un viaje planificado sea visible en la agenda.',
+            'Unable to generate the monthly list. Check that at least one planned trip is visible in the agenda.'
+        ), true);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = t('Générer PDF courses mensuelles', 'Generar PDF compras mensuales', 'Generate monthly shopping PDF');
+        }
+    }
+}
+
+function seedVoyageMonthlyEssentials(planId) {
+    const plan = voyagePlans.find(entry => entry.id === planId) || null;
+    if (!plan) return false;
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        provisioningItems: mergeVoyageProvisioningItems(safePlan.provisioningItems.concat(VOYAGE_MONTHLY_PROVISIONING_DEFAULTS.map((entry, index) => sanitizeVoyageProvisioningItem({
+            ...entry,
+            id: `monthly-seed-${Date.now()}-${index}`,
+            source: 'auto'
+        }, index))))
+    }), { statusMessage: t('Consommables mensuels ajoutés à l\'avitaillement.', 'Consumibles mensuales añadidos al avituallamiento.', 'Monthly consumables added to provisioning.') });
+}
+
+function addVoyageProvisioningItem(planId) {
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        provisioningItems: safePlan.provisioningItems.concat(sanitizeVoyageProvisioningItem({
+            id: generateClientUuid(),
+            name: '',
+            category: 'pantry',
+            scope: 'voyage_food',
+            quantity: 1,
+            unit: 'pieces',
+            stage: 'predeparture',
+            source: 'manual',
+            checked: false,
+            notes: ''
+        }, safePlan.provisioningItems.length))
+    }), { statusMessage: t('Ligne d\'avitaillement ajoutée.', 'Línea de avituallamiento añadida.', 'Provisioning line added.') });
+}
+
+function removeVoyageProvisioningItem(planId, itemId) {
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        provisioningItems: safePlan.provisioningItems.filter(item => item.id !== itemId)
+    }), { statusMessage: t('Ligne d\'avitaillement supprimée.', 'Línea de avituallamiento eliminada.', 'Provisioning line removed.') });
+}
+
+function readVoyageBudgetDraftFromDom() {
+    return sanitizeVoyageBudgetItem({
+        id: generateClientUuid(),
+        date: document.getElementById('voyageBudgetDateInput')?.value || new Date().toISOString().slice(0, 10),
+        label: document.getElementById('voyageBudgetLabelInput')?.value || '',
+        amount: document.getElementById('voyageBudgetAmountInput')?.value || 0,
+        scope: document.getElementById('voyageBudgetScopeInput')?.value || 'voyage_food',
+        category: document.getElementById('voyageBudgetCategoryInput')?.value || 'food',
+        currency: document.getElementById('voyageBudgetCurrencyInput')?.value || 'EUR',
+        payer: document.getElementById('voyageBudgetPayerInput')?.value || '',
+        notes: document.getElementById('voyageBudgetNotesInput')?.value || ''
+    });
+}
+
+function resetVoyageBudgetDraftInputs() {
+    const defaults = {
+        voyageBudgetDateInput: new Date().toISOString().slice(0, 10),
+        voyageBudgetLabelInput: '',
+        voyageBudgetAmountInput: '',
+        voyageBudgetScopeInput: 'voyage_food',
+        voyageBudgetCategoryInput: 'food',
+        voyageBudgetCurrencyInput: 'EUR',
+        voyageBudgetPayerInput: '',
+        voyageBudgetNotesInput: ''
+    };
+    Object.entries(defaults).forEach(([id, value]) => {
+        const node = document.getElementById(id);
+        if (node) node.value = value;
+    });
+}
+
+function addVoyageBudgetItem(planId) {
+    const draft = readVoyageBudgetDraftFromDom();
+    if (!draft.label && draft.amount <= 0) {
+        setVoyagePlanStatus(t('Renseigne au moins un libellé ou un montant.', 'Indica al menos un concepto o un importe.', 'Enter at least a label or an amount.'), true);
+        return false;
+    }
+    const didUpdate = updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        budgetItems: [draft].concat(safePlan.budgetItems)
+    }), { statusMessage: t('Dépense ajoutée au budget voyage.', 'Gasto añadido al presupuesto del viaje.', 'Expense added to the trip budget.') });
+    if (didUpdate) resetVoyageBudgetDraftInputs();
+    return didUpdate;
+}
+
+function removeVoyageBudgetItem(planId, itemId) {
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        budgetItems: safePlan.budgetItems.filter(item => item.id !== itemId)
+    }), { statusMessage: t('Dépense supprimée du budget.', 'Gasto eliminado del presupuesto.', 'Expense removed from the budget.') });
+}
+
+function updateVoyageMealEntryField(planId, mealId, field, value) {
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        mealPlan: safePlan.mealPlan.map((meal, index) => meal.id === mealId
+            ? sanitizeVoyageMealEntry({ ...meal, [field]: String(value || '').trim() }, index)
+            : meal)
+    }), { rerender: false });
+}
+
+function updateVoyageProvisioningItemField(planId, itemId, field, value) {
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        provisioningItems: safePlan.provisioningItems.map((item, index) => item.id === itemId
+            ? sanitizeVoyageProvisioningItem({ ...item, [field]: field === 'checked' ? !!value : value }, index)
+            : item)
+    }), { rerender: false });
+}
+
+function updateVoyageBudgetItemField(planId, itemId, field, value) {
+    return updateVoyagePlanManagedData(planId, safePlan => ({
+        ...safePlan,
+        budgetItems: safePlan.budgetItems.map((item, index) => item.id === itemId
+            ? sanitizeVoyageBudgetItem({ ...item, [field]: value }, index)
+            : item)
+    }), { rerender: false });
+}
+
+function formatVoyageBudgetCurrency(amount, currency = 'EUR') {
+    const safeAmount = Number(amount || 0);
+    const safeCurrency = String(currency || 'EUR').trim() || 'EUR';
+    try {
+        return new Intl.NumberFormat(getCurrentLocale(), { style: 'currency', currency: safeCurrency, maximumFractionDigits: 2 }).format(safeAmount);
+    } catch (_error) {
+        return `${safeAmount.toFixed(2)} ${safeCurrency}`;
+    }
+}
+
+function getVoyageBudgetTotals(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    return safePlan.budgetItems.reduce((acc, item) => {
+        const scope = normalizeVoyageBudgetScope(item.scope);
+        acc[scope] += Number(item.amount || 0) || 0;
+        return acc;
+    }, { voyage_food: 0, monthly_boat: 0 });
+}
+
+function normalizeActiveVoyageDetailTab(value) {
+    const normalized = String(value || '').trim();
+    if (normalized === 'operations') return 'operations';
+    if (normalized === 'documents') return 'documents';
+    return 'itinerary';
+}
+
+function setActiveVoyageDetailTab(tabKey) {
+    activeVoyageDetailTab = normalizeActiveVoyageDetailTab(tabKey);
+}
+
+function normalizeVoyageDocumentGithubSettings(value) {
+    const owner = String(value?.owner || '0GURUGUAY').trim() || '0GURUGUAY';
+    const repo = String(value?.repo || 'RAG').trim() || 'RAG';
+    const branch = String(value?.branch || 'main').trim() || 'main';
+    const basePath = String(value?.basePath || 'ceibo-documents/voyages').trim().replace(/^\/+|\/+$/g, '') || 'ceibo-documents/voyages';
+    const token = String(value?.token || '').trim();
+    return { owner, repo, branch, basePath, token };
+}
+
+function loadVoyageDocumentGithubSettingsFromStorage() {
+    try {
+        const raw = localStorage.getItem(VOYAGE_DOCUMENT_GITHUB_SETTINGS_STORAGE_KEY);
+        if (!raw) return normalizeVoyageDocumentGithubSettings({});
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return normalizeVoyageDocumentGithubSettings({});
+        return normalizeVoyageDocumentGithubSettings(parsed);
+    } catch (_error) {
+        return normalizeVoyageDocumentGithubSettings({});
+    }
+}
+
+function persistVoyageDocumentGithubSettingsToStorage() {
+    try {
+        localStorage.setItem(
+            VOYAGE_DOCUMENT_GITHUB_SETTINGS_STORAGE_KEY,
+            JSON.stringify(normalizeVoyageDocumentGithubSettings(voyageDocumentGithubSettings || {}))
+        );
+    } catch (_error) {
+        // Ignore storage errors in private mode.
+    }
+}
+
+function getVoyageDocumentGithubSettings() {
+    if (!voyageDocumentGithubSettings) {
+        voyageDocumentGithubSettings = loadVoyageDocumentGithubSettingsFromStorage();
+    }
+    return normalizeVoyageDocumentGithubSettings(voyageDocumentGithubSettings);
+}
+
+function setVoyageDocumentGithubSettings(nextSettings) {
+    voyageDocumentGithubSettings = normalizeVoyageDocumentGithubSettings(nextSettings);
+    persistVoyageDocumentGithubSettingsToStorage();
+    return getVoyageDocumentGithubSettings();
+}
+
+function readVoyageDocumentGithubSettingsFromDom() {
+    return normalizeVoyageDocumentGithubSettings({
+        owner: document.getElementById('voyageDocumentGithubOwnerInput')?.value,
+        repo: document.getElementById('voyageDocumentGithubRepoInput')?.value,
+        branch: document.getElementById('voyageDocumentGithubBranchInput')?.value,
+        basePath: document.getElementById('voyageDocumentGithubBasePathInput')?.value,
+        token: document.getElementById('voyageDocumentGithubTokenInput')?.value
+    });
+}
+
+async function encodeFileToBase64(file) {
+    if (!file) return '';
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        const chunk = bytes.subarray(index, index + chunkSize);
+        binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+}
+
+function buildVoyageDocumentGitHubPath(plan, fileName, settings) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const safeName = String(fileName || 'document').replace(/[^a-zA-Z0-9._-]/g, '_') || 'document';
+    const prefix = String(settings?.basePath || '').trim().replace(/^\/+|\/+$/g, '') || 'ceibo-documents/voyages';
+    return `${prefix}/${safePlan.id}/${Date.now()}-${safeName}`;
+}
+
+function buildVoyageDocumentGitHubApiUrl(settings, githubPath) {
+    const safeSettings = normalizeVoyageDocumentGithubSettings(settings);
+    const encodedPath = String(githubPath || '')
+        .split('/')
+        .filter(Boolean)
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+    return `https://api.github.com/repos/${encodeURIComponent(safeSettings.owner)}/${encodeURIComponent(safeSettings.repo)}/contents/${encodedPath}`;
+}
+
+async function readGitHubResponsePayload(response) {
+    const raw = await response.text();
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch (_error) {
+        return raw;
+    }
+}
+
+function formatGitHubApiError(payload, fallbackStatusText = '', statusCode = 0) {
+    const baseMessage = payload && typeof payload === 'object' && payload.message
+        ? String(payload.message || fallbackStatusText || '').trim()
+        : String(payload || fallbackStatusText || '').trim() || 'GitHub error';
+
+    if (statusCode === 401) {
+        return `${baseMessage} · ${t('Token GitHub invalide ou expiré.', 'Token GitHub inválido o caducado.', 'GitHub token invalid or expired.')}`;
+    }
+
+    if (statusCode === 403) {
+        const hint = t(
+            'Vérifie que le token a accès au dépôt 0GURUGUAY/RAG et la permission Contents: Read and write. Si 0GURUGUAY est une organisation, crée le token sous cet owner ou autorise-le côté organisation.',
+            'Verifica que el token tenga acceso al repositorio 0GURUGUAY/RAG y el permiso Contents: Read and write. Si 0GURUGUAY es una organización, crea el token bajo ese owner o autorízalo en la organización.',
+            'Check that the token can access repository 0GURUGUAY/RAG and has Contents: Read and write. If 0GURUGUAY is an organization, create the token under that owner or authorize it in the organization.'
+        );
+        return `${baseMessage} · ${hint}`;
+    }
+
+    return baseMessage;
+}
+
+async function uploadVoyageDocumentToGitHub(plan, file, title, description, settings) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const safeSettings = normalizeVoyageDocumentGithubSettings(settings);
+    if (!safeSettings.token) {
+        throw new Error(t('Renseigne un token GitHub avant l\'upload.', 'Completa un token GitHub antes de subir.', 'Provide a GitHub token before upload.'));
+    }
+    if (!file) {
+        throw new Error(t('Choisis un fichier avant ajout.', 'Elige un archivo antes de añadir.', 'Choose a file before adding.'));
+    }
+
+    const githubPath = buildVoyageDocumentGitHubPath(safePlan, file.name, safeSettings);
+    const response = await fetch(buildVoyageDocumentGitHubApiUrl(safeSettings, githubPath), {
+        method: 'PUT',
+        headers: {
+            Authorization: `Bearer ${safeSettings.token}`,
+            Accept: 'application/vnd.github+json',
+            'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        },
+        body: JSON.stringify({
+            message: `ceibo: add voyage document ${safePlan.name} / ${String(title || file.name || 'document').trim() || 'document'}`,
+            content: await encodeFileToBase64(file),
+            branch: safeSettings.branch
+        })
+    });
+
+    const responsePayload = await readGitHubResponsePayload(response);
+    if (!response.ok) {
+        throw new Error(formatGitHubApiError(responsePayload, response.statusText, response.status));
+    }
+
+    const content = responsePayload?.content || {};
+    return sanitizeVoyageDocumentEntry({
+        id: generateClientUuid(),
+        title: String(title || file.name || '').trim(),
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        sizeBytes: Number(file.size || 0) || 0,
+        description: String(description || '').trim(),
+        githubPath,
+        downloadUrl: content.download_url || '',
+        htmlUrl: content.html_url || '',
+        sha: content.sha || '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    });
+}
+
+async function fetchVoyageDocumentBlobFromGitHub(entry, settings) {
+    const safeEntry = sanitizeVoyageDocumentEntry(entry, 0);
+    const safeSettings = normalizeVoyageDocumentGithubSettings(settings);
+    if (!safeEntry.githubPath || !safeSettings.token) return null;
+
+    const response = await fetch(buildVoyageDocumentGitHubApiUrl(safeSettings, safeEntry.githubPath), {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${safeSettings.token}`,
+            Accept: 'application/vnd.github.raw',
+            'X-GitHub-Api-Version': '2022-11-28'
+        }
+    });
+    if (!response.ok) {
+        const responsePayload = await readGitHubResponsePayload(response);
+        throw new Error(formatGitHubApiError(responsePayload, response.statusText, response.status));
+    }
+    return response.blob();
+}
+
+async function deleteVoyageDocumentFromGitHub(entry, settings, voyageName = '') {
+    const safeEntry = sanitizeVoyageDocumentEntry(entry, 0);
+    const safeSettings = normalizeVoyageDocumentGithubSettings(settings);
+    if (!safeEntry.githubPath) return true;
+    if (!safeSettings.token) {
+        throw new Error(t('Renseigne un token GitHub pour supprimer le fichier distant.', 'Completa un token GitHub para borrar el archivo remoto.', 'Provide a GitHub token to delete the remote file.'));
+    }
+    if (!safeEntry.sha) {
+        throw new Error(t('SHA GitHub manquant pour ce document.', 'Falta el SHA GitHub para este documento.', 'Missing GitHub SHA for this document.'));
+    }
+
+    const response = await fetch(buildVoyageDocumentGitHubApiUrl(safeSettings, safeEntry.githubPath), {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bearer ${safeSettings.token}`,
+            Accept: 'application/vnd.github+json',
+            'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        },
+        body: JSON.stringify({
+            message: `ceibo: delete voyage document ${String(voyageName || '').trim() || 'voyage'} / ${safeEntry.title}`,
+            sha: safeEntry.sha,
+            branch: safeSettings.branch
+        })
+    });
+
+    const responsePayload = await readGitHubResponsePayload(response);
+    if (!response.ok) {
+        throw new Error(formatGitHubApiError(responsePayload, response.statusText, response.status));
+    }
+    return true;
+}
+
+function getVoyageFoodCrewSummary(plan, assignedCrew) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const safeCrew = Array.isArray(assignedCrew) ? assignedCrew : getVoyageAssignedCrewMembers(safePlan);
+    if (!safeCrew.length) {
+        return t('Aucun équipier affecté: le générateur partira sur des repas standards.', 'Sin tripulación asignada: el generador partirá de comidas estándar.', 'No crew assigned: the generator will use standard meals.');
+    }
+    const summary = safeCrew.map(entry => `${getCrewMemberDisplayName(entry)} · ${formatCrewDietaryProfileLabel(entry.dietaryProfile)}`);
+    return summary.join(' | ');
+}
+
+function renderVoyageOperationsSection(plan, timeline, assignedCrew) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const mealEntries = safePlan.mealPlan;
+    const provisioningItems = safePlan.provisioningItems;
+    const budgetItems = safePlan.budgetItems;
+    const budgetTotals = getVoyageBudgetTotals(safePlan);
+    const checkedProvisioningCount = provisioningItems.filter(item => item.checked).length;
+    const navigationDays = mealEntries.filter(item => item.dayType === 'navigation').length;
+    const mouillageDays = mealEntries.filter(item => item.dayType === 'mouillage').length;
+
+    return `
+        <section class="voyage-ops-card">
+            <div class="voyage-ops-card__header">
+                <div>
+                    <div class="voyage-agenda-voyage__meta">${escapeHtml(t('Vie à bord', 'Vida a bordo', 'Life on board'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(getVoyageFoodCrewSummary(safePlan, assignedCrew))}</div>
+                </div>
+                <div class="voyage-ops-card__actions">
+                    <button type="button" data-voyage-food-action="generate-meals" data-voyage-plan-id="${escapeHtml(safePlan.id)}">${escapeHtml(t('Générer menus', 'Generar menús', 'Generate menus'))}</button>
+                    <button type="button" data-voyage-food-action="generate-provisioning" data-voyage-plan-id="${escapeHtml(safePlan.id)}">${escapeHtml(t('Calculer avitaillement', 'Calcular avituallamiento', 'Build provisioning'))}</button>
+                    <button type="button" data-voyage-food-action="seed-monthly" data-voyage-plan-id="${escapeHtml(safePlan.id)}">${escapeHtml(t('Ajouter mensuel bateau', 'Añadir mensual barco', 'Add monthly boat basics'))}</button>
+                </div>
+            </div>
+            <div class="voyage-ops-card__stats">
+                <span>${escapeHtml(t('Jours nav', 'Días nav', 'Nav days'))}: <strong>${navigationDays}</strong></span>
+                <span>${escapeHtml(t('Jours mouillage', 'Días fondeo', 'Anchorage days'))}: <strong>${mouillageDays}</strong></span>
+                <span>${escapeHtml(t('Achats cochés', 'Compras marcadas', 'Checked items'))}: <strong>${checkedProvisioningCount}/${provisioningItems.length}</strong></span>
+                <span>${escapeHtml(t('Nourriture voyage', 'Comida viaje', 'Trip food'))}: <strong>${escapeHtml(formatVoyageBudgetCurrency(budgetTotals.voyage_food))}</strong></span>
+                <span>${escapeHtml(t('Mensuel bateau', 'Mensual barco', 'Monthly boat'))}: <strong>${escapeHtml(formatVoyageBudgetCurrency(budgetTotals.monthly_boat))}</strong></span>
+            </div>
+            <div class="voyage-ops-grid">
+                <div class="voyage-ops-block">
+                    <div class="voyage-ops-block__title">${escapeHtml(t('Menus midi / soir', 'Menús comida / cena', 'Lunch / dinner menus'))}</div>
+                    ${mealEntries.length ? mealEntries.map(entry => `
+                        <article class="voyage-meal-card">
+                            <div class="voyage-meal-card__header">
+                                <strong>${escapeHtml(formatVoyageMealDateLabel(entry.date))}</strong>
+                                <span class="voyage-meal-card__badge">${escapeHtml(entry.dayType === 'navigation' ? t('Navigation', 'Navegación', 'Navigation') : t('Mouillage', 'Fondeo', 'Anchorage'))}</span>
+                            </div>
+                            <label>${escapeHtml(t('Midi', 'Comida', 'Lunch'))}</label>
+                            <textarea data-voyage-meal-field="middayTitle" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-meal-id="${escapeHtml(entry.id)}">${escapeHtml(entry.middayTitle)}</textarea>
+                            <div class="voyage-meal-card__ingredients">${escapeHtml((entry.middayIngredients || []).map(item => `${item.name} (${item.quantity} ${item.unit})`).join(', ') || t('Ingrédients à préciser', 'Ingredientes por precisar', 'Ingredients to refine'))}</div>
+                            <label>${escapeHtml(t('Soir', 'Cena', 'Dinner'))}</label>
+                            <textarea data-voyage-meal-field="eveningTitle" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-meal-id="${escapeHtml(entry.id)}">${escapeHtml(entry.eveningTitle)}</textarea>
+                            <div class="voyage-meal-card__ingredients">${escapeHtml((entry.eveningIngredients || []).map(item => `${item.name} (${item.quantity} ${item.unit})`).join(', ') || t('Ingrédients à préciser', 'Ingredientes por precisar', 'Ingredients to refine'))}</div>
+                            <label>${escapeHtml(t('Note', 'Nota', 'Note'))}</label>
+                            <input type="text" value="${escapeHtml(entry.notes || '')}" data-voyage-meal-field="notes" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-meal-id="${escapeHtml(entry.id)}">
+                        </article>
+                    `).join('') : `<div class="voyage-ops-empty">${escapeHtml(t('Aucun menu généré pour ce voyage.', 'No hay menús generados para este viaje.', 'No menus generated for this trip.'))}</div>`}
+                </div>
+                <div class="voyage-ops-block">
+                    <div class="voyage-ops-block__title">${escapeHtml(t('Avitaillement', 'Avituallamiento', 'Provisioning'))}</div>
+                    <div class="voyage-ops-inline-actions">
+                        <button type="button" data-voyage-food-action="add-provisioning" data-voyage-plan-id="${escapeHtml(safePlan.id)}">${escapeHtml(t('Ajouter ligne', 'Añadir línea', 'Add row'))}</button>
+                    </div>
+                    ${provisioningItems.length ? provisioningItems.map(item => `
+                        <div class="voyage-provision-row">
+                            <input type="checkbox" ${item.checked ? 'checked' : ''} data-voyage-provisioning-field="checked" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}">
+                            <input type="text" value="${escapeHtml(item.name)}" data-voyage-provisioning-field="name" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}" placeholder="${escapeHtml(t('Article', 'Artículo', 'Item'))}">
+                            <input type="number" min="0" step="0.1" value="${escapeHtml(String(item.quantity))}" data-voyage-provisioning-field="quantity" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}">
+                            <input type="text" value="${escapeHtml(item.unit)}" data-voyage-provisioning-field="unit" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}">
+                            <select data-voyage-provisioning-field="scope" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}">
+                                <option value="voyage_food"${item.scope === 'voyage_food' ? ' selected' : ''}>${escapeHtml(t('Voyage nourriture', 'Viaje comida', 'Trip food'))}</option>
+                                <option value="monthly_boat"${item.scope === 'monthly_boat' ? ' selected' : ''}>${escapeHtml(t('Mensuel bateau', 'Mensual barco', 'Monthly boat'))}</option>
+                            </select>
+                            <select data-voyage-provisioning-field="stage" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}">
+                                <option value="predeparture"${item.stage === 'predeparture' ? ' selected' : ''}>${escapeHtml(t('Avant départ', 'Antes salida', 'Before departure'))}</option>
+                                <option value="escale"${item.stage === 'escale' ? ' selected' : ''}>${escapeHtml(t('En escale', 'En escala', 'At stopover'))}</option>
+                                <option value="stock"${item.stage === 'stock' ? ' selected' : ''}>${escapeHtml(t('Déjà à bord', 'Ya a bordo', 'Already onboard'))}</option>
+                            </select>
+                            <button type="button" data-voyage-food-action="delete-provisioning" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-provisioning-id="${escapeHtml(item.id)}">${escapeHtml(t('Suppr.', 'Borrar', 'Delete'))}</button>
+                        </div>
+                    `).join('') : `<div class="voyage-ops-empty">${escapeHtml(t('Aucun article d\'avitaillement.', 'Sin artículos de avituallamiento.', 'No provisioning items.'))}</div>`}
+                </div>
+                <div class="voyage-ops-block">
+                    <div class="voyage-ops-block__title">${escapeHtml(t('Budget du voyage', 'Presupuesto del viaje', 'Trip budget'))}</div>
+                    <div class="voyage-budget-form">
+                        <input id="voyageBudgetDateInput" type="date" value="${escapeHtml(new Date().toISOString().slice(0, 10))}">
+                        <input id="voyageBudgetLabelInput" type="text" placeholder="${escapeHtml(t('Libellé', 'Concepto', 'Label'))}">
+                        <input id="voyageBudgetAmountInput" type="number" min="0" step="0.01" placeholder="0.00">
+                        <select id="voyageBudgetScopeInput">
+                            <option value="voyage_food">${escapeHtml(t('Voyage nourriture', 'Viaje comida', 'Trip food'))}</option>
+                            <option value="monthly_boat">${escapeHtml(t('Mensuel bateau', 'Mensual barco', 'Monthly boat'))}</option>
+                        </select>
+                        <select id="voyageBudgetCategoryInput">
+                            <option value="food">${escapeHtml(t('Alimentation', 'Alimentación', 'Food'))}</option>
+                            <option value="drinks">${escapeHtml(t('Boissons', 'Bebidas', 'Drinks'))}</option>
+                            <option value="household">${escapeHtml(t('Consommables', 'Consumibles', 'Household'))}</option>
+                            <option value="water">${escapeHtml(t('Eau / glace', 'Agua / hielo', 'Water / ice'))}</option>
+                            <option value="market">${escapeHtml(t('Marché / escale', 'Mercado / escala', 'Market / stopover'))}</option>
+                            <option value="other">${escapeHtml(t('Autre', 'Otro', 'Other'))}</option>
+                        </select>
+                        <input id="voyageBudgetCurrencyInput" type="text" value="EUR">
+                        <input id="voyageBudgetPayerInput" type="text" placeholder="${escapeHtml(t('Payé par', 'Pagado por', 'Paid by'))}">
+                        <input id="voyageBudgetNotesInput" type="text" placeholder="${escapeHtml(t('Note', 'Nota', 'Note'))}">
+                        <button type="button" data-voyage-food-action="add-budget" data-voyage-plan-id="${escapeHtml(safePlan.id)}">${escapeHtml(t('Ajouter dépense', 'Añadir gasto', 'Add expense'))}</button>
+                    </div>
+                    ${budgetItems.length ? budgetItems.map(item => `
+                        <div class="voyage-budget-row">
+                            <input type="date" value="${escapeHtml(item.date)}" data-voyage-budget-field="date" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-budget-id="${escapeHtml(item.id)}">
+                            <input type="text" value="${escapeHtml(item.label)}" data-voyage-budget-field="label" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-budget-id="${escapeHtml(item.id)}">
+                            <input type="number" min="0" step="0.01" value="${escapeHtml(String(item.amount))}" data-voyage-budget-field="amount" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-budget-id="${escapeHtml(item.id)}">
+                            <select data-voyage-budget-field="scope" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-budget-id="${escapeHtml(item.id)}">
+                                <option value="voyage_food"${item.scope === 'voyage_food' ? ' selected' : ''}>${escapeHtml(t('Voyage nourriture', 'Viaje comida', 'Trip food'))}</option>
+                                <option value="monthly_boat"${item.scope === 'monthly_boat' ? ' selected' : ''}>${escapeHtml(t('Mensuel bateau', 'Mensual barco', 'Monthly boat'))}</option>
+                            </select>
+                            <input type="text" value="${escapeHtml(item.payer)}" data-voyage-budget-field="payer" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-budget-id="${escapeHtml(item.id)}" placeholder="${escapeHtml(t('Payé par', 'Pagado por', 'Paid by'))}">
+                            <button type="button" data-voyage-food-action="delete-budget" data-voyage-plan-id="${escapeHtml(safePlan.id)}" data-voyage-budget-id="${escapeHtml(item.id)}">${escapeHtml(t('Suppr.', 'Borrar', 'Delete'))}</button>
+                        </div>
+                    `).join('') : `<div class="voyage-ops-empty">${escapeHtml(t('Aucune dépense enregistrée.', 'Sin gastos registrados.', 'No recorded expenses.'))}</div>`}
+                </div>
+            </div>
+        </section>`;
+}
+
+function renderVoyageDocumentsSection(plan) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const githubSettings = getVoyageDocumentGithubSettings();
+    const documents = getVoyageDocumentEntries(safePlan.id);
+    const draft = getVoyageDocumentDraft(safePlan.id);
+    const shouldShowGithubSettings = !githubSettings.token;
+
+    return `
+        <section class="voyage-doc-card">
+            <div class="voyage-doc-card__header">
+                <div>
+                    <div class="voyage-agenda-voyage__meta">${escapeHtml(t('Documents', 'Documentos', 'Documents'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Fichiers stockés sur GitHub, métadonnées synchronisées via Supabase.', 'Archivos guardados en GitHub, metadatos sincronizados vía Supabase.', 'Files stored on GitHub, metadata synchronized through Supabase.'))}</div>
+                </div>
+                <div class="voyage-doc-card__stats" id="voyageDocumentsStats-${escapeHtml(safePlan.id)}">
+                    <span data-voyage-doc-stat="count">${escapeHtml(t('Documents', 'Documentos', 'Documents'))}: <strong>${documents.length}</strong></span>
+                    <span>${escapeHtml(t('Dépôt', 'Repositorio', 'Repository'))}: <strong>${escapeHtml(`${githubSettings.owner}/${githubSettings.repo}`)}</strong></span>
+                    <span>${escapeHtml(t('Branche', 'Rama', 'Branch'))}: <strong>${escapeHtml(githubSettings.branch)}</strong></span>
+                </div>
+            </div>
+            <div class="voyage-doc-grid">
+                <div class="voyage-doc-block">
+                    <div class="voyage-doc-block__title">${escapeHtml(t('Ajouter un document', 'Añadir documento', 'Add document'))}</div>
+                    <div class="voyage-doc-form-grid">
+                        <label class="voyage-doc-form-grid__full">
+                            <span>${escapeHtml(t('Fichier', 'Archivo', 'File'))}</span>
+                            <input id="voyageDocumentFileInput" type="file">
+                        </label>
+                        <label>
+                            <span>${escapeHtml(t('Titre', 'Título', 'Title'))}</span>
+                            <input id="voyageDocumentTitleInput" type="text" value="${escapeHtml(draft.title)}" placeholder="${escapeHtml(t('Nom affiché', 'Nombre mostrado', 'Display name'))}">
+                        </label>
+                        <label class="voyage-doc-form-grid__full">
+                            <span>${escapeHtml(t('Description', 'Descripción', 'Description'))}</span>
+                            <textarea id="voyageDocumentDescriptionInput" rows="3" placeholder="${escapeHtml(t('Optionnel', 'Opcional', 'Optional'))}">${escapeHtml(draft.description)}</textarea>
+                        </label>
+                    </div>
+                    <div class="voyage-ops-inline-actions">
+                        <button type="button" data-voyage-document-action="upload" data-voyage-plan-id="${escapeHtml(safePlan.id)}">${escapeHtml(t('Ajouter sur GitHub', 'Añadir en GitHub', 'Upload to GitHub'))}</button>
+                    </div>
+                </div>
+            </div>
+            <details class="voyage-doc-config-panel"${shouldShowGithubSettings ? ' open' : ''}>
+                <summary class="voyage-doc-config-panel__summary">
+                    <span class="voyage-doc-config-panel__title">${escapeHtml(t('Configuration GitHub', 'Configuración GitHub', 'GitHub settings'))}</span>
+                    <span class="voyage-doc-config-panel__meta">${escapeHtml(`${githubSettings.owner}/${githubSettings.repo} · ${githubSettings.branch}`)}</span>
+                </summary>
+                <div class="voyage-doc-block voyage-doc-config-panel__body">
+                    <div class="voyage-doc-form-grid">
+                        <label>
+                            <span>${escapeHtml(t('Owner', 'Owner', 'Owner'))}</span>
+                            <input id="voyageDocumentGithubOwnerInput" type="text" value="${escapeHtml(githubSettings.owner)}">
+                        </label>
+                        <label>
+                            <span>${escapeHtml(t('Repo', 'Repo', 'Repo'))}</span>
+                            <input id="voyageDocumentGithubRepoInput" type="text" value="${escapeHtml(githubSettings.repo)}">
+                        </label>
+                        <label>
+                            <span>${escapeHtml(t('Branche', 'Rama', 'Branch'))}</span>
+                            <input id="voyageDocumentGithubBranchInput" type="text" value="${escapeHtml(githubSettings.branch)}">
+                        </label>
+                        <label>
+                            <span>${escapeHtml(t('Dossier', 'Carpeta', 'Folder'))}</span>
+                            <input id="voyageDocumentGithubBasePathInput" type="text" value="${escapeHtml(githubSettings.basePath)}">
+                        </label>
+                        <label class="voyage-doc-form-grid__full">
+                            <span>${escapeHtml(t('Token GitHub', 'Token GitHub', 'GitHub token'))}</span>
+                            <input id="voyageDocumentGithubTokenInput" type="password" value="${escapeHtml(githubSettings.token)}" placeholder="${escapeHtml(t('PAT avec accès au dépôt', 'PAT con acceso al repositorio', 'PAT with repo access'))}">
+                        </label>
+                    </div>
+                    <div class="voyage-ops-inline-actions">
+                        <button type="button" data-voyage-document-action="save-github-settings">${escapeHtml(t('Enregistrer config', 'Guardar config', 'Save settings'))}</button>
+                    </div>
+                    <div class="voyage-doc-inline-note">${escapeHtml(t('Le token reste stocké localement dans ce navigateur.', 'El token queda guardado localmente en este navegador.', 'The token is stored locally in this browser.'))}</div>
+                </div>
+            </details>
+            <div class="voyage-doc-list" id="voyageDocumentsList-${escapeHtml(safePlan.id)}">
+                ${renderVoyageDocumentsListHtml(safePlan.id)}
+            </div>
+        </section>`;
+}
+
+function saveVoyageDocumentGithubSettingsFromSection() {
+    const settings = setVoyageDocumentGithubSettings(readVoyageDocumentGithubSettingsFromDom());
+    setVoyagePlanStatus(t(
+        `Configuration GitHub enregistrée pour ${settings.owner}/${settings.repo}.`,
+        `Configuración GitHub guardada para ${settings.owner}/${settings.repo}.`,
+        `GitHub settings saved for ${settings.owner}/${settings.repo}.`
+    ));
+}
+
+async function saveVoyageDocumentFromSection(planId) {
+    const plan = voyagePlans.find(entry => entry.id === planId) || null;
+    if (!plan) {
+        setVoyagePlanStatus(t('Voyage introuvable.', 'Viaje no encontrado.', 'Trip not found.'), true);
+        return;
+    }
+
+    const draft = readVoyageDocumentDraftFromDom(planId);
+    const fileInput = document.getElementById('voyageDocumentFileInput');
+    const titleInput = document.getElementById('voyageDocumentTitleInput');
+    const descriptionInput = document.getElementById('voyageDocumentDescriptionInput');
+    const file = fileInput?.files?.[0] || draft.file || null;
+    const title = String(titleInput?.value || draft.title || file?.name || '').trim();
+    const description = String(descriptionInput?.value || draft.description || '').trim();
+    const githubSettings = setVoyageDocumentGithubSettings(readVoyageDocumentGithubSettingsFromDom());
+
+    if (!file) {
+        setVoyagePlanStatus(t('Choisis un fichier avant ajout.', 'Elige un archivo antes de añadir.', 'Choose a file before adding.'), true);
+        return;
+    }
+
+    setVoyagePlanStatus(t('Upload GitHub du document en cours...', 'Subida GitHub del documento en curso...', 'Uploading document to GitHub...'));
+
+    try {
+        const uploadedEntry = await uploadVoyageDocumentToGitHub(plan, file, title, description, githubSettings);
+        const metadataEntry = buildDocumentEntryFromVoyageDocument(planId, uploadedEntry, {
+            creatorEmail: getCurrentCloudUserEmail() || '',
+            creatorName: cloudUserProfile?.name || ''
+        });
+        setDocumentEntries([metadataEntry, ...documentEntries.filter(entry => entry.id !== metadataEntry.id)], { persistLocal: true, refreshUi: true });
+
+        if (isCloudReady()) {
+            await upsertDocumentToCloud(metadataEntry);
+            setVoyagePlanStatus(t('Document ajouté au voyage et métadonnées synchronisées.', 'Documento añadido al viaje y metadatos sincronizados.', 'Document added to the trip and metadata synchronized.'));
+        } else {
+            setVoyagePlanStatus(t('Document ajouté au voyage. Cloud non connecté: métadonnées gardées en local.', 'Documento añadido al viaje. Nube no conectada: metadatos guardados en local.', 'Document added to the trip. Cloud offline: metadata kept locally.'));
+        }
+
+        clearVoyageDocumentDraft(planId);
+        renderVoyageAgendaPanel();
+    } catch (error) {
+        setVoyagePlanStatus(t(
+            `Upload GitHub impossible: ${String(error?.message || error || '').trim()}`,
+            `Subida GitHub imposible: ${String(error?.message || error || '').trim()}`,
+            `GitHub upload failed: ${String(error?.message || error || '').trim()}`
+        ), true);
+    }
+}
+
+async function openVoyageDocumentForViewing(planId, documentId) {
+    const documentEntry = getVoyageDocumentEntries(planId).find(entry => entry.id === documentId) || null;
+    if (!documentEntry) {
+        setVoyagePlanStatus(t('Document introuvable.', 'Documento no encontrado.', 'Document not found.'), true);
+        return;
+    }
+
+    const githubSettings = getVoyageDocumentGithubSettings();
+    try {
+        if (documentEntry.githubPath && githubSettings.token) {
+            const blob = await fetchVoyageDocumentBlobFromGitHub(documentEntry, githubSettings);
+            if (blob) {
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank', 'noopener');
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+                return;
+            }
+        }
+        const fallbackUrl = String(documentEntry.downloadUrl || documentEntry.htmlUrl || '').trim();
+        if (fallbackUrl) {
+            window.open(fallbackUrl, '_blank', 'noopener');
+            return;
+        }
+        setVoyagePlanStatus(t('Aucune URL disponible pour ce document.', 'Ninguna URL disponible para este documento.', 'No URL available for this document.'), true);
+    } catch (error) {
+        setVoyagePlanStatus(t(
+            `Ouverture document impossible: ${String(error?.message || error || '').trim()}`,
+            `Apertura del documento imposible: ${String(error?.message || error || '').trim()}`,
+            `Unable to open document: ${String(error?.message || error || '').trim()}`
+        ), true);
+    }
+}
+
+async function deleteVoyageDocumentFromSection(planId, documentId) {
+    const plan = voyagePlans.find(entry => entry.id === planId) || null;
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const documentEntry = getVoyageDocumentEntries(planId).find(entry => entry.id === documentId) || null;
+    if (!documentEntry) {
+        setVoyagePlanStatus(t('Document introuvable.', 'Documento no encontrado.', 'Document not found.'), true);
+        return;
+    }
+
+    const confirmed = window.confirm(t(
+        `Confirmer la suppression de "${documentEntry.title}" ?`,
+        `¿Confirmar el borrado de "${documentEntry.title}"?`,
+        `Confirm deletion of "${documentEntry.title}"?`
+    ));
+    if (!confirmed) return;
+
+    const githubSettings = setVoyageDocumentGithubSettings(readVoyageDocumentGithubSettingsFromDom());
+    try {
+        await deleteVoyageDocumentFromGitHub(documentEntry, githubSettings, safePlan.name);
+        const syncedMetadataEntry = documentEntries.find(entry => entry.id === documentId) || null;
+        setDocumentEntries(documentEntries.filter(entry => entry.id !== documentId), { persistLocal: true, refreshUi: true });
+        if (syncedMetadataEntry && isCloudReady()) {
+            await deleteDocumentFromCloud(syncedMetadataEntry);
+        }
+        renderVoyageAgendaPanel();
+        setVoyagePlanStatus(isCloudReady()
+            ? t('Document supprimé du voyage et métadonnées distantes effacées.', 'Documento eliminado del viaje y metadatos remotos borrados.', 'Document removed from the trip and remote metadata deleted.')
+            : t('Document supprimé du voyage. Cloud non connecté: seules les métadonnées locales ont été retirées.', 'Documento eliminado del viaje. Nube no conectada: solo se retiraron los metadatos locales.', 'Document removed from the trip. Cloud offline: only local metadata was removed.'));
+    } catch (error) {
+        setVoyagePlanStatus(t(
+            `Suppression GitHub impossible: ${String(error?.message || error || '').trim()}`,
+            `Borrado GitHub imposible: ${String(error?.message || error || '').trim()}`,
+            `GitHub delete failed: ${String(error?.message || error || '').trim()}`
+        ), true);
+    }
+}
+
+function renderVoyageDetailTabs(plan, timeline, options = {}) {
+    const safePlan = sanitizeVoyagePlan(plan || {}, 0);
+    const safeTimeline = Array.isArray(timeline) ? timeline : [];
+    const disableOperations = !!options.disableOperations;
+    const documentCount = getVoyageDocumentEntries(safePlan.id).length;
+    return `
+        <div class="voyage-detail-tabs-shell">
+            <div class="voyage-detail-tabs__label">${escapeHtml(t('Affichage du voyage', 'Visualización del viaje', 'Trip view'))}</div>
+            <div class="voyage-detail-tabs" role="tablist" aria-label="${escapeHtml(t('Sections du voyage', 'Secciones del viaje', 'Trip sections'))}">
+                <button type="button" class="voyage-detail-tabs__btn${activeVoyageDetailTab === 'itinerary' ? ' is-active' : ''}" role="tab" aria-selected="${activeVoyageDetailTab === 'itinerary' ? 'true' : 'false'}" data-voyage-detail-tab="itinerary" data-voyage-plan-id="${escapeHtml(safePlan.id)}">
+                    <strong>${escapeHtml(t('Plan du voyage', 'Plan del viaje', 'Trip plan'))}</strong>
+                    <span>${escapeHtml(t(`${safeTimeline.length} étape(s)`, `${safeTimeline.length} etapa(s)`, `${safeTimeline.length} leg(s)`))}</span>
+                </button>
+                <button type="button" class="voyage-detail-tabs__btn${activeVoyageDetailTab === 'operations' ? ' is-active' : ''}${disableOperations ? ' is-disabled' : ''}" role="tab" aria-selected="${activeVoyageDetailTab === 'operations' ? 'true' : 'false'}" data-voyage-detail-tab="operations" data-voyage-plan-id="${escapeHtml(safePlan.id)}" ${disableOperations ? 'disabled' : ''}>
+                    <strong>${escapeHtml(t('Vie à bord', 'Vida a bordo', 'Life on board'))}</strong>
+                    <span>${disableOperations
+                        ? escapeHtml(t('Disponible après enregistrement', 'Disponible después de guardar', 'Available after saving'))
+                        : escapeHtml(t('Menus, avitaillement, budget', 'Menús, avituallamiento, presupuesto', 'Menus, provisioning, budget'))}</span>
+                </button>
+                <button type="button" class="voyage-detail-tabs__btn${activeVoyageDetailTab === 'documents' ? ' is-active' : ''}${disableOperations ? ' is-disabled' : ''}" role="tab" aria-selected="${activeVoyageDetailTab === 'documents' ? 'true' : 'false'}" data-voyage-detail-tab="documents" data-voyage-plan-id="${escapeHtml(safePlan.id)}" ${disableOperations ? 'disabled' : ''}>
+                    <strong>${escapeHtml(t('Document', 'Documento', 'Document'))}</strong>
+                    <span>${disableOperations
+                        ? escapeHtml(t('Disponible après enregistrement', 'Disponible después de guardar', 'Available after saving'))
+                        : escapeHtml(t(`${documentCount} pièce(s) jointe(s)`, `${documentCount} adjunto(s)`, `${documentCount} attachment(s)`))}</span>
+                </button>
+            </div>
+        </div>`;
+}
+
+function renderVoyageItinerarySection(plan, timeline, assignedCrew, editableRouteItemId) {
+    return `
+        <div class="voyage-agenda-legs">
+            ${timeline.map((entry, entryIndex) => {
+                const chipClass = entry.statusKey === 'warning'
+                    ? 'voyage-agenda-chip voyage-agenda-chip--warning'
+                    : (entry.statusKey === 'ok' ? 'voyage-agenda-chip voyage-agenda-chip--ok' : 'voyage-agenda-chip');
+                if (entry.type === 'route') {
+                    const isEditableRoute = entry.id === editableRouteItemId;
+                    return `
+                        <article class="voyage-agenda-leg ${activeVoyageMapItemId === entry.id ? 'is-active' : ''}" data-voyage-map-item-id="${escapeHtml(entry.id)}">
+                            <div>
+                                <div class="voyage-agenda-leg__title">${escapeHtml(entry.title)}</div>
+                                <div class="voyage-agenda-leg__route">${escapeHtml(entry.subtitle)}</div>
+                                <div class="voyage-agenda-leg__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                                ${entry.item.notes ? `<div class="voyage-agenda-leg__notes">${escapeHtml(entry.item.notes)}</div>` : ''}
+                            </div>
+                            <div>
+                                <div class="voyage-agenda-leg__label">${escapeHtml(t('Départ', 'Salida', 'Departure'))}</div>
+                                <input type="datetime-local" class="voyage-agenda-leg__inline-input" data-voyage-item-field="departureDateTime" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(entry.item.departureDateTime || formatDateTimeLocalInputValue(entry.departure))}" ${isEditableRoute ? '' : 'disabled'}>
+                                ${isEditableRoute ? '' : `<div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Départ automatique = arrivée de l\'étape précédente.', 'Salida automática = llegada de la etapa anterior.', 'Automatic departure = previous leg arrival.'))}</div>`}
+                            </div>
+                            <div>
+                                <div class="voyage-agenda-leg__label">${escapeHtml(t('Arrivée approx.', 'Llegada aprox.', 'Approx. arrival'))}</div>
+                                <div class="voyage-agenda-leg__value">${escapeHtml(entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : t('En attente du départ', 'En espera de salida', 'Waiting for departure'))}</div>
+                            </div>
+                            <div>
+                                <div class="voyage-agenda-leg__label">${escapeHtml(t('Route', 'Ruta', 'Route'))}</div>
+                                <div class="voyage-agenda-leg__value">${escapeHtml((entry.distanceNm || 0).toFixed(1))} NM<br>${escapeHtml(Number.isFinite(entry.estimatedHours) ? formatDurationHours(entry.estimatedHours) : t('Durée n/a', 'Duración n/a', 'No ETA'))}</div>
+                            </div>
+                            <div>
+                                <div class="voyage-agenda-leg__label">${escapeHtml(t('Statut', 'Estado', 'Status'))}</div>
+                                <div class="voyage-agenda-leg__value"><span class="${chipClass}">${escapeHtml(entry.statusLabel)}</span></div>
+                                <div class="voyage-agenda-leg__actions">
+                                    <button type="button" data-voyage-item-action="move-up" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('Monter', 'Subir', 'Up'))}</button>
+                                    <button type="button" data-voyage-item-action="move-down" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === timeline.length - 1 ? 'disabled' : ''}>${escapeHtml(t('Descendre', 'Bajar', 'Down'))}</button>
+                                    <button type="button" data-voyage-action="open-route" data-route-index="${entry.routeIndex}">${escapeHtml(t('Charger', 'Cargar', 'Load'))}</button>
+                                    <button type="button" data-voyage-action="open-routing" data-route-index="${entry.routeIndex}">${escapeHtml(t('Routage', 'Routing', 'Routing'))}</button>
+                                    <button type="button" data-voyage-item-action="delete" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
+                                </div>
+                            </div>
+                        </article>`;
+                }
+
+                const stopUsesExistingWaypoint = !!String(entry.item?.waypointPhotoId || '').trim();
+                return `
+                    <article class="voyage-agenda-leg voyage-agenda-leg--stop ${activeVoyageMapItemId === entry.id ? 'is-active' : ''}" data-voyage-map-item-id="${escapeHtml(entry.id)}">
+                        <div>
+                            <div class="voyage-agenda-leg__title">${escapeHtml(entry.title)}</div>
+                            <div class="voyage-agenda-leg__route">${escapeHtml(entry.subtitle)}</div>
+                            <div class="voyage-agenda-leg__timeline">${escapeHtml(entry.timelineLabel)}</div>
+                            <input type="text" class="voyage-agenda-leg__inline-input" data-voyage-item-field="stopName" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(entry.item.stopName || '')}">
+                            ${entry.item.notes ? `<div class="voyage-agenda-leg__notes">${escapeHtml(entry.item.notes)}</div>` : ''}
+                        </div>
+                        <div>
+                            <div class="voyage-agenda-leg__label">${escapeHtml(t('Départ', 'Salida', 'Departure'))}</div>
+                            <div class="voyage-agenda-leg__value">${escapeHtml(entry.departure ? formatDateTimeLocalLabel(entry.departure) : t('Après la route précédente', 'Después de la ruta anterior', 'After previous route'))}</div>
+                            <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Début automatique = arrivée de l\'étape précédente.', 'Inicio automático = llegada de la etapa anterior.', 'Automatic start = previous leg arrival.'))}</div>
+                        </div>
+                        <div>
+                            <div class="voyage-agenda-leg__label">${escapeHtml(t('Arrivée approx.', 'Llegada aprox.', 'Approx. arrival'))}</div>
+                            <div class="voyage-agenda-leg__value">${escapeHtml(entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : t('Après une route datée', 'Tras una ruta fechada', 'After a dated route'))}</div>
+                        </div>
+                        <div>
+                            <div class="voyage-agenda-leg__label">${escapeHtml(t('Route', 'Ruta', 'Route'))}</div>
+                            <div class="voyage-agenda-leg__value">0.0 NM<br>${escapeHtml(entry.statusLabel)}</div>
+                            <input type="number" min="${escapeHtml(String(VOYAGE_STOP_MIN_DURATION_DAYS))}" step="${escapeHtml(String(VOYAGE_STOP_DURATION_STEP_DAYS))}" class="voyage-agenda-leg__inline-number" data-voyage-item-field="durationDays" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(String(entry.durationDays || 1))}">
+                        </div>
+                        <div>
+                            <div class="voyage-agenda-leg__label">${escapeHtml(t('Statut', 'Estado', 'Status'))}</div>
+                            <div class="voyage-agenda-leg__value"><span class="${chipClass}">${escapeHtml(entry.arrival ? t('Étape calée', 'Etapa colocada', 'Leg scheduled') : t('À raccorder', 'Por enlazar', 'Needs previous leg'))}</span></div>
+                            ${stopUsesExistingWaypoint ? `<div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Waypoint déjà lié à ce mouillage.', 'Waypoint ya vinculado a este fondeo.', 'Waypoint already linked to this anchorage.'))}</div>` : ''}
+                            <div class="voyage-agenda-leg__actions">
+                                <button type="button" data-voyage-item-action="move-up" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('Monter', 'Subir', 'Up'))}</button>
+                                <button type="button" data-voyage-item-action="move-down" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === timeline.length - 1 ? 'disabled' : ''}>${escapeHtml(t('Descendre', 'Bajar', 'Down'))}</button>
+                                ${stopUsesExistingWaypoint ? '' : `<button type="button" data-voyage-item-action="save-stop-waypoint" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Enregistrer en WP', 'Guardar como WP', 'Save as WP'))}</button>`}
+                                <button type="button" data-voyage-item-action="delete" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
+                            </div>
+                        </div>
+                    </article>`;
+            }).join('')}
+        </div>
+        <div class="voyage-agenda-display-toolbar">
+            <button type="button" class="voyage-agenda-display-toolbar__btn${isVoyageCalendarVisible ? ' is-active' : ''}" data-voyage-map-action="toggle-calendar">${escapeHtml(isVoyageCalendarVisible ? t('Masquer agenda', 'Ocultar agenda', 'Hide agenda') : t('Afficher agenda', 'Mostrar agenda', 'Show agenda'))}</button>
+            <button type="button" class="voyage-agenda-display-toolbar__btn${isVoyageWeatherVisible ? ' is-active' : ''}" data-voyage-map-action="toggle-weather">${escapeHtml(isVoyageWeatherVisible ? t('Masquer météo', 'Ocultar meteo', 'Hide weather') : t('Afficher météo', 'Mostrar meteo', 'Show weather'))}</button>
+        </div>
+        <div class="voyage-agenda-map-card">
+            <div class="voyage-agenda-map-card__header">
+                <div>
+                    <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Carte du voyage', 'Mapa del viaje', 'Trip map'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Routes tracées + mouillages positionnés sur leur waypoint réel quand il existe.', 'Rutas trazadas + fondeos colocados en su waypoint real cuando existe.', 'Routes drawn + anchorages placed at their real waypoint when available.'))}</div>
+                </div>
+                <button type="button" class="voyage-agenda-map-card__toggle" data-voyage-map-action="toggle-expand">${escapeHtml(isVoyageMapExpanded ? t('Réduire', 'Reducir', 'Collapse') : t('Ouvrir en grand', 'Abrir grande', 'Open large'))}</button>
+                <div class="voyage-agenda-map-legend">
+                    <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--route"></span>${escapeHtml(t('Route datée', 'Ruta fechada', 'Dated route'))}</span>
+                    <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--derived"></span>${escapeHtml(t('Route enchaînée', 'Ruta encadenada', 'Chained route'))}</span>
+                    <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--stop"></span>${escapeHtml(t('Mouillage', 'Fondeo', 'Anchorage'))}</span>
+                </div>
+            </div>
+            <div class="voyage-agenda-map-shell${isVoyageMapExpanded ? ' is-expanded' : ''}">
+                <button type="button" class="voyage-agenda-map-shell__close" data-voyage-map-action="toggle-expand">${escapeHtml(t('Fermer la carte', 'Cerrar mapa', 'Close map'))}</button>
+                <div id="voyageAgendaMap"></div>
+                <div id="voyageAgendaMapEmpty" class="voyage-agenda-map-empty">${escapeHtml(t('Ajoute une route avec des waypoints pour afficher la carte.', 'Añade una ruta con waypoints para mostrar el mapa.', 'Add a route with waypoints to display the map.'))}</div>
+            </div>
+        </div>
+        ${isVoyageCalendarVisible ? renderVoyageScheduleCalendar(timeline, editableRouteItemId) : ''}
+        ${isVoyageWeatherVisible ? renderVoyageAgendaWeatherSummary(timeline) : ''}`;
+}
+
 function renderVoyageAgendaPanel() {
     const contentNode = document.getElementById('voyageAgendaContent');
     const panelNode = document.getElementById('voyageAgendaPanel');
@@ -3850,21 +5773,7 @@ function renderVoyageAgendaPanel() {
         timeline: computeVoyagePlanTimeline(plan)
     }));
 
-    const filteredPlanEntries = planEntries.filter(({ plan, timeline }) => {
-        if (voyagePlanStatusFilter !== 'all' && normalizeVoyagePlanStatus(plan.status) !== voyagePlanStatusFilter) {
-            return false;
-        }
-        const crewNames = getVoyageAssignedCrewMembers(plan).map(entry => getCrewMemberDisplayName(entry)).join(' ');
-        const haystack = [
-            plan.name,
-            plan.description,
-            plan.status,
-            getVoyagePlanStatusLabel(plan.status),
-            crewNames,
-            ...timeline.map(entry => `${entry.title} ${entry.subtitle} ${entry.item?.notes || ''}`)
-        ].join(' ').toLowerCase();
-        return !voyageAgendaSearchTerm.trim() || haystack.includes(voyageAgendaSearchTerm.toLowerCase().trim());
-    });
+    const filteredPlanEntries = getFilteredVoyagePlanEntries();
 
     renderVoyagesSidebar(filteredPlanEntries);
     const overviewCalendarHtml = renderVoyagesOverviewCalendar(planEntries);
@@ -3886,8 +5795,8 @@ function renderVoyageAgendaPanel() {
 
     if (!activePlanEntry) {
         contentNode.innerHTML = selectedVoyagePlanId
-            ? `<div class="voyage-agenda-empty">${escapeHtml(t('Voyage introuvable dans le filtre courant. Sélectionne-le dans la liste ou ajuste le filtre.', 'Viaje no encontrado en el filtro actual. Selecciónalo en la lista o ajusta el filtro.', 'Trip not found in the current filter. Select it from the list or adjust the filter.'))}</div>`
-            : `<div class="voyage-agenda-empty voyage-agenda-empty--draft">${escapeHtml(t('Statut NOUVEAU. Renseigne le voyage et l\'équipage, puis enregistre pour débloquer la création des lignes.', 'Estado NUEVO. Completa el viaje y la tripulación, luego guarda para desbloquear la creación de etapas.', 'NEW status. Fill in the trip and crew, then save to unlock leg creation.'))}</div>`;
+            ? `${renderVoyageDetailTabs(null, [], { disableOperations: true })}<div class="voyage-agenda-empty">${escapeHtml(t('Voyage introuvable dans le filtre courant. Sélectionne-le dans la liste ou ajuste le filtre.', 'Viaje no encontrado en el filtro actual. Selecciónalo en la lista o ajusta el filtro.', 'Trip not found in the current filter. Select it from the list or adjust the filter.'))}</div>`
+            : `${renderVoyageDetailTabs(null, [], { disableOperations: true })}<div class="voyage-agenda-empty voyage-agenda-empty--draft">${escapeHtml(t('Statut NOUVEAU. Renseigne le voyage et l\'équipage, puis enregistre pour débloquer l\'onglet menus / avitaillement / budget.', 'Estado NUEVO. Completa el viaje y la tripulación, luego guarda para desbloquear la pestaña menús / avituallamiento / presupuesto.', 'NEW status. Fill in the trip and crew, then save to unlock the menus / provisioning / budget tab.'))}</div>`;
         return;
     }
 
@@ -3923,117 +5832,24 @@ function renderVoyageAgendaPanel() {
                         <div class="voyage-agenda-voyage__stat-value" style="font-size:15px; line-height:1.35;">${escapeHtml(endDate ? formatDateTimeLocalLabel(endDate) : t('Non planifiée', 'Sin planificar', 'Unscheduled'))}</div>
                     </div>
                 </header>
-                <div class="voyage-agenda-legs">
-                    ${timeline.map((entry, entryIndex) => {
-                        const chipClass = entry.statusKey === 'warning'
-                            ? 'voyage-agenda-chip voyage-agenda-chip--warning'
-                            : (entry.statusKey === 'ok' ? 'voyage-agenda-chip voyage-agenda-chip--ok' : 'voyage-agenda-chip');
-                        if (entry.type === 'route') {
-                            const isEditableRoute = entry.id === editableRouteItemId;
-                            return `
-                                <article class="voyage-agenda-leg ${activeVoyageMapItemId === entry.id ? 'is-active' : ''}" data-voyage-map-item-id="${escapeHtml(entry.id)}">
-                                    <div>
-                                        <div class="voyage-agenda-leg__title">${escapeHtml(entry.title)}</div>
-                                        <div class="voyage-agenda-leg__route">${escapeHtml(entry.subtitle)}</div>
-                                        <div class="voyage-agenda-leg__timeline">${escapeHtml(entry.timelineLabel)}</div>
-                                        ${entry.item.notes ? `<div class="voyage-agenda-leg__notes">${escapeHtml(entry.item.notes)}</div>` : ''}
-                                    </div>
-                                    <div>
-                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Départ', 'Salida', 'Departure'))}</div>
-                                        <input type="datetime-local" class="voyage-agenda-leg__inline-input" data-voyage-item-field="departureDateTime" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(entry.item.departureDateTime || formatDateTimeLocalInputValue(entry.departure))}" ${isEditableRoute ? '' : 'disabled'}>
-                                        ${isEditableRoute ? '' : `<div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Départ automatique = arrivée de l\'étape précédente.', 'Salida automática = llegada de la etapa anterior.', 'Automatic departure = previous leg arrival.'))}</div>`}
-                                    </div>
-                                    <div>
-                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Arrivée approx.', 'Llegada aprox.', 'Approx. arrival'))}</div>
-                                        <div class="voyage-agenda-leg__value">${escapeHtml(entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : t('En attente du départ', 'En espera de salida', 'Waiting for departure'))}</div>
-                                    </div>
-                                    <div>
-                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Route', 'Ruta', 'Route'))}</div>
-                                        <div class="voyage-agenda-leg__value">${escapeHtml((entry.distanceNm || 0).toFixed(1))} NM<br>${escapeHtml(Number.isFinite(entry.estimatedHours) ? formatDurationHours(entry.estimatedHours) : t('Durée n/a', 'Duración n/a', 'No ETA'))}</div>
-                                    </div>
-                                    <div>
-                                        <div class="voyage-agenda-leg__label">${escapeHtml(t('Statut', 'Estado', 'Status'))}</div>
-                                        <div class="voyage-agenda-leg__value"><span class="${chipClass}">${escapeHtml(entry.statusLabel)}</span></div>
-                                        <div class="voyage-agenda-leg__actions">
-                                            <button type="button" data-voyage-item-action="move-up" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('Monter', 'Subir', 'Up'))}</button>
-                                            <button type="button" data-voyage-item-action="move-down" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === timeline.length - 1 ? 'disabled' : ''}>${escapeHtml(t('Descendre', 'Bajar', 'Down'))}</button>
-                                            <button type="button" data-voyage-action="open-route" data-route-index="${entry.routeIndex}">${escapeHtml(t('Charger', 'Cargar', 'Load'))}</button>
-                                            <button type="button" data-voyage-action="open-routing" data-route-index="${entry.routeIndex}">${escapeHtml(t('Routage', 'Routing', 'Routing'))}</button>
-                                            <button type="button" data-voyage-item-action="delete" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
-                                        </div>
-                                    </div>
-                                </article>`;
-                        }
-
-                        const stopUsesExistingWaypoint = !!String(entry.item?.waypointPhotoId || '').trim();
-                        return `
-                            <article class="voyage-agenda-leg voyage-agenda-leg--stop ${activeVoyageMapItemId === entry.id ? 'is-active' : ''}" data-voyage-map-item-id="${escapeHtml(entry.id)}">
-                                <div>
-                                    <div class="voyage-agenda-leg__title">${escapeHtml(entry.title)}</div>
-                                    <div class="voyage-agenda-leg__route">${escapeHtml(entry.subtitle)}</div>
-                                    <div class="voyage-agenda-leg__timeline">${escapeHtml(entry.timelineLabel)}</div>
-                                    <input type="text" class="voyage-agenda-leg__inline-input" data-voyage-item-field="stopName" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(entry.item.stopName || '')}">
-                                    ${entry.item.notes ? `<div class="voyage-agenda-leg__notes">${escapeHtml(entry.item.notes)}</div>` : ''}
-                                </div>
-                                <div>
-                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Départ', 'Salida', 'Departure'))}</div>
-                                    <div class="voyage-agenda-leg__value">${escapeHtml(entry.departure ? formatDateTimeLocalLabel(entry.departure) : t('Après la route précédente', 'Después de la ruta anterior', 'After previous route'))}</div>
-                                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Début automatique = arrivée de l\'étape précédente.', 'Inicio automático = llegada de la etapa anterior.', 'Automatic start = previous leg arrival.'))}</div>
-                                </div>
-                                <div>
-                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Arrivée approx.', 'Llegada aprox.', 'Approx. arrival'))}</div>
-                                    <div class="voyage-agenda-leg__value">${escapeHtml(entry.arrival ? formatDateTimeLocalLabel(entry.arrival) : t('Après une route datée', 'Tras una ruta fechada', 'After a dated route'))}</div>
-                                </div>
-                                <div>
-                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Route', 'Ruta', 'Route'))}</div>
-                                    <div class="voyage-agenda-leg__value">0.0 NM<br>${escapeHtml(entry.statusLabel)}</div>
-                                    <input type="number" min="${escapeHtml(String(VOYAGE_STOP_MIN_DURATION_DAYS))}" step="${escapeHtml(String(VOYAGE_STOP_DURATION_STEP_DAYS))}" class="voyage-agenda-leg__inline-number" data-voyage-item-field="durationDays" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" value="${escapeHtml(String(entry.durationDays || 1))}">
-                                </div>
-                                <div>
-                                    <div class="voyage-agenda-leg__label">${escapeHtml(t('Statut', 'Estado', 'Status'))}</div>
-                                    <div class="voyage-agenda-leg__value"><span class="${chipClass}">${escapeHtml(entry.arrival ? t('Étape calée', 'Etapa colocada', 'Leg scheduled') : t('À raccorder', 'Por enlazar', 'Needs previous leg'))}</span></div>
-                                    ${stopUsesExistingWaypoint ? `<div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Waypoint déjà lié à ce mouillage.', 'Waypoint ya vinculado a este fondeo.', 'Waypoint already linked to this anchorage.'))}</div>` : ''}
-                                    <div class="voyage-agenda-leg__actions">
-                                        <button type="button" data-voyage-item-action="move-up" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === 0 ? 'disabled' : ''}>${escapeHtml(t('Monter', 'Subir', 'Up'))}</button>
-                                        <button type="button" data-voyage-item-action="move-down" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}" ${entryIndex === timeline.length - 1 ? 'disabled' : ''}>${escapeHtml(t('Descendre', 'Bajar', 'Down'))}</button>
-                                        ${stopUsesExistingWaypoint ? '' : `<button type="button" data-voyage-item-action="save-stop-waypoint" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Enregistrer en WP', 'Guardar como WP', 'Save as WP'))}</button>`}
-                                        <button type="button" data-voyage-item-action="delete" data-voyage-plan-id="${escapeHtml(plan.id)}" data-voyage-item-id="${escapeHtml(entry.id)}">${escapeHtml(t('Supprimer', 'Eliminar', 'Delete'))}</button>
-                                    </div>
-                                </div>
-                            </article>`;
-                    }).join('')}
-                </div>
-                <div class="voyage-agenda-display-toolbar">
-                    <button type="button" class="voyage-agenda-display-toolbar__btn${isVoyageCalendarVisible ? ' is-active' : ''}" data-voyage-map-action="toggle-calendar">${escapeHtml(isVoyageCalendarVisible ? t('Masquer agenda', 'Ocultar agenda', 'Hide agenda') : t('Afficher agenda', 'Mostrar agenda', 'Show agenda'))}</button>
-                    <button type="button" class="voyage-agenda-display-toolbar__btn${isVoyageWeatherVisible ? ' is-active' : ''}" data-voyage-map-action="toggle-weather">${escapeHtml(isVoyageWeatherVisible ? t('Masquer météo', 'Ocultar meteo', 'Hide weather') : t('Afficher météo', 'Mostrar meteo', 'Show weather'))}</button>
-                </div>
-                <div class="voyage-agenda-map-card">
-                    <div class="voyage-agenda-map-card__header">
-                        <div>
-                            <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Carte du voyage', 'Mapa del viaje', 'Trip map'))}</div>
-                            <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(t('Routes tracées + mouillages positionnés sur leur waypoint réel quand il existe.', 'Rutas trazadas + fondeos colocados en su waypoint real cuando existe.', 'Routes drawn + anchorages placed at their real waypoint when available.'))}</div>
-                        </div>
-                        <button type="button" class="voyage-agenda-map-card__toggle" data-voyage-map-action="toggle-expand">${escapeHtml(isVoyageMapExpanded ? t('Réduire', 'Reducir', 'Collapse') : t('Ouvrir en grand', 'Abrir grande', 'Open large'))}</button>
-                        <div class="voyage-agenda-map-legend">
-                            <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--route"></span>${escapeHtml(t('Route datée', 'Ruta fechada', 'Dated route'))}</span>
-                            <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--derived"></span>${escapeHtml(t('Route enchaînée', 'Ruta encadenada', 'Chained route'))}</span>
-                            <span class="voyage-agenda-map-legend__item"><span class="voyage-agenda-map-legend__swatch voyage-agenda-map-legend__swatch--stop"></span>${escapeHtml(t('Mouillage', 'Fondeo', 'Anchorage'))}</span>
-                        </div>
-                    </div>
-                    <div class="voyage-agenda-map-shell${isVoyageMapExpanded ? ' is-expanded' : ''}">
-                        <button type="button" class="voyage-agenda-map-shell__close" data-voyage-map-action="toggle-expand">${escapeHtml(t('Fermer la carte', 'Cerrar mapa', 'Close map'))}</button>
-                        <div id="voyageAgendaMap"></div>
-                        <div id="voyageAgendaMapEmpty" class="voyage-agenda-map-empty">${escapeHtml(t('Ajoute une route avec des waypoints pour afficher la carte.', 'Añade una ruta con waypoints para mostrar el mapa.', 'Add a route with waypoints to display the map.'))}</div>
-                    </div>
-                </div>
-                ${isVoyageCalendarVisible ? renderVoyageScheduleCalendar(timeline, editableRouteItemId) : ''}
-                ${isVoyageWeatherVisible ? renderVoyageAgendaWeatherSummary(timeline) : ''}
+                ${renderVoyageDetailTabs(plan, timeline)}
+                ${activeVoyageDetailTab === 'operations'
+                    ? renderVoyageOperationsSection(plan, timeline, assignedCrew)
+                    : activeVoyageDetailTab === 'documents'
+                    ? renderVoyageDocumentsSection(plan)
+                    : renderVoyageItinerarySection(plan, timeline, assignedCrew, editableRouteItemId)}
             </section>`;
     })();
 
-    renderVoyagePreviewMap(activePlanEntry.timeline);
+    if (activeVoyageDetailTab === 'itinerary') {
+        renderVoyagePreviewMap(activePlanEntry.timeline);
+    }
+    if (activeVoyageDetailTab === 'documents') {
+        applyVoyageDocumentDraftToDom(selectedVoyagePlanId);
+        void maybeHydrateDocumentsCloudOnDemand();
+    }
     voyageAgendaWeatherHydrationToken += 1;
-    if (isVoyageWeatherVisible) {
+    if (activeVoyageDetailTab === 'itinerary' && isVoyageWeatherVisible) {
         void hydrateVoyageAgendaWeatherSummary(activePlanEntry.timeline, voyageAgendaWeatherHydrationToken);
     }
 }
@@ -4184,6 +6000,12 @@ function upsertCrewMemberFromEditor() {
     const email = normalizeEmailForCompare(document.getElementById('voyageCrewEmailInput')?.value || '');
     const telephone = normalizePhoneValue(document.getElementById('voyageCrewPhoneInput')?.value || '');
     const commentaire = String(document.getElementById('voyageCrewCommentInput')?.value || '').trim();
+    const dietaryProfile = sanitizeCrewDietaryProfile({
+        dietType: document.getElementById('voyageCrewDietTypeInput')?.value || 'omnivore',
+        allergiesText: document.getElementById('voyageCrewAllergiesInput')?.value || '',
+        dislikesText: document.getElementById('voyageCrewDislikesInput')?.value || '',
+        breakfastText: document.getElementById('voyageCrewBreakfastInput')?.value || ''
+    });
 
     if (!firstName && !lastName && !email) {
         setVoyageCrewStatus(t('Renseigne au moins un nom ou un email.', 'Indica al menos un nombre o un email.', 'Enter at least a name or an email.'), true);
@@ -4198,6 +6020,7 @@ function upsertCrewMemberFromEditor() {
         email,
         telephone,
         commentaire,
+        dietaryProfile,
         createdAt: existing?.createdAt,
         updatedAt: new Date().toISOString()
     });
@@ -4746,7 +6569,9 @@ function applyLanguageToUi() {
     setElementText('#voyagesSidebarStatusFilter option[value="cancelled"]', t('Annulés', 'Cancelados', 'Cancelled'));
     setElementText('#voyageAgendaOpenRoutesBtn', t('Ouvrir routes', 'Abrir rutas', 'Open routes'));
     setElementText('#voyageAgendaRefreshBtn', t('Rafraîchir agenda', 'Actualizar agenda', 'Refresh agenda'));
+    setElementText('#voyageAgendaProvisioningPdfBtn', t('Générer PDF courses mensuelles', 'Generar PDF compras mensuales', 'Generate monthly shopping PDF'));
     setElementText('#voyageLlmPromptBtn', t('Prompt LLM', 'Prompt LLM', 'LLM prompt'));
+    setElementText('#voyageAgendaProvisioningStatus', t('Liste mensuelle calculée sur l\'agenda visible.', 'Lista mensual calculada sobre la agenda visible.', 'Monthly list calculated from the visible agenda.'));
     setElementPlaceholder('#voyageAgendaSearchInput', t('Rechercher un voyage, une étape, un équipier...', 'Buscar un viaje, una etapa, un tripulante...', 'Search for a trip, a leg, a crew member...'));
     setElementText('#voyageBuilderCardTitle', t('Créer / éditer un voyage', 'Crear / editar un viaje', 'Create / edit a trip'));
     setElementText('#voyageBuilderLegTitle', t('Ajouter une route existante', 'Añadir una ruta existente', 'Add an existing route'));
@@ -4776,6 +6601,16 @@ function applyLanguageToUi() {
     setElementText('label[for="voyageCrewLastNameInput"]', t('Nom:', 'Apellido:', 'Last name:'));
     setElementText('label[for="voyageCrewEmailInput"]', t('Email:', 'Email:', 'Email:'));
     setElementText('label[for="voyageCrewPhoneInput"]', t('Téléphone:', 'Teléfono:', 'Phone:'));
+    setElementText('label[for="voyageCrewDietTypeInput"]', t('Profil alimentaire:', 'Perfil alimentario:', 'Diet profile:'));
+    setElementText('#voyageCrewDietTypeInput option[value="omnivore"]', t('Omnivore', 'Omnívoro', 'Omnivore'));
+    setElementText('#voyageCrewDietTypeInput option[value="pescatarian"]', t('Pescetarien', 'Pescetariano', 'Pescatarian'));
+    setElementText('#voyageCrewDietTypeInput option[value="vegetarian"]', t('Végétarien', 'Vegetariano', 'Vegetarian'));
+    setElementText('#voyageCrewDietTypeInput option[value="vegan"]', t('Vegan', 'Vegano', 'Vegan'));
+    setElementText('#voyageCrewDietTypeInput option[value="glutenfree"]', t('Sans gluten', 'Sin gluten', 'Gluten free'));
+    setElementText('#voyageCrewDietTypeInput option[value="custom"]', t('Autre', 'Otro', 'Custom'));
+    setElementText('label[for="voyageCrewAllergiesInput"]', t('Allergies / intolérances:', 'Alergias / intolerancias:', 'Allergies / intolerances:'));
+    setElementText('label[for="voyageCrewDislikesInput"]', t('Aliments à éviter:', 'Alimentos a evitar:', 'Foods to avoid:'));
+    setElementText('label[for="voyageCrewBreakfastInput"]', t('Petit-déjeuner / habitudes:', 'Desayuno / hábitos:', 'Breakfast / habits:'));
     setElementText('label[for="voyageCrewCommentInput"]', t('Commentaire:', 'Comentario:', 'Comment:'));
     setElementText('#voyageCrewSaveBtn', t('Enregistrer équipier', 'Guardar tripulante', 'Save crew member'));
     setElementText('#voyageCrewDeleteBtn', t('Supprimer équipier', 'Eliminar tripulante', 'Delete crew member'));
@@ -4787,6 +6622,9 @@ function applyLanguageToUi() {
     setElementPlaceholder('#voyagePlanDescriptionInput', t('Ex: convoyage de printemps avec escales tranquilles', 'Ej: travesía de primavera con escalas tranquilas', 'Ex: spring delivery with calm stops'));
     setElementPlaceholder('#voyagePlanStopNameInput', t('Ex: Port Mahon', 'Ej: Port Mahon', 'Ex: Port Mahon'));
     setElementPlaceholder('#voyagePlanStopDurationInput', t('Ex: 2', 'Ej: 2', 'Ex: 2'));
+    setElementPlaceholder('#voyageCrewAllergiesInput', t('Ex: arachide, lactose', 'Ej: cacahuete, lactosa', 'Ex: peanut, lactose'));
+    setElementPlaceholder('#voyageCrewDislikesInput', t('Ex: coriandre, sardines', 'Ej: cilantro, sardinas', 'Ex: coriander, sardines'));
+    setElementPlaceholder('#voyageCrewBreakfastInput', t('Ex: café noir, yaourt, fruit', 'Ej: café solo, yogur, fruta', 'Ex: black coffee, yogurt, fruit'));
     syncVoyagePlanWaypointSelectOptions();
     renderNightModeToggleUi();
 
@@ -4842,6 +6680,8 @@ function applyLanguageToUi() {
     setElementText('#routingActiveRouteLabel', t('Route active:', 'Ruta activa:', 'Active route:'));
     setElementText('#openWeatherFromRoutingBtn', t('Ouvrir météo routage', 'Abrir meteo de navegación'));
     setElementText('#routingWeatherHint', t('Météo est accessible depuis Routage.', 'Meteo accesible desde Navegación.'));
+    setElementText('#openSkyMapBtn', t('Carte du ciel', 'Carta del cielo', 'Sky map'));
+    setElementText('#routingSkyHint', t('Utilise le GPS actuel si disponible, sinon le centre de la carte.', 'Usa el GPS actual si está disponible, si no el centro del mapa.', 'Uses current GPS when available, otherwise the map center.'));
     setElementText('#suggestAiRoutesBtn', t('Calculer matrice départ (5 j)', 'Calcular matriz de salida (5 d)'));
     setElementText('#refreshAiRoutesBtn', t('Rafraîchir', 'Actualizar'));
     setElementText('label[for="departureDateTimeInput"]', t('Départ (date + heure):', 'Salida (fecha + hora):'));
@@ -5427,6 +7267,71 @@ function setSidebarCollapsed(collapsed, options = {}) {
     }, 90);
 }
 
+function clampSidebarWidth(value) {
+    const numeric = Number(value);
+    const minWidth = 320;
+    const maxWidth = Math.floor(window.innerWidth * 0.68);
+    if (!Number.isFinite(numeric)) return Math.max(minWidth, Math.min(maxWidth, 620));
+    return Math.max(minWidth, Math.min(maxWidth, Math.round(numeric)));
+}
+
+function applySidebarWidth(width, { persist = true } = {}) {
+    sidebarWidthPx = clampSidebarWidth(width);
+    document.body.style.setProperty('--sidebar-width', `${sidebarWidthPx}px`);
+
+    if (persist) {
+        try {
+            localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthPx));
+        } catch (_error) {
+            // ignore storage write failure
+        }
+    }
+
+    window.setTimeout(() => {
+        if (map) map.invalidateSize();
+    }, 90);
+}
+
+function initializeSidebarResize() {
+    const handle = document.getElementById('sidebarResizeHandle');
+    if (!handle) return;
+
+    const storedWidth = parseInt(String(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || ''), 10);
+    applySidebarWidth(storedWidth, { persist: false });
+
+    let dragging = false;
+
+    const stopDragging = () => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove('is-resizing-sidebar');
+    };
+
+    const onPointerMove = event => {
+        if (!dragging) return;
+        applySidebarWidth(event.clientX, { persist: false });
+    };
+
+    handle.addEventListener('pointerdown', event => {
+        if (isSidebarCollapsed) return;
+        dragging = true;
+        document.body.classList.add('is-resizing-sidebar');
+        applySidebarWidth(event.clientX, { persist: false });
+        event.preventDefault();
+    });
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', () => {
+        if (!dragging) return;
+        applySidebarWidth(sidebarWidthPx, { persist: true });
+        stopDragging();
+    });
+    window.addEventListener('pointercancel', stopDragging);
+    window.addEventListener('resize', () => {
+        applySidebarWidth(sidebarWidthPx, { persist: false });
+    });
+}
+
 function initializeSidebarToggle() {
     const toggleBtn = document.getElementById('sidebarToggleBtn');
     if (!toggleBtn) return;
@@ -5700,9 +7605,13 @@ function getLayerControlLabels() {
         satellite: t('Satellite', 'Satélite'),
         marineDepth: t('Maritime · Profondeurs', 'Marítimo · Profundidades'),
         marineHazard: t('Maritime · Dangers', 'Marítimo · Peligros'),
+        marineAnchorages: t('Maritime · Mouillages', 'Marítimo · Fondeos', 'Marine · Anchorages'),
+        marinePorts: t('Maritime · Ports / marinas', 'Marítimo · Puertos / marinas', 'Marine · Ports / marinas'),
+        marineServices: t('Maritime · Services portuaires', 'Marítimo · Servicios portuarios', 'Marine · Port services'),
         aisLive: t('AIS · Live', 'AIS · Live', 'AIS · Live'),
         isobars: t('Météo · Isobares (lignes · clé OWM)', 'Meteo · Isobaras (líneas · clave OWM)', 'Weather · Isobars (lines · OWM key)'),
         weatherWind: t('Météo · Vent (OWM)', 'Meteo · Viento (OWM)', 'Weather · Wind (OWM)'),
+        weatherWindDirection: t('Météo · Direction vent (OWM)', 'Meteo · Dirección viento (OWM)', 'Weather · Wind direction (OWM)'),
         weatherRain: t('Météo · Pluie (OWM)', 'Meteo · Lluvia (OWM)', 'Weather · Rain (OWM)'),
         weatherClouds: t('Météo · Nuages (OWM)', 'Meteo · Nubes (OWM)', 'Weather · Clouds (OWM)'),
         weatherTemp: t('Météo · Température (OWM)', 'Meteo · Temperatura (OWM)', 'Weather · Temperature (OWM)'),
@@ -5724,9 +7633,13 @@ function refreshBaseLayerControlLanguage() {
         {
             [labels.marineDepth]: marineDepthLayer,
             [labels.marineHazard]: marineHazardLayer,
+            [labels.marineAnchorages]: marineAnchoragesLayer,
+            [labels.marinePorts]: marinePortsLayer,
+            [labels.marineServices]: marineServicesLayer,
             [labels.aisLive]: aisTrafficLayer,
             [labels.isobars]: isobarLayer,
             [labels.weatherWind]: weatherWindLayer,
+            [labels.weatherWindDirection]: weatherWindDirectionLayer,
             [labels.weatherRain]: weatherRainLayer,
             [labels.weatherClouds]: weatherCloudLayer,
             [labels.weatherTemp]: weatherTempLayer,
@@ -5768,6 +7681,14 @@ function initializeLanguageSwitcher() {
 
 function isAuthGateLocked() {
     return isAuthRequiredRuntime() && !cloudAuthUser;
+}
+
+function getAuthGateLockedMessage() {
+    return t(
+        'Accès verrouillé: seul l\'onglet Cloud est accessible (connexion / création de compte). L\'onglet Vie à bord se trouve dans Voyages, après sélection ou création d\'un voyage.',
+        'Acceso bloqueado: solo la pestaña Cloud es accesible (conexión / creación de cuenta). La pestaña Vida a bordo está en Viajes, después de seleccionar o crear un viaje.',
+        'Access locked: only the Cloud tab is available (sign in / create account). The Life on board tab is inside Trips, after selecting or creating a trip.'
+    );
 }
 
 function setProtectedTabsEnabled(enabled) {
@@ -5832,13 +7753,7 @@ async function applyAuthGateState({ clearWhenLocked = true } = {}) {
 
         setActiveCloudSubtab('account');
 
-        setCloudStatus(
-            t(
-                'Accès verrouillé: seul l\'onglet Cloud est accessible (connexion / création de compte).',
-                'Acceso bloqueado: solo la pestaña Cloud es accesible (conexión / creación de cuenta).'
-            ),
-            true
-        );
+        setCloudStatus(getAuthGateLockedMessage(), true);
         return;
     }
 
@@ -7285,14 +9200,15 @@ function buildConvertedGribJsonLayer(payload) {
                 if (u !== null && v !== null) {
                     const speed = Math.sqrt((u * u) + (v * v));
                     const directionFrom = (Math.atan2(u, v) * 180 / Math.PI + 360) % 360;
-                    const directionTo = (directionFrom + 180) % 360;
                     const arrow = L.marker([lat, lon], {
                         interactive: true,
                         icon: L.divIcon({
                             className: 'wind-direction-waypoint',
-                            html: `<div class="wind-direction-waypoint__arrow" style="transform:rotate(${directionTo.toFixed(0)}deg)">➤</div>`,
-                            iconSize: [16, 16],
-                            iconAnchor: [8, 8]
+                            html: buildWindNeedleMarkup(directionFrom, speed * 1.94384, {
+                                color: '#173c53'
+                            }),
+                            iconSize: [38, 38],
+                            iconAnchor: [19, 19]
                         })
                     });
                     arrow.bindPopup(
@@ -7464,38 +9380,447 @@ function createIsobarOverlayLayer(appId) {
         return L.layerGroup();
     }
 
-    const contoursLegacy = L.tileLayer(`https://tile.openweathermap.org/map/pressure_cntr/{z}/{x}/{y}.png?appid=${encodeURIComponent(appId)}`, {
-        attribution: 'Isobares legacy © OpenWeatherMap',
-        opacity: 0.92,
-        maxNativeZoom: 18,
-        errorTileUrl: TRANSPARENT_TILE_DATA_URI,
-        crossOrigin: true
-    });
+    const pressureFillLayer = createOpenWeatherOverlayLayer(
+        appId,
+        [
+            'pressure_new',
+            'pressure'
+        ],
+        'Pression © OpenWeatherMap',
+        0.44,
+        'isobares'
+    );
+    const contourLayer = L.layerGroup();
+    const overlay = L.layerGroup([pressureFillLayer, contourLayer]);
+    overlay._pressureFillLayer = pressureFillLayer;
+    overlay._pressureContourLayer = contourLayer;
+    return overlay;
+}
 
-    const isobarGroup = L.layerGroup([contoursLegacy]);
+let weatherIsobarRefreshToken = 0;
 
-    let contourTileErrorCount = 0;
-    let contourDisabled = false;
+function computeWeatherIsobarGridSpec(zoom) {
+    if (!Number.isFinite(zoom)) return { cols: 7, rows: 5 };
+    if (zoom >= 8) return { cols: 13, rows: 10 };
+    if (zoom >= 6) return { cols: 11, rows: 8 };
+    if (zoom >= 4) return { cols: 9, rows: 7 };
+    return { cols: 7, rows: 5 };
+}
 
-    contoursLegacy.on('tileerror', () => {
-        contourTileErrorCount += 1;
+function buildWeatherIsobarSampleGrid(bounds, zoom) {
+    if (!bounds || typeof bounds.getSouth !== 'function') return null;
 
-        if (contourDisabled) return;
-        if (contourTileErrorCount < 6) return;
+    const south = Number(bounds.getSouth());
+    const north = Number(bounds.getNorth());
+    const west = Number(bounds.getWest());
+    const east = Number(bounds.getEast());
+    if (![south, north, west, east].every(Number.isFinite) || north <= south || east <= west) return null;
 
-        contourDisabled = true;
-        if (isobarGroup.hasLayer(contoursLegacy)) {
-            isobarGroup.removeLayer(contoursLegacy);
+    const { cols, rows } = computeWeatherIsobarGridSpec(zoom);
+    const lats = [];
+    const lons = [];
+
+    for (let row = 0; row < rows; row += 1) {
+        const ratio = rows === 1 ? 0.5 : row / (rows - 1);
+        lats.push(north - ((north - south) * ratio));
+    }
+
+    for (let col = 0; col < cols; col += 1) {
+        const ratio = cols === 1 ? 0.5 : col / (cols - 1);
+        lons.push(west + ((east - west) * ratio));
+    }
+
+    const points = [];
+    for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
+            points.push({ row, col, lat: lats[row], lon: lons[col] });
+        }
+    }
+
+    return { rows, cols, lats, lons, points };
+}
+
+function computeWeatherIsobarRenderGridSpec(zoom) {
+    if (!Number.isFinite(zoom)) return { cols: 22, rows: 16 };
+    if (zoom >= 8) return { cols: 36, rows: 28 };
+    if (zoom >= 6) return { cols: 30, rows: 22 };
+    if (zoom >= 4) return { cols: 24, rows: 18 };
+    return { cols: 20, rows: 15 };
+}
+
+function buildInterpolatedIsobarField(sampleGrid, sampleValues, zoom) {
+    if (!sampleGrid || !Array.isArray(sampleValues)) return null;
+
+    const samplePoints = [];
+    for (let row = 0; row < sampleGrid.rows; row += 1) {
+        for (let col = 0; col < sampleGrid.cols; col += 1) {
+            const value = Number(sampleValues[row]?.[col]);
+            if (!Number.isFinite(value)) continue;
+            samplePoints.push({
+                lat: sampleGrid.lats[row],
+                lon: sampleGrid.lons[col],
+                value
+            });
+        }
+    }
+    if (!samplePoints.length) return null;
+
+    const { cols, rows } = computeWeatherIsobarRenderGridSpec(zoom);
+    const north = sampleGrid.lats[0];
+    const south = sampleGrid.lats[sampleGrid.lats.length - 1];
+    const west = sampleGrid.lons[0];
+    const east = sampleGrid.lons[sampleGrid.lons.length - 1];
+    const lats = [];
+    const lons = [];
+    for (let row = 0; row < rows; row += 1) {
+        const ratio = rows === 1 ? 0.5 : row / (rows - 1);
+        lats.push(north - ((north - south) * ratio));
+    }
+    for (let col = 0; col < cols; col += 1) {
+        const ratio = cols === 1 ? 0.5 : col / (cols - 1);
+        lons.push(west + ((east - west) * ratio));
+    }
+
+    const values = Array.from({ length: rows }, () => Array(cols).fill(null));
+    for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
+            const lat = lats[row];
+            const lon = lons[col];
+            const ranked = samplePoints
+                .map(point => {
+                    const dLat = point.lat - lat;
+                    const dLon = point.lon - lon;
+                    return { point, distanceSq: (dLat * dLat) + (dLon * dLon) };
+                })
+                .sort((a, b) => a.distanceSq - b.distanceSq)
+                .slice(0, 6);
+
+            if (!ranked.length) continue;
+            if (ranked[0].distanceSq < 1e-10) {
+                values[row][col] = ranked[0].point.value;
+                continue;
+            }
+
+            let weightedSum = 0;
+            let weightTotal = 0;
+            ranked.forEach(entry => {
+                const weight = 1 / Math.pow(Math.max(entry.distanceSq, 1e-10), 0.85);
+                weightedSum += entry.point.value * weight;
+                weightTotal += weight;
+            });
+            values[row][col] = weightTotal > 0 ? weightedSum / weightTotal : null;
+        }
+    }
+
+    return { rows, cols, lats, lons, values };
+}
+
+function interpolateIsobarPoint(startLat, startLon, endLat, endLon, startValue, endValue, level) {
+    const delta = endValue - startValue;
+    if (!Number.isFinite(delta) || Math.abs(delta) < 1e-9) {
+        return { lat: (startLat + endLat) / 2, lon: (startLon + endLon) / 2 };
+    }
+
+    const ratio = Math.max(0, Math.min(1, (level - startValue) / delta));
+    return {
+        lat: startLat + ((endLat - startLat) * ratio),
+        lon: startLon + ((endLon - startLon) * ratio)
+    };
+}
+
+function buildIsobarSegments(values, lats, lons, level) {
+    if (!Array.isArray(values) || !Array.isArray(lats) || !Array.isArray(lons)) return [];
+
+    const segments = [];
+    const edgeOrder = ['top', 'right', 'bottom', 'left'];
+
+    for (let row = 0; row < values.length - 1; row += 1) {
+        for (let col = 0; col < values[row].length - 1; col += 1) {
+            const nw = Number(values[row]?.[col]);
+            const ne = Number(values[row]?.[col + 1]);
+            const sw = Number(values[row + 1]?.[col]);
+            const se = Number(values[row + 1]?.[col + 1]);
+            if (![nw, ne, sw, se].every(Number.isFinite)) continue;
+
+            const topLat = lats[row];
+            const bottomLat = lats[row + 1];
+            const leftLon = lons[col];
+            const rightLon = lons[col + 1];
+            const intersections = [];
+
+            const addIntersection = (key, point) => {
+                if (!point) return;
+                intersections.push({ key, point });
+            };
+
+            if ((nw < level && ne >= level) || (nw >= level && ne < level)) {
+                addIntersection('top', interpolateIsobarPoint(topLat, leftLon, topLat, rightLon, nw, ne, level));
+            }
+            if ((ne < level && se >= level) || (ne >= level && se < level)) {
+                addIntersection('right', interpolateIsobarPoint(topLat, rightLon, bottomLat, rightLon, ne, se, level));
+            }
+            if ((sw < level && se >= level) || (sw >= level && se < level)) {
+                addIntersection('bottom', interpolateIsobarPoint(bottomLat, leftLon, bottomLat, rightLon, sw, se, level));
+            }
+            if ((nw < level && sw >= level) || (nw >= level && sw < level)) {
+                addIntersection('left', interpolateIsobarPoint(topLat, leftLon, bottomLat, leftLon, nw, sw, level));
+            }
+
+            if (intersections.length < 2) continue;
+            intersections.sort((a, b) => edgeOrder.indexOf(a.key) - edgeOrder.indexOf(b.key));
+
+            if (intersections.length === 2) {
+                segments.push([intersections[0].point, intersections[1].point]);
+                continue;
+            }
+
+            if (intersections.length === 4) {
+                const center = (nw + ne + sw + se) / 4;
+                if (center >= level) {
+                    segments.push([intersections[0].point, intersections[1].point]);
+                    segments.push([intersections[2].point, intersections[3].point]);
+                } else {
+                    segments.push([intersections[0].point, intersections[3].point]);
+                    segments.push([intersections[1].point, intersections[2].point]);
+                }
+            }
+        }
+    }
+
+    return segments;
+}
+
+function getWeatherIsobarLevels(values) {
+    const finiteValues = values.flat().map(value => Number(value)).filter(Number.isFinite);
+    if (!finiteValues.length) return [];
+
+    const minValue = Math.min(...finiteValues);
+    const maxValue = Math.max(...finiteValues);
+    const step = 4;
+    const start = Math.floor(minValue / step) * step - step;
+    const end = Math.ceil(maxValue / step) * step + step;
+    const levels = [];
+
+    for (let level = start; level <= end + (step / 10); level += step) {
+        levels.push(Number(level.toFixed(1)));
+    }
+
+    return levels;
+}
+
+function getIsobarPolylineStyle(level) {
+    const majorLine = Math.abs(level % 8) < 1e-9;
+    return {
+        color: majorLine ? '#20384a' : '#325468',
+        weight: majorLine ? 2 : 1.2,
+        opacity: majorLine ? 0.78 : 0.42,
+        interactive: false,
+        lineCap: 'round',
+        lineJoin: 'round',
+        smoothFactor: 2.2,
+        className: majorLine ? 'isobar-line isobar-line--major' : 'isobar-line'
+    };
+}
+
+function getIsobarHaloStyle(level) {
+    const majorLine = Math.abs(level % 8) < 1e-9;
+    return {
+        color: 'rgba(245, 248, 250, 0.72)',
+        weight: majorLine ? 4 : 2.6,
+        opacity: majorLine ? 0.46 : 0.22,
+        interactive: false,
+        lineCap: 'round',
+        lineJoin: 'round',
+        smoothFactor: 2.4
+    };
+}
+
+function smoothIsobarPath(points, iterations = 2) {
+    if (!Array.isArray(points) || points.length < 3) return Array.isArray(points) ? points.slice() : [];
+
+    let smoothed = points.slice();
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+        if (smoothed.length < 3) break;
+        const next = [smoothed[0]];
+        for (let index = 0; index < smoothed.length - 1; index += 1) {
+            const current = smoothed[index];
+            const following = smoothed[index + 1];
+            next.push([
+                current[0] * 0.75 + following[0] * 0.25,
+                current[1] * 0.75 + following[1] * 0.25
+            ]);
+            next.push([
+                current[0] * 0.25 + following[0] * 0.75,
+                current[1] * 0.25 + following[1] * 0.75
+            ]);
+        }
+        next.push(smoothed[smoothed.length - 1]);
+        smoothed = next;
+    }
+
+    return smoothed;
+}
+
+function getIsobarPointKey(point) {
+    if (!point) return '';
+    return `${Number(point.lat).toFixed(4)},${Number(point.lon).toFixed(4)}`;
+}
+
+function mergeIsobarSegmentsIntoPaths(segments) {
+    if (!Array.isArray(segments) || !segments.length) return [];
+
+    const paths = [];
+    segments.forEach(segment => {
+        if (!Array.isArray(segment) || segment.length !== 2) return;
+        let [start, end] = segment;
+        if (!start || !end) return;
+
+        const matching = [];
+        paths.forEach((path, index) => {
+            const firstKey = getIsobarPointKey(path[0]);
+            const lastKey = getIsobarPointKey(path[path.length - 1]);
+            const startKey = getIsobarPointKey(start);
+            const endKey = getIsobarPointKey(end);
+            if ([firstKey, lastKey].includes(startKey) || [firstKey, lastKey].includes(endKey)) {
+                matching.push(index);
+            }
+        });
+
+        const attachToPath = (path, a, b) => {
+            const firstKey = getIsobarPointKey(path[0]);
+            const lastKey = getIsobarPointKey(path[path.length - 1]);
+            const aKey = getIsobarPointKey(a);
+            const bKey = getIsobarPointKey(b);
+            if (lastKey === aKey) {
+                path.push(b);
+                return true;
+            }
+            if (lastKey === bKey) {
+                path.push(a);
+                return true;
+            }
+            if (firstKey === bKey) {
+                path.unshift(a);
+                return true;
+            }
+            if (firstKey === aKey) {
+                path.unshift(b);
+                return true;
+            }
+            return false;
+        };
+
+        if (!matching.length) {
+            paths.push([start, end]);
+            return;
         }
 
-        setCloudStatus(t('Isobares lignes indisponibles (OWM timeout).', 'Isobaras de líneas no disponibles (timeout OWM).'), true, { updateBadge: false });
+        const primaryPath = paths[matching[0]];
+        attachToPath(primaryPath, start, end);
+
+        if (matching.length > 1) {
+            const secondaryIndex = matching[1];
+            const secondaryPath = paths[secondaryIndex];
+            const primaryFirst = getIsobarPointKey(primaryPath[0]);
+            const primaryLast = getIsobarPointKey(primaryPath[primaryPath.length - 1]);
+            const secondaryFirst = getIsobarPointKey(secondaryPath[0]);
+            const secondaryLast = getIsobarPointKey(secondaryPath[secondaryPath.length - 1]);
+
+            let merged = null;
+            if (primaryLast === secondaryFirst) {
+                merged = primaryPath.concat(secondaryPath.slice(1));
+            } else if (primaryLast === secondaryLast) {
+                merged = primaryPath.concat(secondaryPath.slice(0, -1).reverse());
+            } else if (primaryFirst === secondaryLast) {
+                merged = secondaryPath.concat(primaryPath.slice(1));
+            } else if (primaryFirst === secondaryFirst) {
+                merged = secondaryPath.slice().reverse().concat(primaryPath.slice(1));
+            }
+
+            if (merged) {
+                paths[matching[0]] = merged;
+                paths.splice(secondaryIndex, 1);
+            }
+        }
     });
 
-    contoursLegacy.on('tileload', () => {
-        contourTileErrorCount = 0;
+    return paths.filter(path => Array.isArray(path) && path.length >= 2);
+}
+
+async function refreshWeatherIsobarOverlay() {
+    if (!map || !isobarLayer || !map.hasLayer(isobarLayer)) return;
+
+    const contourLayer = isobarLayer._pressureContourLayer;
+    if (!contourLayer || typeof contourLayer.clearLayers !== 'function') return;
+
+    const sampleGrid = buildWeatherIsobarSampleGrid(map.getBounds(), map.getZoom());
+    if (!sampleGrid) {
+        contourLayer.clearLayers();
+        return;
+    }
+
+    const refreshToken = ++weatherIsobarRefreshToken;
+    contourLayer.clearLayers();
+
+    const samples = await Promise.all(sampleGrid.points.map(async point => {
+        try {
+            const pressure = await getCurrentPressureSample(point.lat, point.lon);
+            return Number.isFinite(pressure) ? { ...point, pressure } : null;
+        } catch (_error) {
+            return null;
+        }
+    }));
+
+    if (refreshToken !== weatherIsobarRefreshToken) return;
+    if (!map || !isobarLayer || !map.hasLayer(isobarLayer)) return;
+
+    const values = Array.from({ length: sampleGrid.rows }, () => Array(sampleGrid.cols).fill(null));
+    samples.forEach(sample => {
+        if (!sample) return;
+        values[sample.row][sample.col] = sample.pressure;
     });
 
-    return isobarGroup;
+    const contourField = buildInterpolatedIsobarField(sampleGrid, values, map.getZoom());
+    if (!contourField) return;
+
+    const levels = getWeatherIsobarLevels(contourField.values);
+    if (!levels.length) return;
+
+    levels.forEach(level => {
+        const segments = buildIsobarSegments(contourField.values, contourField.lats, contourField.lons, level);
+        const paths = mergeIsobarSegmentsIntoPaths(segments);
+        paths.forEach(path => {
+            const latlngs = smoothIsobarPath(path.map(point => [point.lat, point.lon]), 2);
+            if (latlngs.length < 4) return;
+            L.polyline(latlngs, getIsobarHaloStyle(level)).addTo(contourLayer);
+            L.polyline(latlngs, getIsobarPolylineStyle(level)).addTo(contourLayer);
+        });
+    });
+}
+
+async function getCurrentPressureSample(lat, lon) {
+    const cacheKey = getWeatherPressureSampleCacheKey(lat, lon);
+    if (weatherPressureSampleCache.has(cacheKey)) return weatherPressureSampleCache.get(cacheKey);
+    if (weatherPressureSampleInFlight.has(cacheKey)) return weatherPressureSampleInFlight.get(cacheKey);
+
+    const roundedLat = Number(lat).toFixed(2);
+    const roundedLon = Number(lon).toFixed(2);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(roundedLat)}&longitude=${encodeURIComponent(roundedLon)}&current=surface_pressure&timezone=UTC`;
+    const request = fetchJsonWithRetry(url, { retries: 1, timeoutMs: 7000 })
+        .then(payload => {
+            const pressure = Number(payload?.current?.surface_pressure);
+            const value = Number.isFinite(pressure) ? pressure : null;
+            weatherPressureSampleCache.set(cacheKey, value);
+            weatherPressureSampleInFlight.delete(cacheKey);
+            return value;
+        })
+        .catch(error => {
+            weatherPressureSampleInFlight.delete(cacheKey);
+            throw error;
+        });
+
+    weatherPressureSampleInFlight.set(cacheKey, request);
+    return request;
 }
 
 function reportOpenWeatherTileIssue(layerName, contextLabel = '') {
@@ -7511,8 +9836,215 @@ function reportOpenWeatherTileIssue(layerName, contextLabel = '') {
         `Clave OWM válida pero capa ${target} no disponible (permisos teselas OWM).`,
         `OWM key valid but layer ${target} unavailable (OWM tiles permissions).`
     );
+
     if (status) status.textContent = message;
     setCloudStatus(message, true, { updateBadge: false });
+}
+
+function normalizeOpenWeatherTileCandidates(layerNames) {
+    return (Array.isArray(layerNames) ? layerNames : [layerNames])
+        .map(entry => {
+            if (typeof entry === 'string') {
+                const name = String(entry || '').trim();
+                return name ? { version: '1.0', name, debugName: name } : null;
+            }
+
+            const version = String(entry?.version || '1.0').trim() || '1.0';
+            if (version === '2.0') {
+                const code = String(entry?.code || '').trim();
+                if (!code) return null;
+                return {
+                    version,
+                    code,
+                    debugName: String(entry?.debugName || code).trim() || code,
+                    params: entry?.params && typeof entry.params === 'object' ? entry.params : null
+                };
+            }
+
+            const name = String(entry?.name || '').trim();
+            if (!name) return null;
+            return {
+                version: '1.0',
+                name,
+                debugName: String(entry?.debugName || name).trim() || name
+            };
+        })
+
+        .filter(Boolean);
+}
+
+function buildOpenWeatherTileUrl(candidate, appId) {
+    const safeAppId = String(appId || '').trim();
+    if (!candidate || !safeAppId) return '';
+
+    if (candidate.version === '2.0') {
+        const params = new URLSearchParams({ appid: safeAppId });
+        if (candidate.params) {
+            Object.entries(candidate.params).forEach(([key, value]) => {
+                if (value === null || value === undefined || value === '') return;
+
+                params.set(key, String(value));
+            });
+        }
+        return `https://maps.openweathermap.org/maps/2.0/weather/${encodeURIComponent(candidate.code)}/{z}/{x}/{y}?${params.toString()}`;
+    }
+
+    return `https://tile.openweathermap.org/map/${encodeURIComponent(candidate.name)}/{z}/{x}/{y}.png?appid=${encodeURIComponent(safeAppId)}`;
+}
+
+function getOpenWeatherRoundedTimestampSeconds(date = new Date()) {
+    const currentMs = date instanceof Date ? date.getTime() : Date.now();
+    const stepMs = 3 * 60 * 60 * 1000;
+    return Math.floor(currentMs / stepMs) * (stepMs / 1000);
+}
+
+function computeWeatherWindDirectionGridSpec(zoom) {
+    if (!Number.isFinite(zoom)) return { cols: 4, rows: 3 };
+    if (zoom >= 9) return { cols: 6, rows: 5 };
+    if (zoom >= 7) return { cols: 5, rows: 4 };
+    if (zoom >= 5) return { cols: 4, rows: 3 };
+    return { cols: 3, rows: 2 };
+}
+
+function buildWeatherWindDirectionSamplePoints(bounds, zoom) {
+    if (!bounds || typeof bounds.getSouth !== 'function') return [];
+
+    const south = Number(bounds.getSouth());
+    const north = Number(bounds.getNorth());
+    const west = Number(bounds.getWest());
+    const east = Number(bounds.getEast());
+    if (![south, north, west, east].every(Number.isFinite) || north <= south || east <= west) return [];
+
+    const { cols, rows } = computeWeatherWindDirectionGridSpec(zoom);
+    const latSpan = north - south;
+    const lonSpan = east - west;
+    const latPadding = latSpan * 0.12;
+    const lonPadding = lonSpan * 0.12;
+    const startLat = south + latPadding;
+    const endLat = north - latPadding;
+    const startLon = west + lonPadding;
+    const endLon = east - lonPadding;
+    const points = [];
+
+    for (let row = 0; row < rows; row += 1) {
+        const latRatio = rows === 1 ? 0.5 : row / (rows - 1);
+        const lat = startLat + (endLat - startLat) * latRatio;
+        for (let col = 0; col < cols; col += 1) {
+            const lonRatio = cols === 1 ? 0.5 : col / (cols - 1);
+            const lon = startLon + (endLon - startLon) * lonRatio;
+            points.push({ lat, lon });
+        }
+    }
+
+    return points;
+}
+
+function getWindNeedleMetrics(windSpeed, { compact = false } = {}) {
+    const safeWindSpeed = Math.max(0, Number(windSpeed) || 0);
+    const length = compact
+        ? Math.min(22, 12 + safeWindSpeed * 0.42)
+        : Math.min(30, 16 + safeWindSpeed * 0.55);
+
+    const thickness = compact
+        ? Math.min(4.2, 1.8 + safeWindSpeed * 0.06)
+        : Math.min(5.4, 2.2 + safeWindSpeed * 0.08);
+    const headLength = compact
+        ? Math.min(8, 5 + safeWindSpeed * 0.12)
+        : Math.min(10, 6 + safeWindSpeed * 0.14);
+    const headHalfHeight = Math.max(thickness * 1.15, headLength * 0.52);
+    const canvas = Math.max(length + headLength + 8, compact ? 26 : 38);
+    return {
+        length: Number(length.toFixed(1)),
+        thickness: Number(thickness.toFixed(1)),
+        headLength: Number(headLength.toFixed(1)),
+        headHalfHeight: Number(headHalfHeight.toFixed(1)),
+        canvas: Math.ceil(canvas)
+    };
+}
+
+
+function buildWindNeedleMarkup(windDirection, windSpeed, { color = '#1c4258', compact = false } = {}) {
+    const rotation = getWindFlowArrowRotation(windDirection);
+    if (!Number.isFinite(rotation)) return '';
+
+    const metrics = getWindNeedleMetrics(windSpeed, { compact });
+    const beaufort = knotsToBeaufort(windSpeed);
+    const beaufortTone = getBeaufortToneName(beaufort);
+    const variantClass = compact ? ' wind-needle--compact' : '';
+    return `<div class="wind-needle${variantClass}" style="transform: rotate(${rotation}deg); --wind-needle-length:${metrics.length}px; --wind-needle-thickness:${metrics.thickness}px; --wind-needle-head-length:${metrics.headLength}px; --wind-needle-head-half-height:${metrics.headHalfHeight}px; --wind-needle-color:${color}; width:${metrics.canvas}px; height:${metrics.canvas}px;"><span class="wind-needle__backdrop wind-needle__backdrop--${beaufortTone}"></span><span class="wind-needle__shaft"></span><span class="wind-needle__head"></span></div>`;
+}
+
+
+function buildWeatherWindDirectionArrowLayer(lat, lon, weather) {
+    const windDirection = Number(weather?.windDirection);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(windDirection)) return null;
+
+    const sourceCardinal = degreesToCardinalFr(windDirection);
+    const windSpeedLabel = formatWindKnotsWithBeaufort(weather?.windSpeed);
+    const windNeedleMarkup = buildWindNeedleMarkup(windDirection, weather?.windSpeed, {
+        color: '#163a50'
+    });
+    const icon = L.divIcon({
+        className: 'wind-direction-waypoint',
+        html: windNeedleMarkup,
+        iconSize: [38, 38],
+        iconAnchor: [19, 19]
+    });
+
+    const layer = L.marker([lat, lon], {
+        icon,
+        interactive: true,
+        keyboard: false,
+        zIndexOffset: 900
+    });
+
+    layer.bindTooltip(`${t('Vent de', 'Viento de', 'Wind from')} ${sourceCardinal} · ${windSpeedLabel}`, {
+        direction: 'top',
+        opacity: 0.95
+    });
+
+    return layer;
+}
+
+async function refreshWeatherWindDirectionOverlay() {
+    if (!map || !weatherWindDirectionLayer || !map.hasLayer(weatherWindDirectionLayer)) return;
+
+    const refreshToken = ++weatherWindDirectionRefreshToken;
+    if (typeof weatherWindDirectionLayer.clearLayers === 'function') {
+        weatherWindDirectionLayer.clearLayers();
+    }
+
+    const samplePoints = buildWeatherWindDirectionSamplePoints(map.getBounds(), map.getZoom());
+    if (!samplePoints.length) return;
+
+    const results = await Promise.all(samplePoints.map(async point => {
+        try {
+            const weather = await getCurrentWeatherAtWaypoint(point.lat, point.lon);
+            return { point, weather, error: null };
+        } catch (error) {
+            return { point, weather: null, error };
+        }
+    }));
+
+    if (refreshToken !== weatherWindDirectionRefreshToken) return;
+    if (!weatherWindDirectionLayer || !map.hasLayer(weatherWindDirectionLayer)) return;
+
+    let visibleArrowCount = 0;
+    results.forEach(result => {
+        if (result.error || !result.weather) return;
+        const arrowLayer = buildWeatherWindDirectionArrowLayer(result.point.lat, result.point.lon, result.weather);
+        if (!arrowLayer) return;
+        weatherWindDirectionLayer.addLayer(arrowLayer);
+        visibleArrowCount += 1;
+    });
+
+    if (visibleArrowCount === 0) {
+        setCloudStatus(t(
+            'Direction vent indisponible: données Open-Meteo non récupérées sur la zone visible.',
+            'Dirección del viento no disponible: datos Open-Meteo no recuperados en la zona visible.',
+            'Wind direction unavailable: Open-Meteo data could not be retrieved for the visible area.'
+        ), true, { updateBadge: false });
+    }
 }
 
 function createOpenWeatherOverlayLayer(appId, layerNames, attribution, opacity = 0.75, contextLabel = '') {
@@ -7520,20 +10052,16 @@ function createOpenWeatherOverlayLayer(appId, layerNames, attribution, opacity =
         return L.layerGroup();
     }
 
-    const names = (Array.isArray(layerNames) ? layerNames : [layerNames])
-        .map(name => String(name || '').trim())
-        .filter(Boolean);
-    if (!names.length) {
+    const candidates = normalizeOpenWeatherTileCandidates(layerNames);
+    if (!candidates.length) {
         return L.layerGroup();
     }
 
     let activeIndex = 0;
-    let currentLayerName = names[activeIndex];
+    let currentCandidate = candidates[activeIndex];
     let tileErrorCount = 0;
 
-    const buildUrl = name => `https://tile.openweathermap.org/map/${encodeURIComponent(name)}/{z}/{x}/{y}.png?appid=${encodeURIComponent(appId)}`;
-
-    const layer = L.tileLayer(buildUrl(currentLayerName), {
+    const layer = L.tileLayer(buildOpenWeatherTileUrl(currentCandidate, appId), {
         attribution,
         opacity,
         maxNativeZoom: 18,
@@ -7549,15 +10077,15 @@ function createOpenWeatherOverlayLayer(appId, layerNames, attribution, opacity =
         tileErrorCount += 1;
         if (tileErrorCount < 4) return;
 
-        if (activeIndex < names.length - 1) {
+        if (activeIndex < candidates.length - 1) {
             activeIndex += 1;
-            currentLayerName = names[activeIndex];
-            layer.setUrl(buildUrl(currentLayerName));
+            currentCandidate = candidates[activeIndex];
+            layer.setUrl(buildOpenWeatherTileUrl(currentCandidate, appId));
             tileErrorCount = 0;
             return;
         }
 
-        reportOpenWeatherTileIssue(currentLayerName, contextLabel);
+        reportOpenWeatherTileIssue(currentCandidate?.debugName || contextLabel, contextLabel);
     });
 
     return layer;
@@ -7569,7 +10097,15 @@ async function testOpenWeatherTileAccess(appId, layerName = 'clouds_new') {
         return { ok: false, message: t('Clé vide.', 'Clave vacía.', 'Empty key.') };
     }
 
-    const url = `https://tile.openweathermap.org/map/${encodeURIComponent(layerName)}/2/2/1.png?appid=${encodeURIComponent(cleanedKey)}`;
+    const candidate = normalizeOpenWeatherTileCandidates([layerName])[0] || null;
+    if (!candidate) {
+        return { ok: false, message: t('Couche météo invalide.', 'Capa meteo inválida.', 'Invalid weather layer.') };
+    }
+
+    const url = buildOpenWeatherTileUrl(candidate, cleanedKey)
+        .replace('{z}', '2')
+        .replace('{x}', '2')
+        .replace('{y}', '1');
 
     try {
         const response = await fetch(url, { method: 'GET' });
@@ -7596,16 +10132,14 @@ async function testOpenWeatherTileAccess(appId, layerName = 'clouds_new') {
 }
 
 async function testOpenWeatherTileAccessAny(appId, layerNames) {
-    const names = (Array.isArray(layerNames) ? layerNames : [layerNames])
-        .map(name => String(name || '').trim())
-        .filter(Boolean);
-    if (!names.length) {
+    const candidates = normalizeOpenWeatherTileCandidates(layerNames);
+    if (!candidates.length) {
         return { ok: false, message: t('Aucune couche à tester.', 'Ninguna capa para probar.', 'No layer to test.') };
     }
 
     let lastMessage = '';
-    for (const name of names) {
-        const result = await testOpenWeatherTileAccess(appId, name);
+    for (const candidate of candidates) {
+        const result = await testOpenWeatherTileAccess(appId, candidate);
         if (result.ok) return result;
         lastMessage = result.message;
     }
@@ -7618,6 +10152,7 @@ function rebuildOpenWeatherOverlays(appId) {
     const previous = [
         { key: 'isobars', layer: isobarLayer },
         { key: 'wind', layer: weatherWindLayer },
+        { key: 'windDirection', layer: weatherWindDirectionLayer },
         { key: 'rain', layer: weatherRainLayer },
         { key: 'clouds', layer: weatherCloudLayer },
         { key: 'temp', layer: weatherTempLayer }
@@ -7634,14 +10169,16 @@ function rebuildOpenWeatherOverlays(appId) {
     });
 
     isobarLayer = createIsobarOverlayLayer(appId);
-    weatherWindLayer = createOpenWeatherOverlayLayer(appId, ['wind_new', 'wind'], 'Vent © OpenWeatherMap', 0.78, 'vent');
-    weatherRainLayer = createOpenWeatherOverlayLayer(appId, ['precipitation_new', 'precipitation'], 'Pluie © OpenWeatherMap', 0.78, 'pluie');
-    weatherCloudLayer = createOpenWeatherOverlayLayer(appId, ['clouds_new', 'clouds'], 'Nuages © OpenWeatherMap', 0.72, 'nuages');
-    weatherTempLayer = createOpenWeatherOverlayLayer(appId, ['temp_new', 'temp', 'TA2'], 'Température © OpenWeatherMap', 0.9, 'température');
+    weatherWindLayer = createOpenWeatherOverlayLayer(appId, ['wind_new', 'wind', { version: '2.0', code: 'WS10', debugName: 'WS10' }], 'Vent © OpenWeatherMap', 0.78, 'vent');
+    weatherWindDirectionLayer = L.layerGroup();
+    weatherRainLayer = createOpenWeatherOverlayLayer(appId, ['precipitation_new', 'precipitation', { version: '2.0', code: 'PR0', debugName: 'PR0' }], 'Pluie © OpenWeatherMap', 0.78, 'pluie');
+    weatherCloudLayer = createOpenWeatherOverlayLayer(appId, ['clouds_new', 'clouds', { version: '2.0', code: 'CL', debugName: 'CL' }], 'Nuages © OpenWeatherMap', 0.72, 'nuages');
+    weatherTempLayer = createOpenWeatherOverlayLayer(appId, ['temp_new', 'temp', { version: '2.0', code: 'TA2', debugName: 'TA2' }], 'Température © OpenWeatherMap', 0.9, 'température');
 
     const current = {
         isobars: isobarLayer,
         wind: weatherWindLayer,
+        windDirection: weatherWindDirectionLayer,
         rain: weatherRainLayer,
         clouds: weatherCloudLayer,
         temp: weatherTempLayer
@@ -8007,7 +10544,7 @@ function buildGoogleMapsUrl(lat, lng) {
 
 function ensureMapWebOverlay() {
     if (mapWebOverlayElement && mapWebOverlayFrame) {
-        return { overlay: mapWebOverlayElement, frame: mapWebOverlayFrame };
+        return { overlay: mapWebOverlayElement, frame: mapWebOverlayFrame, title: mapWebOverlayTitleElement };
     }
 
     const mapContainer = document.getElementById('map');
@@ -8016,12 +10553,17 @@ function ensureMapWebOverlay() {
     const overlay = document.createElement('div');
     overlay.className = 'map-web-overlay';
     overlay.style.display = 'none';
+    ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'contextmenu', 'wheel'].forEach(eventName => {
+        overlay.addEventListener(eventName, event => {
+            event.stopPropagation();
+        }, { passive: eventName === 'touchstart' || eventName === 'touchend' || eventName === 'wheel' });
+    });
 
     const header = document.createElement('div');
     header.className = 'map-web-overlay__header';
 
     const title = document.createElement('strong');
-    title.textContent = t('Aperçu Google', 'Vista Google');
+    title.textContent = t('Aperçu web', 'Vista web', 'Web preview');
     header.appendChild(title);
 
     const closeBtn = document.createElement('button');
@@ -8047,18 +10589,94 @@ function ensureMapWebOverlay() {
 
     mapWebOverlayElement = overlay;
     mapWebOverlayFrame = frame;
-    return { overlay, frame };
+    mapWebOverlayTitleElement = title;
+    return { overlay, frame, title };
 }
 
-function openUrlInMapOverlay(url) {
+function openUrlInMapOverlay(url, options = {}) {
     const safeUrl = String(url || '').trim();
     if (!safeUrl) return;
 
-    const { overlay, frame } = ensureMapWebOverlay();
+    const { overlay, frame, title } = ensureMapWebOverlay();
     if (!overlay || !frame) return;
+
+    const overlayTitle = String(options?.title || '').trim() || t('Aperçu web', 'Vista web', 'Web preview');
+    if (title) {
+        title.textContent = overlayTitle;
+    }
 
     overlay.style.display = 'flex';
     frame.src = safeUrl;
+}
+
+function isMapWebOverlayOpen() {
+    return !!(mapWebOverlayElement && mapWebOverlayElement.style.display !== 'none');
+}
+
+function getSkyMapContext() {
+    if (Number.isFinite(navGpsLatestFix?.lat) && Number.isFinite(navGpsLatestFix?.lng)) {
+        return {
+            lat: navGpsLatestFix.lat,
+            lng: navGpsLatestFix.lng,
+            sourceLabel: t('GPS actuel', 'GPS actual', 'Current GPS'),
+            headingDeg: Number.isFinite(navLatestCourseDeg) ? navLatestCourseDeg : null
+        };
+    }
+
+    const center = typeof map?.getCenter === 'function' ? map.getCenter() : null;
+    if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+        return {
+            lat: center.lat,
+            lng: center.lng,
+            sourceLabel: t('Centre de carte', 'Centro del mapa', 'Map center'),
+            headingDeg: null
+        };
+    }
+
+    return null;
+}
+
+function buildSkyMapUrl(context, referenceTime = new Date()) {
+    if (!context || !Number.isFinite(context.lat) || !Number.isFinite(context.lng)) return '';
+
+    const url = new URL('skymap.html', window.location.href);
+    url.searchParams.set('lat', String(context.lat));
+    url.searchParams.set('lng', String(context.lng));
+    url.searchParams.set('source', String(context.sourceLabel || ''));
+    url.searchParams.set('time', (referenceTime instanceof Date && !Number.isNaN(referenceTime.getTime()) ? referenceTime : new Date()).toISOString());
+    if (Number.isFinite(context.headingDeg)) {
+        url.searchParams.set('heading', String(context.headingDeg));
+    }
+    return url.toString();
+}
+
+function openSkyMapForCurrentContext() {
+    startPassiveNavigationWatch();
+    const context = getSkyMapContext();
+    const hint = document.getElementById('routingSkyHint');
+
+    if (!context) {
+        if (hint) {
+            hint.textContent = t(
+                'Carte du ciel indisponible: ni GPS ni centre de carte exploitable.',
+                'Carta del cielo no disponible: ni GPS ni centro del mapa utilizable.',
+                'Sky map unavailable: neither GPS nor usable map center found.'
+            );
+        }
+        return;
+    }
+
+    if (hint) {
+        hint.textContent = t(
+            `Carte du ciel ouverte depuis ${context.sourceLabel}.`,
+            `Carta del cielo abierta desde ${context.sourceLabel}.`,
+            `Sky map opened from ${context.sourceLabel}.`
+        );
+    }
+
+    openUrlInMapOverlay(buildSkyMapUrl(context), {
+        title: t('Carte du ciel', 'Carta del cielo', 'Sky map')
+    });
 }
 
 function buildReverseGeocodeCacheKey(lat, lng) {
@@ -8201,7 +10819,9 @@ function updateWaypointGoogleMapPreview(lat, lng) {
     googleLink.href = buildGoogleMapsUrl(lat, lng);
     googleLink.onclick = (event) => {
         event.preventDefault();
-        openUrlInMapOverlay(googleLink.href);
+        openUrlInMapOverlay(googleLink.href, {
+            title: t('Aperçu Google', 'Vista Google', 'Google preview')
+        });
     };
 
     waypointEditorIsUpdating = true;
@@ -9914,11 +12534,17 @@ function invalidateComputedRouteDisplay() {
     clearWaveDirectionSegmentLayers();
     waypointPassageSlots.clear();
     lastRouteBounds = null;
+    lastRoutingDecisionSnapshot = null;
 
     const info = document.getElementById('info');
     if (info) info.innerHTML = '';
     const windLegend = document.getElementById('windSpeedLegend');
-    if (windLegend) windLegend.innerHTML = '';
+    if (windLegend) renderWindSpeedLegend();
+    const routingDecisionSummary = document.getElementById('routingDecisionSummary');
+    if (routingDecisionSummary) {
+        routingDecisionSummary.innerHTML = '';
+        routingDecisionSummary.style.display = 'none';
+    }
 }
 
 function refreshEditableRouteOverlay() {
@@ -10105,9 +12731,92 @@ function getPoiLabel(point, fallback) {
     return point?.tags?.name || fallback;
 }
 
+function isOverpassTemporarilyDisabled() {
+    return overpassDisabledUntil > Date.now();
+}
+
+function getOverpassDisabledError() {
+    if (!isOverpassTemporarilyDisabled()) return null;
+    return new Error(overpassDisabledReason || 'overpass-disabled');
+}
+
+function removeMarinePoiLayersFromMap() {
+    const layers = [marineAnchoragesLayer, marinePortsLayer, marineServicesLayer];
+    layers.forEach(layer => {
+        if (map && layer && map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+        if (typeof layer?.clearLayers === 'function') {
+            layer.clearLayers();
+        }
+    });
+}
+
+function reportOverpassUnavailable(kind = 'generic', endpoint = '') {
+    const issueKey = `${kind}:${String(endpoint || 'all')}`;
+    if (overpassIssueFlags.has(issueKey)) return;
+    overpassIssueFlags.add(issueKey);
+
+    const endpointLabel = endpoint ? ` (${endpoint})` : '';
+    const message = kind === 'browser-blocked'
+        ? t(
+            `Couches maritimes dynamiques désactivées${endpointLabel}: accès navigateur direct à Overpass refusé (CORS / réseau). Utilise un proxy serveur pour localhost.`,
+            `Capas marítimas dinámicas desactivadas${endpointLabel}: acceso directo del navegador a Overpass rechazado (CORS / red). Usa un proxy del servidor en localhost.`,
+            `Dynamic marine layers disabled${endpointLabel}: direct browser access to Overpass is blocked (CORS / network). Use a server proxy on localhost.`
+        )
+        : t(
+            `Couches maritimes dynamiques indisponibles${endpointLabel}: Overpass saturé ou inaccessible.`,
+            `Capas marítimas dinámicas no disponibles${endpointLabel}: Overpass saturado o inaccesible.`,
+            `Dynamic marine layers unavailable${endpointLabel}: Overpass is saturated or unreachable.`
+        );
+
+    setCloudStatus(message, true, { updateBadge: false });
+    console.warn(`[CEIBO] ${message}`);
+}
+
+function disableOverpassForBrowser(reason = 'browser-blocked', endpoint = '') {
+    overpassDisabledReason = reason;
+    overpassDisabledUntil = Date.now() + OVERPASS_BROWSER_BLOCK_COOLDOWN_MS;
+    removeMarinePoiLayersFromMap();
+    reportOverpassUnavailable(reason, endpoint);
+}
+
+function disableOverpassTemporarily(reason = 'generic', endpoint = '', cooldownMs = OVERPASS_429_COOLDOWN_MS) {
+    overpassDisabledReason = reason;
+    overpassDisabledUntil = Date.now() + Math.max(1000, Number(cooldownMs) || OVERPASS_429_COOLDOWN_MS);
+    removeMarinePoiLayersFromMap();
+    reportOverpassUnavailable(reason, endpoint);
+}
+
+function getMarinePoiRefreshSignature() {
+    if (!map) return '';
+    const visibleKeys = getMarinePoiVisibleLayerDescriptors().map(item => item.key).sort().join('|');
+    const bounds = map.getBounds();
+    if (!visibleKeys || !bounds) return '';
+    const south = Number(bounds.getSouth()).toFixed(2);
+    const west = Number(bounds.getWest()).toFixed(2);
+    const north = Number(bounds.getNorth()).toFixed(2);
+    const east = Number(bounds.getEast()).toFixed(2);
+    return `${map.getZoom()}|${visibleKeys}|${south},${west},${north},${east}`;
+}
+
+function scheduleMarinePoiOverlayRefresh({ force = false, delayMs = MARINE_POI_REFRESH_DEBOUNCE_MS } = {}) {
+    if (marinePoiOverlayRefreshTimer) {
+        clearTimeout(marinePoiOverlayRefreshTimer);
+        marinePoiOverlayRefreshTimer = null;
+    }
+    marinePoiOverlayRefreshTimer = window.setTimeout(() => {
+        marinePoiOverlayRefreshTimer = null;
+        void refreshMarinePoiOverlays({ force });
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
 async function fetchOverpassElements(query) {
     const normalizedQuery = String(query || '').trim();
     if (!normalizedQuery) return [];
+
+    const disabledError = getOverpassDisabledError();
+    if (disabledError) throw disabledError;
 
     const cached = overpassQueryCache.get(normalizedQuery);
     if (cached && (Date.now() - cached.ts) < OVERPASS_CACHE_TTL_MS) {
@@ -10115,6 +12824,7 @@ async function fetchOverpassElements(query) {
     }
 
     let lastError = null;
+    let lastEndpointTried = '';
 
     const now = Date.now();
     const orderedEndpoints = [
@@ -10125,6 +12835,7 @@ async function fetchOverpassElements(query) {
     for (const endpoint of orderedEndpoints) {
         const blockedUntil = overpassEndpointCooldownUntil.get(endpoint) || 0;
         if (blockedUntil > now) continue;
+        lastEndpointTried = endpoint;
 
         try {
             const requestNow = Date.now();
@@ -10147,6 +12858,9 @@ async function fetchOverpassElements(query) {
                     overpassEndpointCooldownUntil.set(endpoint, Date.now() + OVERPASS_429_COOLDOWN_MS);
                     await new Promise(resolve => setTimeout(resolve, 1200));
                 }
+                if (response.status === 404 || response.status >= 500) {
+                    overpassEndpointCooldownUntil.set(endpoint, Date.now() + OVERPASS_BROWSER_BLOCK_COOLDOWN_MS);
+                }
                 lastError = new Error(`Overpass HTTP ${response.status}`);
                 continue;
             }
@@ -10165,10 +12879,48 @@ async function fetchOverpassElements(query) {
                 ts: Date.now(),
                 elements
             });
+            overpassDisabledUntil = 0;
+            overpassDisabledReason = '';
             return elements;
         } catch (error) {
+            const message = String(error?.message || error || '').toLowerCase();
+            const isBrowserBlocked =
+                message.includes('failed to fetch')
+                || message.includes('load failed')
+                || message.includes('networkerror')
+                || message.includes('network error')
+                || message.includes('err_failed')
+                || message.includes('err_http2_protocol_error')
+                || message.includes('err_connection_closed')
+                || message.includes('err_connection_refused')
+                || message.includes('err_connection_reset');
+            if (isBrowserBlocked) {
+                overpassEndpointCooldownUntil.set(endpoint, Date.now() + OVERPASS_BROWSER_BLOCK_COOLDOWN_MS);
+            }
             lastError = error;
         }
+    }
+
+    const finalMessage = String(lastError?.message || lastError || '').toLowerCase();
+    if (
+        finalMessage.includes('failed to fetch')
+        || finalMessage.includes('load failed')
+        || finalMessage.includes('networkerror')
+        || finalMessage.includes('err_failed')
+        || finalMessage.includes('err_http2_protocol_error')
+        || finalMessage.includes('err_connection_closed')
+        || finalMessage.includes('err_connection_refused')
+        || finalMessage.includes('err_connection_reset')
+    ) {
+        disableOverpassForBrowser('browser-blocked', overpassPreferredEndpoint);
+    } else if (
+        finalMessage.includes('http 429')
+        || finalMessage.includes('http 502')
+        || finalMessage.includes('http 503')
+        || finalMessage.includes('http 504')
+        || finalMessage.includes('overpass indisponible')
+    ) {
+        disableOverpassTemporarily('generic', lastEndpointTried || overpassPreferredEndpoint, OVERPASS_429_COOLDOWN_MS);
     }
 
     throw lastError || new Error('Overpass indisponible');
@@ -10227,12 +12979,337 @@ async function fetchNearbyAmenityList(lat, lon, kind = 'restaurant', radiusM = 6
         .slice(0, 8);
 }
 
+function getMarinePoiBoundsBbox(bounds) {
+    if (!bounds || typeof bounds.getSouth !== 'function') return '';
+    const south = Number(bounds.getSouth());
+    const west = Number(bounds.getWest());
+    const north = Number(bounds.getNorth());
+    const east = Number(bounds.getEast());
+    if (![south, west, north, east].every(Number.isFinite) || north <= south || east <= west) return '';
+    return `${south},${west},${north},${east}`;
+}
+
+function getMarinePoiLayerDescriptors() {
+    return [
+        { key: 'anchorages', layer: marineAnchoragesLayer },
+        { key: 'ports', layer: marinePortsLayer },
+        { key: 'services', layer: marineServicesLayer }
+    ];
+}
+
+function clearMarinePoiOverlayLayers() {
+    getMarinePoiLayerDescriptors().forEach(item => {
+        if (typeof item.layer?.clearLayers === 'function') {
+            item.layer.clearLayers();
+        }
+    });
+}
+
+function getMarinePoiVisibleLayerDescriptors() {
+    if (!map) return [];
+    return getMarinePoiLayerDescriptors().filter(item => item.layer && map.hasLayer(item.layer));
+}
+
+function getMarinePoiTypeLabel(kind, tags = {}) {
+    if (kind === 'anchorages') {
+        if (tags['seamark:type'] === 'mooring') return t('Mouillage organisé', 'Amarre', 'Mooring');
+        return t('Mouillage', 'Fondeo', 'Anchorage');
+    }
+    if (kind === 'ports') {
+        if (tags.leisure === 'marina') return t('Marina', 'Marina', 'Marina');
+        return t('Port / abri', 'Puerto / abrigo', 'Harbour / shelter');
+    }
+    if (tags.amenity === 'fuel') return t('Carburant', 'Combustible', 'Fuel');
+    if (tags.amenity === 'drinking_water') return t('Eau', 'Agua', 'Water');
+    if (tags.amenity === 'toilets') return t('Toilettes', 'Aseos', 'Toilets');
+    if (tags.amenity === 'shower') return t('Douche', 'Ducha', 'Shower');
+    if (tags.shop === 'boat') return t('Accastillage', 'Náutica', 'Chandlery');
+    if (tags.man_made === 'slipway') return t('Cale', 'Varadero', 'Slipway');
+    if (tags.craft === 'shipyard' || tags.craft === 'boatbuilder') return t('Chantier naval', 'Astillero', 'Boatyard');
+    return t('Service portuaire', 'Servicio portuario', 'Port service');
+}
+
+function getMarinePoiFallbackName(kind, index) {
+    if (kind === 'anchorages') return t(`Mouillage ${index + 1}`, `Fondeo ${index + 1}`, `Anchorage ${index + 1}`);
+    if (kind === 'ports') return t(`Port ${index + 1}`, `Puerto ${index + 1}`, `Port ${index + 1}`);
+    return t(`Service ${index + 1}`, `Servicio ${index + 1}`, `Service ${index + 1}`);
+}
+
+function getMarinePoiServiceSummary(tags = {}) {
+    const summary = [];
+    if (tags.amenity === 'fuel') summary.push(t('diesel / essence à confirmer', 'diesel / gasolina por confirmar', 'fuel type to confirm'));
+    if (tags.amenity === 'drinking_water') summary.push(t('eau douce', 'agua dulce', 'fresh water'));
+    if (tags.amenity === 'toilets') summary.push(t('sanitaires', 'aseos', 'sanitary'));
+    if (tags.amenity === 'shower') summary.push(t('douches', 'duchas', 'showers'));
+    if (tags.shop === 'boat') summary.push(t('matériel de bord', 'material náutico', 'boat supplies'));
+    if (tags.man_made === 'slipway') summary.push(t('mise à l’eau / sortie', 'botadura / varada', 'launch / haul-out'));
+    if (tags.craft === 'shipyard' || tags.craft === 'boatbuilder') summary.push(t('réparation / chantier', 'reparación / astillero', 'repair / yard'));
+    return summary.join(' · ');
+}
+
+function getMarinePoiWebsite(tags = {}) {
+    return String(tags.website || tags['contact:website'] || tags.url || '').trim();
+}
+
+function getMarinePoiPhone(tags = {}) {
+    return String(tags.phone || tags['contact:phone'] || '').trim();
+}
+
+function getMarinePoiEmail(tags = {}) {
+    return String(tags.email || tags['contact:email'] || '').trim();
+}
+
+function getMarinePoiVhf(tags = {}) {
+    return String(tags['seamark:radio_station:channel'] || tags.vhf || tags['contact:vhf'] || '').trim();
+}
+
+function getMarinePoiOperator(tags = {}) {
+    return String(tags.operator || tags['seamark:harbour:category'] || tags.harbour || '').trim();
+}
+
+function getMarinePoiCapacity(tags = {}) {
+    return String(tags.capacity || tags['capacity:boats'] || tags['capacity:berth'] || '').trim();
+}
+
+function getMarinePoiOpeningHours(tags = {}) {
+    return String(tags.opening_hours || '').trim();
+}
+
+function getMarinePoiServiceFlags(entry) {
+    const tags = entry?.tags || {};
+    const flags = [];
+    if (entry?.kind === 'ports') {
+        if (tags.leisure === 'marina') flags.push(t('marina', 'marina', 'marina'));
+        if (tags.harbour === 'yes' || tags['seamark:type'] === 'harbour') flags.push(t('abri', 'abrigo', 'harbour'));
+    }
+    if (tags.amenity === 'fuel' || tags.fuel === 'yes' || tags.diesel === 'yes') flags.push(t('carburant', 'combustible', 'fuel'));
+    if (tags.amenity === 'drinking_water' || tags.drinking_water === 'yes' || tags.water_point === 'yes') flags.push(t('eau', 'agua', 'water'));
+    if (tags.amenity === 'toilets' || tags.toilets === 'yes') flags.push(t('toilettes', 'aseos', 'toilets'));
+    if (tags.amenity === 'shower' || tags.shower === 'yes') flags.push(t('douches', 'duchas', 'showers'));
+    if (tags.electricity === 'yes' || tags.power_supply === 'yes') flags.push(t('électricité', 'electricidad', 'electricity'));
+    if (tags.wifi === 'yes' || tags.internet_access === 'wlan') flags.push(t('wifi', 'wifi', 'wifi'));
+    if (tags.slipway === 'yes' || tags.man_made === 'slipway') flags.push(t('cale', 'rampa', 'slipway'));
+    if (tags.shop === 'boat') flags.push(t('accastillage', 'náutica', 'chandlery'));
+    if (tags.craft === 'shipyard' || tags.craft === 'boatbuilder') flags.push(t('chantier', 'astillero', 'boatyard'));
+    return flags;
+}
+
+function buildMarinePoiDetailRows(entry) {
+    const tags = entry?.tags || {};
+    const rows = [];
+    const operator = getMarinePoiOperator(tags);
+    const phone = getMarinePoiPhone(tags);
+    const email = getMarinePoiEmail(tags);
+    const website = getMarinePoiWebsite(tags);
+    const vhf = getMarinePoiVhf(tags);
+    const openingHours = getMarinePoiOpeningHours(tags);
+    const capacity = getMarinePoiCapacity(tags);
+    const serviceFlags = getMarinePoiServiceFlags(entry);
+
+    if (operator) rows.push({ label: t('Gestion', 'Gestión', 'Operator'), value: escapeHtml(operator) });
+    if (capacity) rows.push({ label: t('Capacité', 'Capacidad', 'Capacity'), value: escapeHtml(capacity) });
+    if (vhf) rows.push({ label: 'VHF', value: escapeHtml(vhf) });
+    if (phone) rows.push({ label: t('Téléphone', 'Teléfono', 'Phone'), value: escapeHtml(phone) });
+    if (email) rows.push({ label: 'Email', value: escapeHtml(email) });
+    if (openingHours) rows.push({ label: t('Horaires', 'Horarios', 'Hours'), value: escapeHtml(openingHours) });
+    if (serviceFlags.length) rows.push({ label: t('Services', 'Servicios', 'Services'), value: escapeHtml(serviceFlags.join(' · ')) });
+    if (website) {
+        const safeHref = escapeHtml(website);
+        rows.push({
+            label: 'Web',
+            value: `<a href="${safeHref}" target="_blank" rel="noreferrer noopener">${safeHref}</a>`
+        });
+    }
+    return rows;
+}
+
+function normalizeMarinePoiEntries(elements, kind) {
+    const seen = new Set();
+    return (Array.isArray(elements) ? elements : [])
+        .map(elementToPoint)
+        .filter(Boolean)
+        .map((point, index) => {
+            const name = getPoiLabel(point, getMarinePoiFallbackName(kind, index));
+            const typeLabel = getMarinePoiTypeLabel(kind, point.tags);
+            const summary = kind === 'services'
+                ? getMarinePoiServiceSummary(point.tags)
+                : String(point.tags?.operator || point.tags?.harbour || point.tags?.seamark?.name || '').trim();
+            return {
+                ...point,
+                kind,
+                name,
+                typeLabel,
+                summary
+            };
+        })
+        .filter(entry => {
+            const key = `${entry.kind}:${entry.name}:${entry.lat.toFixed(4)}:${entry.lon.toFixed(4)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr', { sensitivity: 'base' }));
+}
+
+async function fetchMarinePoisInBounds(bounds, kind) {
+    const bbox = getMarinePoiBoundsBbox(bounds);
+    if (!bbox) return [];
+
+    const selectorsByKind = {
+        anchorages: [
+            `node(${bbox})["seamark:type"="anchorage"]`,
+            `way(${bbox})["seamark:type"="anchorage"]`,
+            `relation(${bbox})["seamark:type"="anchorage"]`,
+            `node(${bbox})["seamark:type"="mooring"]`,
+            `way(${bbox})["seamark:type"="mooring"]`
+        ],
+        ports: [
+            `node(${bbox})["leisure"="marina"]`,
+            `way(${bbox})["leisure"="marina"]`,
+            `relation(${bbox})["leisure"="marina"]`,
+            `node(${bbox})["harbour"="yes"]`,
+            `way(${bbox})["harbour"="yes"]`,
+            `relation(${bbox})["harbour"="yes"]`,
+            `node(${bbox})["seamark:type"="harbour"]`,
+            `way(${bbox})["seamark:type"="harbour"]`,
+            `relation(${bbox})["seamark:type"="harbour"]`,
+            `way(${bbox})["landuse"="harbour"]`,
+            `relation(${bbox})["landuse"="harbour"]`
+        ],
+        services: [
+            `node(${bbox})["amenity"~"fuel|drinking_water|toilets|shower"]`,
+            `way(${bbox})["amenity"~"fuel|drinking_water|toilets|shower"]`,
+            `node(${bbox})["shop"="boat"]`,
+            `way(${bbox})["shop"="boat"]`,
+            `node(${bbox})["man_made"="slipway"]`,
+            `way(${bbox})["man_made"="slipway"]`,
+            `node(${bbox})["craft"~"shipyard|boatbuilder"]`,
+            `way(${bbox})["craft"~"shipyard|boatbuilder"]`,
+            `relation(${bbox})["craft"~"shipyard|boatbuilder"]`
+        ]
+    };
+
+    const selectors = selectorsByKind[kind] || [];
+    if (!selectors.length) return [];
+
+    const query = `
+        [out:json][timeout:25];
+        (
+          ${selectors.join(';\n          ')};
+        );
+        out center tags;
+    `;
+
+    const elements = await fetchOverpassElements(query);
+    return normalizeMarinePoiEntries(elements, kind).slice(0, MARINE_POI_OVERLAY_LIMITS[kind] || 32);
+}
+
+function buildMarinePoiIcon(kind) {
+    const token = kind === 'anchorages' ? 'A' : (kind === 'ports' ? 'P' : 'S');
+    return L.divIcon({
+        className: 'marine-poi-icon-wrapper',
+        html: `<div class="marine-poi-marker marine-poi-marker--${kind}"><span>${token}</span></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -10]
+    });
+}
+
+function buildMarinePoiPopup(entry) {
+    const coords = `${Number(entry.lat).toFixed(5)}, ${Number(entry.lon).toFixed(5)}`;
+    const summaryLine = entry.summary ? `<div class="marine-poi-popup__meta">${escapeHtml(entry.summary)}</div>` : '';
+    const detailRows = buildMarinePoiDetailRows(entry)
+        .map(row => `<div class="marine-poi-popup__row"><span class="marine-poi-popup__label">${escapeHtml(row.label)}</span><span class="marine-poi-popup__value">${row.value}</span></div>`)
+        .join('');
+    const detailsBlock = detailRows ? `<div class="marine-poi-popup__details">${detailRows}</div>` : '';
+    return `<div class="marine-poi-popup"><strong>${escapeHtml(entry.name)}</strong><div class="marine-poi-popup__type">${escapeHtml(entry.typeLabel)}</div>${summaryLine}${detailsBlock}<div class="marine-poi-popup__coords">${coords}</div></div>`;
+}
+
+function buildMarinePoiMarker(entry) {
+    if (!map || !entry || !Number.isFinite(entry.lat) || !Number.isFinite(entry.lon)) return null;
+    const marker = L.marker([entry.lat, entry.lon], {
+        icon: buildMarinePoiIcon(entry.kind),
+        interactive: true,
+        keyboard: false,
+        zIndexOffset: 780
+    });
+    marker.bindPopup(buildMarinePoiPopup(entry), { maxWidth: 260, autoPan: false });
+    marker.bindTooltip(`${entry.typeLabel} · ${entry.name}`, {
+        direction: 'top',
+        opacity: 0.92
+    });
+    return marker;
+}
+
+async function refreshMarinePoiOverlays({ force = false } = {}) {
+    if (isOverpassTemporarilyDisabled()) {
+        removeMarinePoiLayersFromMap();
+        return;
+    }
+
+    const visibleLayers = getMarinePoiVisibleLayerDescriptors();
+    if (!map || !visibleLayers.length) return;
+
+    const signature = getMarinePoiRefreshSignature();
+    if (!signature) return;
+    if (!force && marinePoiOverlayRefreshPromise) {
+        return marinePoiOverlayRefreshPromise;
+    }
+    if (!force && signature === marinePoiOverlayLastRequestSignature && (Date.now() - marinePoiOverlayLastRequestAt) < MARINE_POI_REFRESH_COOLDOWN_MS) {
+        return;
+    }
+
+    marinePoiOverlayLastRequestSignature = signature;
+    marinePoiOverlayLastRequestAt = Date.now();
+    marinePoiOverlayRefreshPromise = (async () => {
+        const refreshToken = ++marinePoiOverlayRefreshToken;
+        visibleLayers.forEach(item => {
+            if (typeof item.layer?.clearLayers === 'function') {
+                item.layer.clearLayers();
+            }
+        });
+
+        if (map.getZoom() < MARINE_POI_OVERLAY_MIN_ZOOM) {
+            return;
+        }
+
+        const paddedBounds = map.getBounds()?.pad?.(0.12) || map.getBounds();
+        for (const item of visibleLayers) {
+            let entries = [];
+            try {
+                entries = await fetchMarinePoisInBounds(paddedBounds, item.key);
+            } catch (_error) {
+                entries = [];
+            }
+
+            if (refreshToken !== marinePoiOverlayRefreshToken) return;
+            if (!item.layer || !map.hasLayer(item.layer)) continue;
+
+            entries.forEach(entry => {
+                const marker = buildMarinePoiMarker(entry);
+                if (marker) item.layer.addLayer(marker);
+            });
+        }
+    })();
+
+    try {
+        await marinePoiOverlayRefreshPromise;
+    } finally {
+        marinePoiOverlayRefreshPromise = null;
+    }
+}
+
 async function scoreAnchoragesForArrival(anchorages, arrivalDateTime) {
     const arrivalSlot = toDateAndHourUtc(arrivalDateTime);
 
     const scored = [];
     for (const anchorage of anchorages) {
-        const weather = await getWeatherAtDateHour(anchorage.lat, anchorage.lon, arrivalSlot.date, arrivalSlot.hour);
+        let weather = null;
+        try {
+            weather = await getWeatherAtDateHour(anchorage.lat, anchorage.lon, arrivalSlot.date, arrivalSlot.hour);
+        } catch (_error) {
+            weather = null;
+        }
         const wind = Number.isFinite(weather?.windSpeed) ? weather.windSpeed : 12;
         const wave = Number.isFinite(weather?.waveHeight) ? weather.waveHeight : 0.8;
 
@@ -10251,6 +13328,22 @@ async function scoreAnchoragesForArrival(anchorages, arrivalDateTime) {
     }
 
     return scored.sort((a, b) => a.score - b.score).slice(0, 3);
+}
+
+function buildFallbackArrivalAnchorage(destination) {
+    const lat = Number(destination?.lat);
+    const lon = Number(destination?.lng ?? destination?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    return {
+        lat,
+        lon,
+        name: t('Point d\'arrivée à confirmer', 'Punto de llegada por confirmar', 'Arrival point to confirm'),
+        distanceNm: 0,
+        tags: {
+            source: 'ceibo-fallback'
+        }
+    };
 }
 
 function renderNearbyList(containerId, items, emptyText) {
@@ -10844,21 +13937,67 @@ async function analyzeArrivalZone() {
     try {
         const destination = routePoints[routePoints.length - 1];
         const arrivalTime = getArrivalReferenceDateTime();
+        const arrivalWarnings = [];
         pushAiTrafficLog(t(
             `Destination ciblée: ${Number(destination.lat).toFixed(4)}, ${Number(destination.lng).toFixed(4)}`,
             `Destino objetivo: ${Number(destination.lat).toFixed(4)}, ${Number(destination.lng).toFixed(4)}`
         ));
 
         pushAiTrafficLog(t('Recherche mouillages à proximité (Overpass)...', 'Busqueda de fondeos cercanos (Overpass)...'));
-        const anchorages = await fetchNearbyAnchorages(destination.lat, destination.lng);
+        let anchorages = [];
+        try {
+            anchorages = await fetchNearbyAnchorages(destination.lat, destination.lng);
+        } catch (error) {
+            const message = String(error?.message || error || 'Overpass indisponible');
+            arrivalWarnings.push(t('Mouillages live indisponibles', 'Fondeos live no disponibles', 'Live anchorages unavailable'));
+            pushAiTrafficLog(t(
+                `Recherche mouillages indisponible: ${message}`,
+                `Busqueda de fondeos no disponible: ${message}`,
+                `Anchorage lookup unavailable: ${message}`
+            ));
+        }
+        if (!anchorages.length) {
+            const fallbackAnchorage = buildFallbackArrivalAnchorage(destination);
+            if (fallbackAnchorage) {
+                anchorages = [fallbackAnchorage];
+                arrivalWarnings.push(t('Conseil réduit au point d\'arrivée final', 'Consejo reducido al punto final de llegada', 'Fallback limited to final arrival point'));
+                pushAiTrafficLog(t(
+                    'Aucun mouillage OSM disponible: utilisation du point d\'arrivée comme fallback.',
+                    'Sin fondeos OSM disponibles: uso del punto de llegada como fallback.',
+                    'No OSM anchorages available: using arrival point as fallback.'
+                ));
+            }
+        }
         pushAiTrafficLog(t(`Mouillages trouvés: ${anchorages.length}`, `Fondeos encontrados: ${anchorages.length}`));
 
         pushAiTrafficLog(t('Recherche restaurants proches...', 'Busqueda de restaurantes cercanos...'));
-        const restaurants = await fetchNearbyAmenityList(destination.lat, destination.lng, 'restaurant');
+        let restaurants = [];
+        try {
+            restaurants = await fetchNearbyAmenityList(destination.lat, destination.lng, 'restaurant');
+        } catch (error) {
+            const message = String(error?.message || error || 'Overpass indisponible');
+            arrivalWarnings.push(t('Restaurants indisponibles', 'Restaurantes no disponibles', 'Restaurants unavailable'));
+            pushAiTrafficLog(t(
+                `Recherche restaurants indisponible: ${message}`,
+                `Busqueda de restaurantes no disponible: ${message}`,
+                `Restaurant lookup unavailable: ${message}`
+            ));
+        }
         pushAiTrafficLog(t(`Restaurants trouvés: ${restaurants.length}`, `Restaurantes encontrados: ${restaurants.length}`));
 
         pushAiTrafficLog(t('Recherche magasins proches...', 'Busqueda de tiendas cercanas...'));
-        const shops = await fetchNearbyAmenityList(destination.lat, destination.lng, 'shop');
+        let shops = [];
+        try {
+            shops = await fetchNearbyAmenityList(destination.lat, destination.lng, 'shop');
+        } catch (error) {
+            const message = String(error?.message || error || 'Overpass indisponible');
+            arrivalWarnings.push(t('Magasins indisponibles', 'Tiendas no disponibles', 'Shops unavailable'));
+            pushAiTrafficLog(t(
+                `Recherche magasins indisponible: ${message}`,
+                `Busqueda de tiendas no disponible: ${message}`,
+                `Shop lookup unavailable: ${message}`
+            ));
+        }
         pushAiTrafficLog(t(`Magasins trouvés: ${shops.length}`, `Tiendas encontradas: ${shops.length}`));
 
         pushAiTrafficLog(t('Scoring météo des mouillages...', 'Puntuacion meteo de los fondeos...'));
@@ -10879,6 +14018,9 @@ async function analyzeArrivalZone() {
         pushAiTrafficLog(t('Listes arrivée mises à jour', 'Listas de llegada actualizadas'));
 
         renderArrivalSummary(recommendations);
+        if (arrivalWarnings.length) {
+            setArrivalCacheStatus(arrivalWarnings.join(' · '), true);
+        }
         if (recommendations.length) {
             pushAiTrafficLog(t(
                 `Top mouillage: ${recommendations[0].name} (${recommendations[0].distanceNm.toFixed(2)} nm)`,
@@ -15152,6 +18294,9 @@ function sanitizeDocumentEntry(entry, fallbackIndex = 0) {
         description: String(entry?.description || '').trim(),
         creatorEmail: normalizeEmailForCompare(entry?.creatorEmail || ''),
         creatorName: String(entry?.creatorName || '').trim(),
+        voyagePlanId: String(entry?.voyagePlanId || entry?.voyage_plan_id || '').trim(),
+        externalProvider: String(entry?.externalProvider || entry?.external_provider || '').trim().toLowerCase(),
+        externalSha: String(entry?.externalSha || entry?.external_sha || '').trim(),
         storagePath: String(entry?.storagePath || '').trim(),
         publicUrl: String(entry?.publicUrl || '').trim(),
         dataUrl: String(entry?.dataUrl || ''),
@@ -16044,6 +19189,9 @@ function buildDocumentFromCloudRow(row, index = 0) {
         description: row?.description,
         creatorEmail: row?.creator_email,
         creatorName: row?.creator_name,
+        voyagePlanId: row?.voyage_plan_id,
+        externalProvider: row?.external_provider,
+        externalSha: row?.external_sha,
         storagePath: row?.storage_path,
         publicUrl: row?.public_url,
         createdAt: row?.created_at,
@@ -16074,6 +19222,9 @@ async function upsertDocumentToCloud(entry) {
         subcategory: safe.subcategory || null,
         tags: Array.isArray(safe.tags) ? safe.tags : [],
         description: safe.description || null,
+        voyage_plan_id: safe.voyagePlanId || null,
+        external_provider: safe.externalProvider || null,
+        external_sha: safe.externalSha || null,
         storage_path: safe.storagePath || null,
         public_url: safe.publicUrl || null,
         created_at: safe.createdAt,
@@ -16175,6 +19326,9 @@ async function maybeHydrateDocumentsCloudOnDemand({ force = false } = {}) {
             .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
         setDocumentEntries(merged, { persistLocal: true, refreshUi: true });
         documentCloudHydratedOnce = true;
+        if (activeVoyageDetailTab === 'documents' && document.getElementById('voyageAgendaContent')) {
+            refreshVoyageDocumentsSectionDom(selectedVoyagePlanId);
+        }
         setDocumentStatus(t(`Documents cloud chargés: ${merged.length}`, `Documentos nube cargados: ${merged.length}`));
         return true;
     } catch (error) {
@@ -26534,7 +29688,7 @@ function startNavigationLogging() {
                 if (signalkConfig.mode !== 'signalk' || !signalkConfig.host.trim() || signalkLoggingActive) return;
                 ensureSignalKStreamingConnection({ announce: true });
             }, 120);
-        } else if (signalkConfig.mode === 'auto') {
+        } else if (signalkConfig.mode === 'auto' && activeTabName === 'navlog') {
             startPassiveNavigationWatch();
         }
     }
@@ -27428,16 +30582,20 @@ function maybeBootstrapOwmKeyValidation() {
     if (owmApiKeyStatus) owmApiKeyStatus.textContent = t('Clé OWM: validation en cours...', 'Clave OWM: validación en curso...');
 
     testOpenWeatherApiKey(storedOwmKey).then(async result => {
-        const cloudTileResult = result.ok ? await testOpenWeatherTileAccessAny(storedOwmKey, ['clouds_new', 'clouds']) : null;
-        const tempTileResult = result.ok ? await testOpenWeatherTileAccessAny(storedOwmKey, ['temp_new', 'temp', 'TA2']) : null;
+        const isobarTileResult = result.ok ? await testOpenWeatherTileAccessAny(storedOwmKey, ['pressure_new', 'pressure']) : null;
+        const cloudTileResult = result.ok ? await testOpenWeatherTileAccessAny(storedOwmKey, ['clouds_new', 'clouds', { version: '2.0', code: 'CL' }]) : null;
+        const tempTileResult = result.ok ? await testOpenWeatherTileAccessAny(storedOwmKey, ['temp_new', 'temp', { version: '2.0', code: 'TA2' }]) : null;
+        const windTileResult = result.ok ? await testOpenWeatherTileAccessAny(storedOwmKey, ['wind_new', 'wind', { version: '2.0', code: 'WND' }]) : null;
 
         if (owmApiKeyStatus) {
-            if (result.ok && cloudTileResult?.ok && tempTileResult?.ok) {
-                owmApiKeyStatus.textContent = `${t('Clé OWM', 'Clave OWM')}: ✅ ${result.message} · ${t('Nuages+Temp OK', 'Nubes+Temp OK', 'Clouds+Temp OK')}`;
+            if (result.ok && isobarTileResult?.ok && cloudTileResult?.ok && tempTileResult?.ok && windTileResult?.ok) {
+                owmApiKeyStatus.textContent = `${t('Clé OWM', 'Clave OWM')}: ✅ ${result.message} · ${t('Isobares+Nuages+Temp+Vent OK', 'Isobaras+Nubes+Temp+Viento OK', 'Isobars+Clouds+Temp+Wind OK')}`;
             } else if (result.ok) {
                 const detail = [
+                    isobarTileResult?.ok ? t('Isobares OK', 'Isobaras OK', 'Isobars OK') : t('Isobares KO', 'Isobaras KO', 'Isobars KO'),
                     cloudTileResult?.ok ? t('Nuages OK', 'Nubes OK', 'Clouds OK') : t('Nuages KO', 'Nubes KO', 'Clouds KO'),
-                    tempTileResult?.ok ? t('Temp OK', 'Temp OK', 'Temp OK') : t('Temp KO', 'Temp KO', 'Temp KO')
+                    tempTileResult?.ok ? t('Temp OK', 'Temp OK', 'Temp OK') : t('Temp KO', 'Temp KO', 'Temp KO'),
+                    windTileResult?.ok ? t('Vent OK', 'Viento OK', 'Wind OK') : t('Vent KO', 'Viento KO', 'Wind KO')
                 ].join(' · ');
                 owmApiKeyStatus.textContent = `${t('Clé OWM', 'Clave OWM')}: ⚠️ ${result.message} · ${detail}`;
             } else {
@@ -27472,6 +30630,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initializeLanguageSwitcher();
     initializeNightModeToggle();
     initializeSidebarToggle();
+    initializeSidebarResize();
     loadNavLogLayoutState();
     populatePolarProfileSelects();
     loadPolarProfileEditor();
@@ -27504,6 +30663,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         crossOrigin: true
     });
 
+    marineAnchoragesLayer = L.layerGroup();
+    marinePortsLayer = L.layerGroup();
+    marineServicesLayer = L.layerGroup();
     gribWeatherLayer = L.layerGroup();
     aisTrafficLayer = L.layerGroup();
 
@@ -27519,9 +30681,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         {
             [layerLabels.marineDepth]: marineDepthLayer,
             [layerLabels.marineHazard]: marineHazardLayer,
+            [layerLabels.marineAnchorages]: marineAnchoragesLayer,
+            [layerLabels.marinePorts]: marinePortsLayer,
+            [layerLabels.marineServices]: marineServicesLayer,
             [layerLabels.aisLive]: aisTrafficLayer,
             [layerLabels.isobars]: isobarLayer,
             [layerLabels.weatherWind]: weatherWindLayer,
+            [layerLabels.weatherWindDirection]: weatherWindDirectionLayer,
             [layerLabels.weatherRain]: weatherRainLayer,
             [layerLabels.weatherClouds]: weatherCloudLayer,
             [layerLabels.weatherTemp]: weatherTempLayer,
@@ -27557,14 +30723,12 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Setup event listeners after map is ready
     map.on('click', function(e) {
+        if (isMapWebOverlayOpen()) {
+            return;
+        }
+
         if (isAuthGateLocked()) {
-            setCloudStatus(
-                t(
-                    'Accès verrouillé: seul l\'onglet Cloud est accessible (connexion / création de compte).',
-                    'Acceso bloqueado: solo la pestaña Cloud es accesible (conexión / creación de cuenta).'
-                ),
-                true
-            );
+            setCloudStatus(getAuthGateLockedMessage(), true);
             return;
         }
 
@@ -27609,6 +30773,15 @@ document.addEventListener('DOMContentLoaded', async function() {
         persistMapView();
         scheduleAisRefresh({ immediate: true });
         updateAisStatusIndicator();
+        if (!isOverpassTemporarilyDisabled() && getMarinePoiVisibleLayerDescriptors().length) {
+            scheduleMarinePoiOverlayRefresh();
+        }
+        if (weatherWindDirectionLayer && map.hasLayer(weatherWindDirectionLayer)) {
+            void refreshWeatherWindDirectionOverlay();
+        }
+        if (isobarLayer && map.hasLayer(isobarLayer)) {
+            void refreshWeatherIsobarOverlay();
+        }
     });
 
     map.on('overlayadd', event => {
@@ -27619,10 +30792,22 @@ document.addEventListener('DOMContentLoaded', async function() {
             return;
         }
 
+        if ([marineAnchoragesLayer, marinePortsLayer, marineServicesLayer].includes(selectedLayer)) {
+            if (isOverpassTemporarilyDisabled()) {
+                map.removeLayer(selectedLayer);
+                reportOverpassUnavailable(overpassDisabledReason || 'browser-blocked');
+                return;
+            }
+            scheduleMarinePoiOverlayRefresh({ force: true, delayMs: 0 });
+            return;
+        }
+
         const selectedKey = selectedLayer === isobarLayer
             ? 'isobars'
             : selectedLayer === weatherWindLayer
                 ? 'wind'
+                : selectedLayer === weatherWindDirectionLayer
+                    ? 'windDirection'
                 : selectedLayer === weatherRainLayer
                     ? 'rain'
                     : selectedLayer === weatherCloudLayer
@@ -27631,6 +30816,18 @@ document.addEventListener('DOMContentLoaded', async function() {
                             ? 'temp'
                             : '';
         if (!selectedKey) return;
+
+        if (selectedKey === 'windDirection') {
+            void refreshWeatherWindDirectionOverlay();
+            renderWeatherOverlayLegend();
+            return;
+        }
+
+        if (selectedKey === 'isobars') {
+            void refreshWeatherIsobarOverlay();
+            renderWeatherOverlayLegend();
+            return;
+        }
 
         const key = getStoredOpenWeatherTileAppId();
         if (!key) {
@@ -27657,6 +30854,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 ? isobarLayer
                 : selectedKey === 'wind'
                     ? weatherWindLayer
+                    : selectedKey === 'windDirection'
+                        ? weatherWindDirectionLayer
                     : selectedKey === 'rain'
                         ? weatherRainLayer
                         : selectedKey === 'clouds'
@@ -27682,6 +30881,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (event?.layer === aisTrafficLayer) {
             stopAisRefresh({ clearLayer: true });
             updateAisStatusIndicator();
+        }
+        if (event?.layer === weatherWindDirectionLayer && typeof weatherWindDirectionLayer?.clearLayers === 'function') {
+            weatherWindDirectionLayer.clearLayers();
+        }
+        if (event?.layer === isobarLayer && typeof isobarLayer?._pressureContourLayer?.clearLayers === 'function') {
+            isobarLayer._pressureContourLayer.clearLayers();
         }
         renderWeatherOverlayLegend();
     });
@@ -27787,13 +30992,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     function activateTab(tabName) {
         if (isAuthGateLocked() && tabName !== 'cloud') {
-            setCloudStatus(
-                t(
-                    'Accès verrouillé: seul l\'onglet Cloud est accessible (connexion / création de compte).',
-                    'Acceso bloqueado: solo la pestaña Cloud es accesible (conexión / creación de cuenta).'
-                ),
-                true
-            );
+            setCloudStatus(getAuthGateLockedMessage(), true);
             tabName = 'cloud';
         }
 
@@ -27883,6 +31082,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         if (isNavLog) {
+            if (signalkConfig.mode === 'auto') {
+                startPassiveNavigationWatch();
+            }
             void maybeHydrateNavLogCloudOnDemand();
             updateNavPolarCaptureHint();
             updateNavLiveDashboard();
@@ -27952,6 +31154,23 @@ document.addEventListener('DOMContentLoaded', async function() {
             invalidateWeatherDiagnostic(t('Analyse synoptique: fenêtre changée, relance l\'analyse.', 'Análisis sinóptico: ventana cambiada, vuelve a lanzar el análisis.', 'Synoptic analysis: window changed, run it again.'));
         });
     }
+
+    const windSpeedLegend = document.getElementById('windSpeedLegend');
+    if (windSpeedLegend) {
+        windSpeedLegend.addEventListener('input', event => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement) || target.id !== 'routingWeatherOffsetRange') return;
+            const nextIndex = parseInt(String(target.value || '0'), 10);
+            if (!Number.isFinite(nextIndex)) return;
+            routingDecisionOffsetIndex = Math.max(0, Math.min(ROUTING_DECISION_OFFSETS_HOURS.length - 1, nextIndex));
+            renderWindSpeedLegend();
+            if (routePoints.length >= 2) {
+                void computeRoute();
+            }
+        });
+    }
+    renderWindSpeedLegend();
+    renderRoutingDecisionSummary(null);
 
     document.getElementById("computeBtn").addEventListener("click", computeRoute);
     const saveRouteFromRoutingBtn = document.getElementById('saveRouteFromRoutingBtn');
@@ -28196,7 +31415,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     initSignalKUi();
-    if (signalkConfig.mode === 'auto') {
+    if (signalkConfig.mode === 'auto' && activeTabName === 'navlog') {
         startPassiveNavigationWatch();
     }
 
@@ -28463,15 +31682,17 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (owmApiKeyStatus) owmApiKeyStatus.textContent = t('Clé OWM: test en cours...', 'Clave OWM: prueba en curso...');
 
             const result = await testOpenWeatherApiKey(keyValue);
-            const cloudTileResult = result.ok ? await testOpenWeatherTileAccessAny(keyValue, ['clouds_new', 'clouds']) : null;
-            const tempTileResult = result.ok ? await testOpenWeatherTileAccessAny(keyValue, ['temp_new', 'temp', 'TA2']) : null;
+            const cloudTileResult = result.ok ? await testOpenWeatherTileAccessAny(keyValue, ['clouds_new', 'clouds', { version: '2.0', code: 'CL' }]) : null;
+            const tempTileResult = result.ok ? await testOpenWeatherTileAccessAny(keyValue, ['temp_new', 'temp', { version: '2.0', code: 'TA2' }]) : null;
+            const windTileResult = result.ok ? await testOpenWeatherTileAccessAny(keyValue, ['wind_new', 'wind', { version: '2.0', code: 'WND' }]) : null;
             if (owmApiKeyStatus) {
-                if (result.ok && cloudTileResult?.ok && tempTileResult?.ok) {
-                    owmApiKeyStatus.textContent = `${t('Clé OWM', 'Clave OWM')}: ✅ ${result.message} · ${t('Nuages+Temp OK', 'Nubes+Temp OK', 'Clouds+Temp OK')}`;
+                if (result.ok && cloudTileResult?.ok && tempTileResult?.ok && windTileResult?.ok) {
+                    owmApiKeyStatus.textContent = `${t('Clé OWM', 'Clave OWM')}: ✅ ${result.message} · ${t('Nuages+Temp+Vent OK', 'Nubes+Temp+Viento OK', 'Clouds+Temp+Wind OK')}`;
                 } else if (result.ok) {
                     const detail = [
                         cloudTileResult?.ok ? t('Nuages OK', 'Nubes OK', 'Clouds OK') : t('Nuages KO', 'Nubes KO', 'Clouds KO'),
-                        tempTileResult?.ok ? t('Temp OK', 'Temp OK', 'Temp OK') : t('Temp KO', 'Temp KO', 'Temp KO')
+                        tempTileResult?.ok ? t('Temp OK', 'Temp OK', 'Temp OK') : t('Temp KO', 'Temp KO', 'Temp KO'),
+                        windTileResult?.ok ? t('Vent OK', 'Viento OK', 'Wind OK') : t('Vent KO', 'Viento KO', 'Wind KO')
                     ].join(' · ');
                     owmApiKeyStatus.textContent = `${t('Clé OWM', 'Clave OWM')}: ⚠️ ${result.message} · ${detail}`;
                 } else {
@@ -28479,7 +31700,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             }
 
-            if (result.ok && cloudTileResult?.ok) {
+            if (result.ok && (cloudTileResult?.ok || tempTileResult?.ok || windTileResult?.ok)) {
                 localStorage.setItem(OWM_TILE_APPID_STORAGE_KEY, keyValue);
                 rebuildOpenWeatherOverlays(keyValue);
                 setWeatherApiConfigVisibility(false, t('API météo connectée (isobares actives).', 'API meteo conectada (isobaras activas).'));
@@ -28848,6 +32069,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 cloudUserProfile = null;
                 cloudManagedUsers = [];
                 updateCloudAuthUi();
+                await applyAuthGateState({ clearWhenLocked: true });
             } catch (error) {
                 setCloudAuthStatus(t(`Déconnexion impossible: ${formatCloudError(error)}`, `Desconexión imposible: ${formatCloudError(error)}`), true);
             }
@@ -28928,11 +32150,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
     document.getElementById('exportRouteBtn').addEventListener('click', () => {
-        if (currentLoadedRouteIndex >= 0) {
-            exportRoute(currentLoadedRouteIndex);
-        } else {
-            alert(t('Aucune route chargée', 'No hay ruta cargada'));
-        }
+        exportRoutesVoyagesWaypointsJson();
     });
     document.getElementById('exportRouteGpxBtn').addEventListener('click', () => {
         if (currentLoadedRouteIndex >= 0) {
@@ -28954,6 +32172,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     const emailVoyagePdfBtn = document.getElementById('emailVoyagePdfBtn');
     if (emailVoyagePdfBtn) {
         emailVoyagePdfBtn.addEventListener('click', emailVoyagePdfReport);
+    }
+    const voyageAgendaProvisioningPdfBtn = document.getElementById('voyageAgendaProvisioningPdfBtn');
+    if (voyageAgendaProvisioningPdfBtn) {
+        voyageAgendaProvisioningPdfBtn.addEventListener('click', exportAgendaProvisioningPdfReport);
     }
     const voyageLlmPromptBtn = document.getElementById('voyageLlmPromptBtn');
     if (voyageLlmPromptBtn) {
@@ -29252,7 +32474,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         'voyageCrewFirstNameInput',
         'voyageCrewLastNameInput',
         'voyageCrewEmailInput',
-        'voyageCrewPhoneInput'
+        'voyageCrewPhoneInput',
+        'voyageCrewAllergiesInput',
+        'voyageCrewDislikesInput'
     ];
     voyageCrewEditorInputIds.forEach(inputId => {
         const inputNode = document.getElementById(inputId);
@@ -29275,6 +32499,16 @@ document.addEventListener('DOMContentLoaded', async function() {
             event.stopPropagation();
             upsertCrewMemberFromEditor();
         });
+    }
+
+    const voyageCrewBreakfastInput = document.getElementById('voyageCrewBreakfastInput');
+    if (voyageCrewBreakfastInput) {
+        voyageCrewBreakfastInput.addEventListener('input', () => captureCrewEditorDraftFromInputs());
+    }
+
+    const voyageCrewDietTypeInput = document.getElementById('voyageCrewDietTypeInput');
+    if (voyageCrewDietTypeInput) {
+        voyageCrewDietTypeInput.addEventListener('change', () => captureCrewEditorDraftFromInputs());
     }
 
     const voyagePlanCrewList = document.getElementById('voyagePlanCrewList');
@@ -29462,6 +32696,41 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         voyageAgendaContent.addEventListener('click', event => {
+            const detailTabTarget = event.target.closest('[data-voyage-detail-tab]');
+            if (detailTabTarget) {
+                setActiveVoyageDetailTab(detailTabTarget.getAttribute('data-voyage-detail-tab') || 'itinerary');
+                renderVoyageAgendaPanel();
+                return;
+            }
+
+            const foodActionTarget = event.target.closest('[data-voyage-food-action]');
+            if (foodActionTarget) {
+                const action = String(foodActionTarget.getAttribute('data-voyage-food-action') || '');
+                const planId = String(foodActionTarget.getAttribute('data-voyage-plan-id') || selectedVoyagePlanId || '');
+                const provisioningId = String(foodActionTarget.getAttribute('data-voyage-provisioning-id') || '');
+                const budgetId = String(foodActionTarget.getAttribute('data-voyage-budget-id') || '');
+                if (action === 'generate-meals' && planId) regenerateVoyageMealPlan(planId);
+                if (action === 'generate-provisioning' && planId) regenerateVoyageProvisioning(planId);
+                if (action === 'seed-monthly' && planId) seedVoyageMonthlyEssentials(planId);
+                if (action === 'add-provisioning' && planId) addVoyageProvisioningItem(planId);
+                if (action === 'delete-provisioning' && planId && provisioningId) removeVoyageProvisioningItem(planId, provisioningId);
+                if (action === 'add-budget' && planId) addVoyageBudgetItem(planId);
+                if (action === 'delete-budget' && planId && budgetId) removeVoyageBudgetItem(planId, budgetId);
+                return;
+            }
+
+            const voyageDocumentActionTarget = event.target.closest('[data-voyage-document-action]');
+            if (voyageDocumentActionTarget) {
+                const action = String(voyageDocumentActionTarget.getAttribute('data-voyage-document-action') || '');
+                const planId = String(voyageDocumentActionTarget.getAttribute('data-voyage-plan-id') || selectedVoyagePlanId || '');
+                const documentId = String(voyageDocumentActionTarget.getAttribute('data-voyage-document-id') || '');
+                if (action === 'save-github-settings') saveVoyageDocumentGithubSettingsFromSection();
+                if (action === 'upload' && planId) void saveVoyageDocumentFromSection(planId);
+                if (action === 'open' && planId && documentId) void openVoyageDocumentForViewing(planId, documentId);
+                if (action === 'delete' && planId && documentId) void deleteVoyageDocumentFromSection(planId, documentId);
+                return;
+            }
+
             const mapActionTarget = event.target.closest('[data-voyage-map-action]');
             if (mapActionTarget) {
                 const action = String(mapActionTarget.getAttribute('data-voyage-map-action') || '');
@@ -29622,8 +32891,47 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         voyageAgendaContent.addEventListener('change', event => {
+            if (event.target.id === 'voyageDocumentFileInput') {
+                readVoyageDocumentDraftFromDom(selectedVoyagePlanId);
+                return;
+            }
             const target = event.target.closest('[data-voyage-item-field]');
             if (!target) {
+                const mealFieldTarget = event.target.closest('[data-voyage-meal-field]');
+                if (mealFieldTarget) {
+                    updateVoyageMealEntryField(
+                        String(mealFieldTarget.getAttribute('data-voyage-plan-id') || ''),
+                        String(mealFieldTarget.getAttribute('data-voyage-meal-id') || ''),
+                        String(mealFieldTarget.getAttribute('data-voyage-meal-field') || ''),
+                        mealFieldTarget.value
+                    );
+                    return;
+                }
+
+                const provisioningFieldTarget = event.target.closest('[data-voyage-provisioning-field]');
+                if (provisioningFieldTarget) {
+                    updateVoyageProvisioningItemField(
+                        String(provisioningFieldTarget.getAttribute('data-voyage-plan-id') || ''),
+                        String(provisioningFieldTarget.getAttribute('data-voyage-provisioning-id') || ''),
+                        String(provisioningFieldTarget.getAttribute('data-voyage-provisioning-field') || ''),
+                        provisioningFieldTarget instanceof HTMLInputElement && provisioningFieldTarget.type === 'checkbox'
+                            ? provisioningFieldTarget.checked
+                            : provisioningFieldTarget.value
+                    );
+                    return;
+                }
+
+                const budgetFieldTarget = event.target.closest('[data-voyage-budget-field]');
+                if (budgetFieldTarget) {
+                    updateVoyageBudgetItemField(
+                        String(budgetFieldTarget.getAttribute('data-voyage-plan-id') || ''),
+                        String(budgetFieldTarget.getAttribute('data-voyage-budget-id') || ''),
+                        String(budgetFieldTarget.getAttribute('data-voyage-budget-field') || ''),
+                        budgetFieldTarget.value
+                    );
+                    return;
+                }
+
                 if (event.target.closest('[data-agenda-event-field]')) {
                     if (event.target.id === 'agendaEventStartDateInput' || event.target.id === 'agendaEventStartTimeInput') {
                         syncAgendaEventEndWithStartEditor();
@@ -29641,6 +32949,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         voyageAgendaContent.addEventListener('input', event => {
+            if (event.target.id === 'voyageDocumentTitleInput' || event.target.id === 'voyageDocumentDescriptionInput') {
+                readVoyageDocumentDraftFromDom(selectedVoyagePlanId);
+                return;
+            }
             if (!event.target.closest('[data-agenda-event-field]')) return;
             if (event.target.id === 'agendaEventStartDateInput' || event.target.id === 'agendaEventStartTimeInput') {
                 syncAgendaEventEndWithStartEditor();
@@ -29756,6 +33068,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     const openWeatherFromRoutingBtn = document.getElementById('openWeatherFromRoutingBtn');
     if (openWeatherFromRoutingBtn) {
         openWeatherFromRoutingBtn.addEventListener('click', () => activateTab('weather'));
+    }
+
+    const openSkyMapBtn = document.getElementById('openSkyMapBtn');
+    if (openSkyMapBtn) {
+        openSkyMapBtn.addEventListener('click', () => openSkyMapForCurrentContext());
     }
 
     const backToRoutingBtn = document.getElementById('backToRoutingBtn');
@@ -29979,11 +33296,12 @@ async function computeRoute() {
     let generatedAutoWaypointCount = 0;
     let generatedWaypointOrdinal = 1;
 
-    const departureDateTime = new Date(`${departureDate}T${departureTime}:00`);
-    if (Number.isNaN(departureDateTime.getTime())) {
+    const baseDepartureDateTime = new Date(`${departureDate}T${departureTime}:00`);
+    if (Number.isNaN(baseDepartureDateTime.getTime())) {
         alert(t('Date/heure de départ invalide', 'Fecha/hora de salida inválida'));
         return;
     }
+    const scenarioDepartureDateTime = getRoutingDecisionScenarioDateTime(baseDepartureDateTime);
 
     try {
 
@@ -30057,7 +33375,7 @@ async function computeRoute() {
             pointMetaByKey.set(key, pointMetas[idx]);
         });
 
-        const legStartDateTime = new Date(departureDateTime.getTime() + totalTime * 3600 * 1000);
+        const legStartDateTime = new Date(scenarioDepartureDateTime.getTime() + totalTime * 3600 * 1000);
         const legStartSlot = toDateAndHourUtc(legStartDateTime);
         const legStartWeather = await getWeatherAtDateHour(userStart.lat, userStart.lon, legStartSlot.date, legStartSlot.hour);
         const effectiveSpeed = estimateEffectiveSpeedForLegSplit(userStart, userEnd, legStartWeather);
@@ -30097,7 +33415,7 @@ async function computeRoute() {
             const endPoint = weatherLegPoints[legIndex + 1];
             const startMeta = pointMetaByKey.get(toPointKey(startPoint)) || null;
 
-            const passageDateTime = new Date(departureDateTime.getTime() + totalTime * 3600 * 1000);
+            const passageDateTime = new Date(scenarioDepartureDateTime.getTime() + totalTime * 3600 * 1000);
             const passageSlot = toDateAndHourUtc(passageDateTime);
             const weatherAtPassage = await getWeatherAtDateHour(
                 startPoint.lat,
@@ -30124,8 +33442,6 @@ async function computeRoute() {
                 });
                 waypointPassageSlots.set(i, passageSlot);
             }
-
-            drawWind(startPoint.lat, startPoint.lon, wind.direction);
 
             const isMotorSegment = wind.speed < MOTOR_WIND_THRESHOLD_KN;
 
@@ -30231,6 +33547,8 @@ async function computeRoute() {
                     segment
                 ),
                 windSpeed: wind.speed,
+                windGust: Number.isFinite(weatherAtPassage.windGust) ? weatherAtPassage.windGust : wind.speed,
+                windDirection: wind.direction,
                 mode: segment.type,
                 waveHeight: weatherAtPassage.waveHeight,
                 waveDirection: weatherAtPassage.waveDirection,
@@ -30239,7 +33557,8 @@ async function computeRoute() {
                 segmentNumber: routeSegmentsForDraw.length + 1,
                 sailSetup,
                 sailComment,
-                departureHour: passageSlot.hour
+                departureHour: passageSlot.hour,
+                passageLabel: formatLocalSlotLabel(passageSlot)
             });
 
             fullRoute = fullRoute.concat(segment.points);
@@ -30328,7 +33647,7 @@ async function computeRoute() {
         }
     }
 
-    const arrivalDateTime = new Date(departureDateTime.getTime() + totalTime * 3600 * 1000);
+    const arrivalDateTime = new Date(scenarioDepartureDateTime.getTime() + totalTime * 3600 * 1000);
     const arrivalSlot = toDateAndHourUtc(arrivalDateTime);
     const arrivalWeatherAtPassage = await getWeatherAtDateHour(
         routePoints[routePoints.length - 1].lat,
@@ -30344,7 +33663,7 @@ async function computeRoute() {
     });
     waypointPassageSlots.set(routePoints.length - 1, arrivalSlot);
 
-    drawWaypointWindDirections(waypointPassageWeather);
+    drawRouteWindDecisionMarkers(routeSegmentsForDraw);
 
     drawRouteByWindSpeed(routeSegmentsForDraw);
     drawStrongWaveDirections(routeSegmentsForDraw);
@@ -30433,7 +33752,7 @@ async function computeRoute() {
     lastComputedReportData = {
         routeName,
         computedAt: new Date().toISOString(),
-        departureIso: departureDateTime.toISOString(),
+        departureIso: scenarioDepartureDateTime.toISOString(),
         arrivalIso: arrivalDateTime.toISOString(),
         weatherUpdatedAt: lastWeatherUpdateAt,
         metrics: {
@@ -30467,8 +33786,19 @@ async function computeRoute() {
         }
     };
 
+    const decisionWindows = await buildRoutingDecisionWindows(routePoints, baseDepartureDateTime);
+    lastRoutingDecisionSnapshot = {
+        offsetHours: getRoutingDecisionOffsetHours(),
+        scenarioDepartureDateTime,
+        arrivalDateTime,
+        arrivalWeather: arrivalWeatherAtPassage,
+        routeSegments: routeSegmentsForDraw,
+        windows: decisionWindows
+    };
+
     document.getElementById("info").innerHTML =
         `<div class="segment-summary">
+            <strong>${t('Décalage météo', 'Desfase meteo', 'Weather offset')}: ${formatRoutingDecisionOffsetLabel(getRoutingDecisionOffsetHours())}</strong><br>
             <strong>${t('Segments', 'Segmentos')}: ${routePoints.length - 1}</strong><br>
             <strong>${t('Distance totale', 'Distancia total')}: ${totalDistance.toFixed(2)} nm</strong><br>
             <strong>${t('Temps total', 'Tiempo total')}: ${totalTime.toFixed(2)} h</strong><br>
@@ -30497,6 +33827,7 @@ async function computeRoute() {
     });
 
     renderWindSpeedLegend();
+    renderRoutingDecisionSummary(lastRoutingDecisionSnapshot);
 
     // Auto-save distance after routing
     if (routePoints.length > 1 && Number.isInteger(currentLoadedRouteIndex) && currentLoadedRouteIndex >= 0) {
@@ -30528,7 +33859,7 @@ async function computeRoute() {
         }
     }
 
-    updateArrivalPointWeather(totalTime);
+    updateArrivalPointWeather(totalTime, scenarioDepartureDateTime);
     } catch (error) {
         invalidateComputedRouteDisplay();
         const message = buildWeatherDataUnavailableMessage(error?.message || error);
@@ -30699,6 +34030,17 @@ function getWeatherDailyBundleCacheKey(lat, lon, date) {
     return `${roundedLat},${roundedLon}|${date}`;
 }
 
+function getWeatherPressureSampleCacheKey(lat, lon) {
+    const slot = toDateAndHourUtc(new Date());
+    return `${Number(lat).toFixed(2)},${Number(lon).toFixed(2)}|${slot.date}|${slot.hour}`;
+}
+
+function getAstronomyDailyBundleCacheKey(lat, lon, date) {
+    const roundedLat = roundWeatherNearbyCoord(lat);
+    const roundedLon = roundWeatherNearbyCoord(lon);
+    return `${roundedLat},${roundedLon}|${date}`;
+}
+
 async function fetchJsonWithRetry(url, { retries = 2, timeoutMs = 9000 } = {}) {
     let lastError = null;
 
@@ -30778,6 +34120,193 @@ function getWeatherSeriesHourIndex(hourlyTimes, date, hour) {
     return normalizedHour < hourlyTimes.length ? normalizedHour : -1;
 }
 
+function shiftIsoDateString(dateString, dayDelta) {
+    const parsed = new Date(`${dateString}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) return dateString;
+    parsed.setUTCDate(parsed.getUTCDate() + Number(dayDelta || 0));
+    return parsed.toISOString().slice(0, 10);
+}
+
+function getLocalDateKey(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function getLocalTimeZoneId() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (_error) {
+        return 'UTC';
+    }
+}
+
+function getLocalUtcOffsetString(dateString) {
+    const parsed = new Date(`${dateString}T12:00:00`);
+    if (Number.isNaN(parsed.getTime())) return '+00:00';
+    const offsetMinutes = -parsed.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absoluteMinutes = Math.abs(offsetMinutes);
+    const hours = String(Math.floor(absoluteMinutes / 60)).padStart(2, '0');
+    const minutes = String(absoluteMinutes % 60).padStart(2, '0');
+    return `${sign}${hours}:${minutes}`;
+}
+
+function parseSunriseSunsetPayload(payload) {
+    if (String(payload?.status || '').toUpperCase() !== 'OK' || !payload?.results) return null;
+    return {
+        sunrise: String(payload.results.sunrise || '').trim(),
+        sunset: String(payload.results.sunset || '').trim(),
+        astronomicalTwilightBegin: String(payload.results.astronomical_twilight_begin || '').trim(),
+        astronomicalTwilightEnd: String(payload.results.astronomical_twilight_end || '').trim()
+    };
+}
+
+function parseMoonPayload(payload) {
+    const properties = payload?.properties;
+    if (!properties || typeof properties !== 'object') return null;
+    return {
+        moonrise: String(properties?.moonrise?.time || '').trim(),
+        moonset: String(properties?.moonset?.time || '').trim()
+    };
+}
+
+function isSunriseSunsetCoolingDown() {
+    return sunriseSunsetCooldownUntil > Date.now();
+}
+
+function markSunriseSunsetRateLimited() {
+    sunriseSunsetCooldownUntil = Date.now() + (15 * 60 * 1000);
+}
+
+function isRateLimitPayload(payload) {
+    return Boolean(payload?.error) && /HTTP\s*429/i.test(String(payload?.reason || ''));
+}
+
+async function getAstronomyDailyBundle(lat, lon, date) {
+    const cacheKey = getAstronomyDailyBundleCacheKey(lat, lon, date);
+    if (astronomyDailyCache.has(cacheKey)) return astronomyDailyCache.get(cacheKey);
+    if (astronomyDailyInFlight.has(cacheKey)) return astronomyDailyInFlight.get(cacheKey);
+
+    const roundedLat = roundWeatherNearbyCoord(lat);
+    const roundedLon = roundWeatherNearbyCoord(lon);
+    const timezoneId = getLocalTimeZoneId();
+    const localOffset = getLocalUtcOffsetString(date);
+    const nextDate = shiftIsoDateString(date, 1);
+    const solarUrl = `https://api.sunrise-sunset.org/json?lat=${encodeURIComponent(roundedLat)}&lng=${encodeURIComponent(roundedLon)}&date=${encodeURIComponent(date)}&formatted=0&tzid=${encodeURIComponent(timezoneId)}`;
+    const nextSolarUrl = `https://api.sunrise-sunset.org/json?lat=${encodeURIComponent(roundedLat)}&lng=${encodeURIComponent(roundedLon)}&date=${encodeURIComponent(nextDate)}&formatted=0&tzid=${encodeURIComponent(timezoneId)}`;
+    const moonUrl = `https://api.met.no/weatherapi/sunrise/3.0/moon?lat=${encodeURIComponent(roundedLat)}&lon=${encodeURIComponent(roundedLon)}&date=${encodeURIComponent(date)}&offset=${encodeURIComponent(localOffset)}`;
+
+    const request = (async () => {
+        const moonPromise = fetchJsonWithRetry(moonUrl, { retries: 0, timeoutMs: 7000 }).catch(() => null);
+        let solarPayload = null;
+        let nextSolarPayload = null;
+
+        if (!isSunriseSunsetCoolingDown()) {
+            [solarPayload, nextSolarPayload] = await Promise.all([
+                fetchJsonWithRetry(solarUrl, { retries: 0, timeoutMs: 7000 }).catch(() => null),
+                fetchJsonWithRetry(nextSolarUrl, { retries: 0, timeoutMs: 7000 }).catch(() => null)
+            ]);
+
+            if (isRateLimitPayload(solarPayload) || isRateLimitPayload(nextSolarPayload)) {
+                markSunriseSunsetRateLimited();
+                solarPayload = null;
+                nextSolarPayload = null;
+            }
+        }
+
+        const moonPayload = await moonPromise;
+        const bundle = {
+            sun: parseSunriseSunsetPayload(solarPayload),
+            nextSun: parseSunriseSunsetPayload(nextSolarPayload),
+            moon: parseMoonPayload(moonPayload)
+        };
+        astronomyDailyCache.set(cacheKey, bundle);
+        astronomyDailyInFlight.delete(cacheKey);
+        return bundle;
+    })().catch(error => {
+        astronomyDailyInFlight.delete(cacheKey);
+        throw error;
+    });
+
+    astronomyDailyInFlight.set(cacheKey, request);
+    return request;
+}
+
+function buildAstronomySnapshot(astronomyBundle, referenceDate) {
+    if (!astronomyBundle?.sun && !astronomyBundle?.moon && !astronomyBundle?.nextSun) return null;
+    return {
+        referenceDate,
+        sunrise: String(astronomyBundle?.sun?.sunrise || '').trim(),
+        sunset: String(astronomyBundle?.sun?.sunset || '').trim(),
+        moonrise: String(astronomyBundle?.moon?.moonrise || '').trim(),
+        moonset: String(astronomyBundle?.moon?.moonset || '').trim(),
+        astronomicalNightStart: String(astronomyBundle?.sun?.astronomicalTwilightEnd || '').trim(),
+        astronomicalNightEnd: String(astronomyBundle?.nextSun?.astronomicalTwilightBegin || '').trim()
+    };
+}
+
+function formatAstroEventTime(isoString, referenceDate = '') {
+    const safeIso = String(isoString || '').trim();
+    if (!safeIso) return 'N/A';
+    const parsed = new Date(safeIso);
+    if (Number.isNaN(parsed.getTime())) return 'N/A';
+
+    const timeLabel = parsed.toLocaleTimeString(getCurrentLocale(), {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    const localDateKey = getLocalDateKey(parsed);
+    if (!referenceDate || !localDateKey || localDateKey === referenceDate) {
+        return timeLabel;
+    }
+
+    return `${parsed.toLocaleDateString(getCurrentLocale(), {
+        day: '2-digit',
+        month: '2-digit'
+    })} ${timeLabel}`;
+}
+
+function formatAstroInterval(startIso, endIso, referenceDate = '') {
+    const startLabel = formatAstroEventTime(startIso, referenceDate);
+    const endLabel = formatAstroEventTime(endIso, referenceDate);
+    if (startLabel === 'N/A' && endLabel === 'N/A') return 'N/A';
+    if (startLabel === 'N/A') return `→ ${endLabel}`;
+    if (endLabel === 'N/A') return `${startLabel} →`;
+    return `${startLabel} → ${endLabel}`;
+}
+
+function renderAstronomyCartoucheHtml(astro) {
+    if (!astro) return '';
+
+    const referenceDate = String(astro.referenceDate || '').trim();
+    const sunrise = formatAstroEventTime(astro.sunrise, referenceDate);
+    const sunset = formatAstroEventTime(astro.sunset, referenceDate);
+    const moonrise = formatAstroEventTime(astro.moonrise, referenceDate);
+    const moonset = formatAstroEventTime(astro.moonset, referenceDate);
+    const astronomicalNight = formatAstroInterval(astro.astronomicalNightStart, astro.astronomicalNightEnd, referenceDate);
+
+    return `<section class="weather-astro-card">` +
+        `<div class="weather-astro-card__title">${escapeHtml(t('Cartouche astro', 'Cartucho astro', 'Astronomy card'))}</div>` +
+        `<div class="weather-astro-card__grid">` +
+            `<article class="weather-astro-card__item">` +
+                `<strong>${escapeHtml(t('Soleil', 'Sol', 'Sun'))}</strong>` +
+                `<span>${escapeHtml(t('Lever', 'Salida', 'Rise'))}: ${escapeHtml(sunrise)}</span>` +
+                `<span>${escapeHtml(t('Coucher', 'Puesta', 'Set'))}: ${escapeHtml(sunset)}</span>` +
+            `</article>` +
+            `<article class="weather-astro-card__item">` +
+                `<strong>${escapeHtml(t('Lune', 'Luna', 'Moon'))}</strong>` +
+                `<span>${escapeHtml(t('Lever', 'Salida', 'Rise'))}: ${escapeHtml(moonrise)}</span>` +
+                `<span>${escapeHtml(t('Coucher', 'Puesta', 'Set'))}: ${escapeHtml(moonset)}</span>` +
+            `</article>` +
+            `<article class="weather-astro-card__item weather-astro-card__item--night">` +
+                `<strong>${escapeHtml(t('Nuit astronomique', 'Noche astronómica', 'Astronomical night'))}</strong>` +
+                `<span>${escapeHtml(astronomicalNight)}</span>` +
+            `</article>` +
+        `</div>` +
+        `<div class="weather-astro-card__source">sunrise-sunset.org · MET Norway</div>` +
+    `</section>`;
+}
+
 async function getWeatherDailyBundle(lat, lon, date) {
     const bundleKey = getWeatherDailyBundleCacheKey(lat, lon, date);
     if (weatherDailyCache.has(bundleKey)) return weatherDailyCache.get(bundleKey);
@@ -30790,11 +34319,13 @@ async function getWeatherDailyBundle(lat, lon, date) {
 
     const request = Promise.all([
         fetchJsonWithRetry(forecastUrl, { retries: 2, timeoutMs: 9000 }),
-        fetchJsonWithRetry(marineUrl, { retries: 1, timeoutMs: 9000 })
-    ]).then(([forecastData, marineData]) => {
+        fetchJsonWithRetry(marineUrl, { retries: 1, timeoutMs: 9000 }),
+        getAstronomyDailyBundle(lat, lon, date).catch(() => null)
+    ]).then(([forecastData, marineData, astronomyData]) => {
         const bundle = {
             forecastData,
             marineData,
+            astronomyData,
             fetchedAt: new Date().toISOString()
         };
         weatherDailyCache.set(bundleKey, bundle);
@@ -30837,7 +34368,7 @@ async function getWeatherAtDateHour(lat, lon, date, hour) {
         return cachedNearbyWeather;
     }
 
-    const { forecastData: data, marineData, fetchedAt } = await getWeatherDailyBundle(lat, lon, date);
+    const { forecastData: data, marineData, astronomyData, fetchedAt } = await getWeatherDailyBundle(lat, lon, date);
     const hourIndex = getWeatherSeriesHourIndex(data?.hourly?.time, date, hour);
 
     const hasForecastSeries = hourIndex >= 0
@@ -30869,6 +34400,7 @@ async function getWeatherAtDateHour(lat, lon, date, hour) {
             ? marineData.hourly.ocean_current_velocity[marineHourIndex] * MPS_TO_KNOTS
             : null,
         weatherCode: data?.hourly?.weather_code?.[hourIndex] ?? 2,
+        astronomy: buildAstronomySnapshot(astronomyData, date),
         updatedAt: fetchedAt
     };
 
@@ -30935,11 +34467,41 @@ function knotsToBeaufort(knots) {
     return 12;
 }
 
+function getBeaufortBadgeClassName(beaufort) {
+    const safeBeaufort = Number(beaufort);
+    if (!Number.isFinite(safeBeaufort) || safeBeaufort < 0) return 'beaufort-badge beaufort-badge--na';
+    if (safeBeaufort <= 1) return 'beaufort-badge beaufort-badge--0';
+    if (safeBeaufort <= 3) return 'beaufort-badge beaufort-badge--2';
+    if (safeBeaufort <= 4) return 'beaufort-badge beaufort-badge--4';
+    if (safeBeaufort <= 5) return 'beaufort-badge beaufort-badge--5';
+    if (safeBeaufort <= 6) return 'beaufort-badge beaufort-badge--6';
+    if (safeBeaufort <= 7) return 'beaufort-badge beaufort-badge--7';
+    if (safeBeaufort <= 8) return 'beaufort-badge beaufort-badge--8';
+    if (safeBeaufort <= 9) return 'beaufort-badge beaufort-badge--9';
+    if (safeBeaufort <= 10) return 'beaufort-badge beaufort-badge--10';
+    return 'beaufort-badge beaufort-badge--12';
+}
+
+function getBeaufortToneName(beaufort) {
+    const safeBeaufort = Number(beaufort);
+    if (!Number.isFinite(safeBeaufort) || safeBeaufort < 0) return 'na';
+    if (safeBeaufort <= 1) return '0';
+    if (safeBeaufort <= 3) return '2';
+    if (safeBeaufort <= 4) return '4';
+    if (safeBeaufort <= 5) return '5';
+    if (safeBeaufort <= 6) return '6';
+    if (safeBeaufort <= 7) return '7';
+    if (safeBeaufort <= 8) return '8';
+    if (safeBeaufort <= 9) return '9';
+    if (safeBeaufort <= 10) return '10';
+    return '12';
+}
+
 function formatWindKnotsWithBeaufort(knots, decimals = 1) {
     const speed = Number(knots);
     if (!Number.isFinite(speed)) return 'N/A';
     const bft = knotsToBeaufort(speed);
-    return `${speed.toFixed(decimals)} kn (Bft ${bft})`;
+    return `${speed.toFixed(decimals)} kn <span class="${getBeaufortBadgeClassName(bft)}">Bft ${bft}</span>`;
 }
 
 function getWaypointBoatCourseDeg(marker) {
@@ -31050,6 +34612,7 @@ function renderWaypointWeatherInfo(marker, weather, referenceLabel) {
     const seaComfort = getSeaComfortLevel(weather);
     const passageRef = referenceLabel || formatLocalSlotLabel({ date: departureDate, hour: departureTime });
     const summary = weatherCodeToLabel(weather.weatherCode);
+    const astronomyCartouche = renderAstronomyCartoucheHtml(weather.astronomy);
 
     weatherContainer.innerHTML =
         `<strong>${waypointLabel}</strong><br>` +
@@ -31064,7 +34627,8 @@ function renderWaypointWeatherInfo(marker, weather, referenceLabel) {
         `${t('Houle', 'Oleaje')}: ${waveHeight} · ${wavePeriod} · ${waveDirectionWithFavorability}<br>` +
         `${t('Courant', 'Corriente', 'Current')}: ${currentSpeed} · ${currentDirectionWithFavorability}<br>` +
         `${seaComfort}<br>` +
-        `${t('Passage WP', 'Paso WP')}: ${passageRef}`;
+        `${t('Passage WP', 'Paso WP')}: ${passageRef}` +
+        astronomyCartouche;
 }
 
 function formatWaypointPopupContent(marker, weather, referenceLabel) {
@@ -31207,48 +34771,231 @@ function clearWaypointWindDirectionLayers() {
     waypointWindDirectionLayers = [];
 }
 
-function drawWaypointWindDirections(waypointPassageWeather) {
+function getRoutingDecisionOffsetHours() {
+    return ROUTING_DECISION_OFFSETS_HOURS[routingDecisionOffsetIndex] ?? 0;
+}
+
+function formatRoutingDecisionOffsetLabel(hours) {
+    const safeHours = Number(hours) || 0;
+    return safeHours > 0 ? `+${safeHours}h` : '0h';
+}
+
+function getRoutingDecisionScenarioDateTime(baseDateTime) {
+    const safeBase = baseDateTime instanceof Date ? baseDateTime : new Date(`${departureDate}T${departureTime}:00`);
+    return new Date(safeBase.getTime() + (getRoutingDecisionOffsetHours() * 3600 * 1000));
+}
+
+function getRoutingWindGustBadge(windSpeed, windGust) {
+    const safeWind = Number(windSpeed);
+    const safeGust = Number(windGust);
+    if (!Number.isFinite(safeWind) || !Number.isFinite(safeGust)) return '';
+    const delta = safeGust - safeWind;
+    if (delta >= 10) return 'G++';
+    if (delta >= 6) return 'G+';
+    return '';
+}
+
+function getWindFlowArrowRotation(windDirection) {
+    const sourceDirection = Number(windDirection);
+    if (!Number.isFinite(sourceDirection)) return null;
+    const flowDirection = (sourceDirection + 180) % 360;
+    return (flowDirection - 90 + 360) % 360;
+}
+
+function getRoutingDecisionStatus(weather) {
+    const wind = Number(weather?.windSpeed);
+    const gust = Number(weather?.windGust);
+    const wave = Number(weather?.waveHeight);
+
+    if (!Number.isFinite(wind)) {
+        return {
+            label: t('À confirmer', 'Por confirmar', 'To confirm'),
+            className: 'routing-decision-summary__pill routing-decision-summary__pill--warn'
+        };
+    }
+
+    if (wind <= 16 && (!Number.isFinite(gust) || gust <= 22) && (!Number.isFinite(wave) || wave <= 1.2)) {
+        return {
+            label: t('Arrivée acceptable', 'Llegada aceptable', 'Arrival acceptable'),
+            className: 'routing-decision-summary__pill routing-decision-summary__pill--ok'
+        };
+    }
+
+    if (wind <= RECOMMENDED_MAX_WIND_KN && (!Number.isFinite(gust) || gust <= 27) && (!Number.isFinite(wave) || wave <= 1.8)) {
+        return {
+            label: t('Arrivée à surveiller', 'Llegada a vigilar', 'Arrival to monitor'),
+            className: 'routing-decision-summary__pill routing-decision-summary__pill--warn'
+        };
+    }
+
+    return {
+        label: t('Arrivée déconseillée', 'Llegada desaconsejada', 'Arrival not recommended'),
+        className: 'routing-decision-summary__pill routing-decision-summary__pill--danger'
+    };
+}
+
+function getRoutingSegmentDecisionScore(segment) {
+    const wind = Number(segment?.windSpeed);
+    const gust = Number(segment?.windGust);
+    const wave = Number(segment?.waveHeight);
+    const current = Number(segment?.currentSpeedKnots);
+    let score = 0;
+
+    if (segment?.mode === 'motor') score += 10;
+    if (Number.isFinite(wind)) score += Math.max(0, wind - 12) * 2.6;
+    if (Number.isFinite(gust) && Number.isFinite(wind)) score += Math.max(0, gust - wind - 4) * 3.5;
+    if (Number.isFinite(wave)) score += Math.max(0, wave - 1.0) * 10;
+    if (Number.isFinite(current)) score += Math.max(0, current - 1.2) * 4;
+    return score;
+}
+
+function buildRoutingWindDecisionMarker(segment) {
+    const midpoint = getSegmentMidpoint(segment?.latlngs);
+    const windDirection = Number(segment?.windDirection);
+    if (!midpoint || !Number.isFinite(windDirection)) return null;
+
+    const color = getRouteSegmentColor(segment);
+    const gustBadge = getRoutingWindGustBadge(segment?.windSpeed, segment?.windGust);
+    const windCardinal = degreesToCardinalFr(windDirection);
+    const windSpeedLabel = formatWindKnotsWithBeaufort(segment?.windSpeed, 0);
+    const windNeedleMarkup = buildWindNeedleMarkup(windDirection, segment?.windSpeed, {
+        color,
+        compact: true
+    });
+    const icon = L.divIcon({
+        className: 'routing-wind-marker',
+        html: `<div class="routing-wind-marker__core" style="color:${color}; border-color:${color};">
+                ${windNeedleMarkup}
+                ${gustBadge ? `<div class="routing-wind-marker__badge">${gustBadge}</div>` : ''}
+            </div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+    });
+
+    const marker = L.marker([midpoint.lat, midpoint.lng], {
+        icon,
+        interactive: true,
+        keyboard: false,
+        zIndexOffset: 850
+    });
+
+    const departureLabel = segment?.passageLabel || (segment?.departureHour ? `${segment.departureHour} UTC` : 'UTC');
+    marker.bindTooltip(`${t('Vent de', 'Viento de', 'Wind from')} ${windCardinal} · ${windSpeedLabel}${gustBadge ? ` · ${gustBadge}` : ''}<br>${departureLabel}`, {
+        direction: 'top',
+        opacity: 0.95
+    });
+    return marker;
+}
+
+function drawRouteWindDecisionMarkers(routeSegments) {
     clearWaypointWindDirectionLayers();
 
-    waypointPassageWeather.forEach(entry => {
-        const marker = markers[entry.waypointIndex];
-        const windDirection = entry.weather?.windDirection;
+    const segments = Array.isArray(routeSegments) ? routeSegments : [];
+    const stride = segments.length > 14 ? Math.ceil(segments.length / 14) : 1;
 
-        if (!marker || !Number.isFinite(windDirection)) return;
-
-        const iconDirection = (windDirection - 90 + 360) % 360;
-        const sourceCardinal = degreesToCardinalFr(windDirection);
-        const windSpeed = entry.weather?.windSpeed;
-        const windSpeedLabel = formatWindKnotsWithBeaufort(windSpeed);
-        const icon = L.divIcon({
-            className: 'wind-direction-waypoint',
-            html: `<div class="wind-direction-waypoint__arrow" style="transform: rotate(${iconDirection}deg);">➤</div>`,
-            iconSize: [16, 16],
-            iconAnchor: [8, 8]
-        });
-
-        const arrowLayer = L.marker(marker.getLatLng(), {
-            icon,
-            interactive: true,
-            keyboard: false,
-            zIndexOffset: 1000
-        }).addTo(map);
-
-        arrowLayer.bindTooltip(`${t('Vent de', 'Viento de')} ${sourceCardinal} · ${windSpeedLabel}`, {
-            direction: 'top',
-            opacity: 0.95
-        });
-
-        waypointWindDirectionLayers.push(arrowLayer);
+    segments.forEach((segment, index) => {
+        if (index % stride !== 0 && index !== segments.length - 1) return;
+        const marker = buildRoutingWindDecisionMarker(segment);
+        if (!marker) return;
+        marker.addTo(map);
+        waypointWindDirectionLayers.push(marker);
     });
 }
 
-async function updateArrivalPointWeather(totalTimeHours) {
+async function buildRoutingDecisionWindows(routeScenarioPoints, baseDepartureDateTime) {
+    const offsets = ROUTING_DECISION_OFFSETS_HOURS;
+    const activeOffsetHours = getRoutingDecisionOffsetHours();
+
+    const windows = await Promise.all(offsets.map(async offsetHours => {
+        const scenarioDateTime = new Date(baseDepartureDateTime.getTime() + offsetHours * 3600 * 1000);
+        const estimate = await estimateRouteForDepartureOnPoints(routeScenarioPoints, scenarioDateTime).catch(() => null);
+        return {
+            offsetHours,
+            departureDateTime: scenarioDateTime,
+            estimate
+        };
+    }));
+
+    return windows.filter(Boolean).sort((a, b) => a.offsetHours - b.offsetHours).map(window => ({
+        ...window,
+        isActive: window.offsetHours === activeOffsetHours
+    }));
+}
+
+function renderRoutingDecisionSummary(snapshot = null) {
+    const container = document.getElementById('routingDecisionSummary');
+    if (!container) return;
+
+    if (!snapshot) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+
+    const hardestSegment = Array.isArray(snapshot.routeSegments)
+        ? snapshot.routeSegments.reduce((best, segment) => {
+            const score = getRoutingSegmentDecisionScore(segment);
+            if (!best || score > best.score) return { segment, score };
+            return best;
+        }, null)
+        : null;
+
+    const windows = Array.isArray(snapshot.windows) ? snapshot.windows.filter(item => item?.estimate) : [];
+    const bestWindow = windows.length
+        ? [...windows].sort((a, b) => {
+            const aSafe = a.estimate?.isSafe ? 0 : 1;
+            const bSafe = b.estimate?.isSafe ? 0 : 1;
+            if (aSafe !== bSafe) return aSafe - bSafe;
+            return Number(a.estimate?.score || 0) - Number(b.estimate?.score || 0);
+        })[0]
+        : null;
+
+    const arrivalStatus = getRoutingDecisionStatus(snapshot.arrivalWeather);
+    const activeOffsetLabel = formatRoutingDecisionOffsetLabel(snapshot.offsetHours);
+    const hardest = hardestSegment?.segment || null;
+    const hardestWind = Number.isFinite(Number(hardest?.windSpeed)) ? `${Number(hardest.windSpeed).toFixed(0)} kn` : 'N/A';
+    const hardestGust = Number.isFinite(Number(hardest?.windGust)) ? `${Number(hardest.windGust).toFixed(0)} kn` : 'N/A';
+    const arrivalWind = Number.isFinite(snapshot.arrivalWeather?.windSpeed) ? `${snapshot.arrivalWeather.windSpeed.toFixed(0)} kn` : 'N/A';
+    const arrivalWave = Number.isFinite(snapshot.arrivalWeather?.waveHeight) ? `${snapshot.arrivalWeather.waveHeight.toFixed(1)} m` : 'N/A';
+
+    container.innerHTML =
+        `<div class="routing-decision-summary__grid">` +
+            `<article class="routing-decision-summary__card">` +
+                `<div class="routing-decision-summary__eyebrow">${t('Fenêtre active', 'Ventana activa', 'Active window')}</div>` +
+                `<strong>${escapeHtml(activeOffsetLabel)}</strong>` +
+                `<div>${escapeHtml(formatWeekdayHourUtc(snapshot.scenarioDepartureDateTime))}</div>` +
+                `<div class="routing-decision-summary__note">${t('Scénario météo appliqué au calcul de route.', 'Escenario meteo aplicado al cálculo de ruta.', 'Weather scenario applied to route computation.')}</div>` +
+            `</article>` +
+            `<article class="routing-decision-summary__card">` +
+                `<div class="routing-decision-summary__eyebrow">${t('Meilleure fenêtre', 'Mejor ventana', 'Best window')}</div>` +
+                `<strong>${escapeHtml(bestWindow ? formatRoutingDecisionOffsetLabel(bestWindow.offsetHours) : t('N/A', 'N/D', 'N/A'))}</strong>` +
+                `<div>${escapeHtml(bestWindow ? formatWeekdayHourUtc(bestWindow.departureDateTime) : '')}</div>` +
+                `<div class="routing-decision-summary__note">${bestWindow ? `${t('Score', 'Puntuación', 'Score')}: ${Number(bestWindow.estimate?.score || 0).toFixed(0)} · ${bestWindow.estimate?.isSafe ? t('fenêtre sûre', 'ventana segura', 'safe window') : t('fenêtre tendue', 'ventana tensa', 'tense window')}` : t('Calcul en attente.', 'Cálculo en espera.', 'Pending calculation.')}</div>` +
+            `</article>` +
+            `<article class="routing-decision-summary__card">` +
+                `<div class="routing-decision-summary__eyebrow">${t('Segment le plus dur', 'Tramo más duro', 'Hardest segment')}</div>` +
+                `<strong>${hardest ? `${t('Segment', 'Segmento', 'Segment')} ${hardest.segmentNumber}` : 'N/A'}</strong>` +
+                `<div>${escapeHtml(hardest ? `${hardestWind} · ${hardestGust} ${t('rafales', 'ráfagas', 'gusts')}` : '')}</div>` +
+                `<div class="routing-decision-summary__note">${escapeHtml(hardest ? `${t('Départ', 'Salida', 'Departure')}: ${hardest.passageLabel || hardest.departureHour || ''}` : t('Aucun segment calculé.', 'Ningún tramo calculado.', 'No segment computed.'))}</div>` +
+            `</article>` +
+            `<article class="routing-decision-summary__card">` +
+                `<div class="routing-decision-summary__eyebrow">${t('Arrivée', 'Llegada', 'Arrival')}</div>` +
+                `<strong class="${escapeHtml(arrivalStatus.className)}">${escapeHtml(arrivalStatus.label)}</strong>` +
+                `<div>${escapeHtml(`${arrivalWind} · ${arrivalWave}`)}</div>` +
+                `<div class="routing-decision-summary__note">${escapeHtml(Number.isFinite(snapshot.arrivalWeather?.windDirection) ? `${Math.round(snapshot.arrivalWeather.windDirection)}° ${degreesToCardinalFr(snapshot.arrivalWeather.windDirection)}` : '')}</div>` +
+            `</article>` +
+        `</div>`;
+    container.style.display = 'block';
+}
+
+async function updateArrivalPointWeather(totalTimeHours, scenarioDepartureDateTime = null) {
     if (!markers.length) return;
 
     const arrivalMarker = markers[markers.length - 1];
     const destination = arrivalMarker.getLatLng();
-    const departureDateTime = new Date(`${departureDate}T${departureTime}:00`);
+    const departureDateTime = scenarioDepartureDateTime instanceof Date
+        ? scenarioDepartureDateTime
+        : getRoutingDecisionScenarioDateTime(new Date(`${departureDate}T${departureTime}:00`));
 
     if (Number.isNaN(departureDateTime.getTime())) return;
 
@@ -31274,7 +35021,6 @@ async function updateArrivalPointWeather(totalTimeHours) {
             `<strong>${t('Météo prévue', 'Meteo prevista')} (${arrivalRef})</strong><br>${arrivalLine.replace('<strong>Météo</strong><br>', '').replace('<strong>Meteo</strong><br>', '')}`;
 
         arrivalMarker.bindPopup(popupContent, { maxWidth: 320 });
-        arrivalMarker.openPopup();
     } catch (error) {
         arrivalMarker.bindPopup(`<strong>${t("Point d'arrivée", 'Punto de llegada')}</strong><br>${t('Météo indisponible', 'Meteo no disponible')}`, { maxWidth: 300 });
     }
@@ -31297,6 +35043,11 @@ function drawRoute(points) {
     }).addTo(map);
 
     routeLayer.on('click', function(e) {
+        if (isMapWebOverlayOpen()) {
+            if (e?.originalEvent) L.DomEvent.stop(e.originalEvent);
+            return;
+        }
+
         if (e?.originalEvent) L.DomEvent.stop(e.originalEvent);
 
         const insertIndex = getInsertionIndexIfNearRoute(e.latlng, 80)
@@ -31504,13 +35255,25 @@ function renderWindSpeedLegend() {
     const legend = document.getElementById('windSpeedLegend');
     if (!legend) return;
 
+    const activeOffsetLabel = formatRoutingDecisionOffsetLabel(getRoutingDecisionOffsetHours());
+
     legend.innerHTML =
-    `<strong>${t('Légende vent (route)', 'Leyenda viento (ruta)')}</strong>` +
+    `<div class="routing-wind-toolbar">` +
+        `<div class="routing-wind-toolbar__header">` +
+            `<strong>${t('Vent utile pré-départ', 'Viento útil pre-salida', 'Pre-departure wind')}</strong>` +
+            `<span class="routing-wind-toolbar__offset">${t('Scénario', 'Escenario', 'Scenario')}: ${activeOffsetLabel}</span>` +
+        `</div>` +
+        `<div class="routing-wind-toolbar__slider">` +
+            `<input id="routingWeatherOffsetRange" type="range" min="0" max="${ROUTING_DECISION_OFFSETS_HOURS.length - 1}" step="1" value="${routingDecisionOffsetIndex}">` +
+            `<div class="routing-wind-toolbar__ticks">${ROUTING_DECISION_OFFSETS_HOURS.map(hours => `<span${hours === getRoutingDecisionOffsetHours() ? ' class="is-active"' : ''}>${formatRoutingDecisionOffsetLabel(hours)}</span>`).join('')}</div>` +
+        `</div>` +
+    `</div>` +
     `<div class="wind-legend-row"><span class="wind-legend-swatch" style="background:#ff4fa3"></span><span>${t('Moteur (&lt; 5 kn) · 7 kn', 'Motor (&lt; 5 kn) · 7 kn')}</span></div>` +
         '<div class="wind-legend-row"><span class="wind-legend-swatch" style="background:#2ecc71"></span><span>&lt; 8 kn (Bft 0-3)</span></div>' +
         '<div class="wind-legend-row"><span class="wind-legend-swatch" style="background:#f1c40f"></span><span>8-14 kn (Bft 4)</span></div>' +
         '<div class="wind-legend-row"><span class="wind-legend-swatch" style="background:#e67e22"></span><span>14-20 kn (Bft 4-5)</span></div>' +
-        '<div class="wind-legend-row"><span class="wind-legend-swatch" style="background:#e74c3c"></span><span>&gt; 20 kn (Bft 6+)</span></div>';
+        '<div class="wind-legend-row"><span class="wind-legend-swatch" style="background:#e74c3c"></span><span>&gt; 20 kn (Bft 6+)</span></div>' +
+        `<div class="wind-legend-row"><span class="wind-legend-badge">G+</span><span>${t('Rafales > vent moyen + 6 kn', 'Ráfagas > viento medio + 6 kn', 'Gusts > mean wind + 6 kn')}</span></div>`;
 }
 
 function renderWeatherOverlayLegend() {
@@ -31520,13 +35283,14 @@ function renderWeatherOverlayLegend() {
 
     const isTempActive = !!(weatherTempLayer && map.hasLayer(weatherTempLayer));
     const isWindActive = !!(weatherWindLayer && map.hasLayer(weatherWindLayer));
+    const isWindDirectionActive = !!(weatherWindDirectionLayer && map.hasLayer(weatherWindDirectionLayer));
     const isRainActive = !!(weatherRainLayer && map.hasLayer(weatherRainLayer));
     const isCloudsActive = !!(weatherCloudLayer && map.hasLayer(weatherCloudLayer));
 
     const legends = [sidebarLegend, mapLegend].filter(Boolean);
     if (!legends.length) return;
 
-    if (!isTempActive && !isWindActive && !isRainActive && !isCloudsActive) {
+    if (!isTempActive && !isWindActive && !isWindDirectionActive && !isRainActive && !isCloudsActive) {
         legends.forEach(legend => {
             legend.style.display = 'none';
             legend.innerHTML = '';
@@ -31554,6 +35318,15 @@ function renderWeatherOverlayLegend() {
             `<div class="weather-overlay-legend__bar" style="background: linear-gradient(90deg, #1e3a8a 0%, #2563eb 16%, #06b6d4 32%, #22c55e 48%, #facc15 64%, #f97316 82%, #dc2626 100%);"></div>` +
             `<div class="weather-overlay-legend__labels"><span>Bft 0</span><span>Bft 2</span><span>Bft 4</span><span>Bft 6</span><span>Bft 8</span><span>Bft 10</span><span>Bft 12</span></div>` +
             `<div class="weather-overlay-legend__note">${t('Échelle indicative OpenWeatherMap (équivalent Beaufort approximatif).', 'Escala orientativa OpenWeatherMap (equivalente Beaufort aproximado).')}</div>` +
+            `</div>`
+        );
+    }
+
+    if (isWindDirectionActive) {
+        blocks.push(
+            `<div>` +
+            `<strong>${t('Légende tuiles · Direction du vent', 'Leyenda teselas · Dirección del viento', 'Weather tiles legend · Wind direction')}</strong>` +
+            `<div class="weather-overlay-legend__note">${t('Flèches OWM 2.0: elles indiquent la direction du vent; la longueur est normalisée pour privilégier la lecture du cap.', 'Flechas OWM 2.0: indican la dirección del viento; la longitud está normalizada para priorizar la lectura del rumbo.', 'OWM 2.0 arrows: they show wind direction; arrow length is normalized to favor heading readability.')}</div>` +
             `</div>`
         );
     }
@@ -33450,6 +37223,9 @@ function buildVoyagePlansFromCloudRows(planRows, itemRows, crewAssignmentRows = 
             name: row?.name,
             description: row?.description,
             status: row?.status,
+            mealPlan: row?.meal_plan,
+            provisioningItems: row?.provisioning_items,
+            budgetItems: row?.budget_items,
             crewMemberIds: Array.from(new Set(crewIdsByPlanId.get(String(row?.id || '').trim()) || [])),
             items: (itemsByPlanId.get(String(row?.id || '').trim()) || [])
                 .sort((a, b) => {
@@ -33562,6 +37338,18 @@ function isCloudMissingVoyageStatusColumnError(error) {
     return message.includes('status') && (message.includes('column') || message.includes('schema cache') || message.includes('could not find'));
 }
 
+function isCloudMissingVoyageFoodColumnError(error) {
+    const message = String(error?.message || error?.details || error?.hint || '').toLowerCase();
+    return ['meal_plan', 'provisioning_items', 'budget_items'].some(column => message.includes(column))
+        && (message.includes('column') || message.includes('schema cache') || message.includes('could not find'));
+}
+
+function isCloudMissingCrewDietaryProfileColumnError(error) {
+    const message = String(error?.message || error?.details || error?.hint || '').toLowerCase();
+    return message.includes('dietary_profile')
+        && (message.includes('column') || message.includes('schema cache') || message.includes('could not find'));
+}
+
 function buildCrewDirectoryFromCloudRows(rows) {
     return (Array.isArray(rows) ? rows : [])
         .map((row, index) => sanitizeCrewMember({
@@ -33571,6 +37359,7 @@ function buildCrewDirectoryFromCloudRows(rows) {
             email: row?.email,
             telephone: row?.telephone,
             commentaire: row?.commentaire,
+            dietaryProfile: row?.dietary_profile,
             creatorEmail: row?.creator_email,
             creatorName: row?.creator_name,
             createdAt: row?.created_at,
@@ -33684,13 +37473,20 @@ async function pushCrewDirectoryToCloudV2(entries) {
         email: normalizeEmailForCompare(entry.email || ''),
         telephone: normalizePhoneValue(entry.telephone || ''),
         commentaire: String(entry.commentaire || '').trim(),
+        ...(cloudCrewHasDietaryProfileColumn ? { dietary_profile: sanitizeCrewDietaryProfile(entry.dietaryProfile || {}) } : {}),
         created_at: entry.createdAt || new Date().toISOString(),
         updated_at: entry.updatedAt || new Date().toISOString()
     }));
 
-    const { error: insertError } = await cloudClient
+    let { error: insertError } = await cloudClient
         .from(CLOUD_CREW_TABLE)
         .insert(payload);
+    if (insertError && cloudCrewHasDietaryProfileColumn && isCloudMissingCrewDietaryProfileColumnError(insertError)) {
+        cloudCrewHasDietaryProfileColumn = false;
+        ({ error: insertError } = await cloudClient
+            .from(CLOUD_CREW_TABLE)
+            .insert(payload.map(({ dietary_profile, ...rest }) => rest)));
+    }
     if (insertError) throw insertError;
     return true;
 }
@@ -33749,7 +37545,7 @@ async function pushVoyagePlansToCloudV2(plans) {
     if (!safePlans.length) return true;
 
     const nowIso = new Date().toISOString();
-    const buildPlanPayload = (includeStatus = true) => safePlans.map(plan => ({
+    const buildPlanPayload = (includeStatus = true, includeFoodColumns = true) => safePlans.map(plan => ({
         id: String(plan.id || generateClientUuid()),
         project_id: resolvedProjectIdUuid,
         creator_email: creatorEmail,
@@ -33757,18 +37553,30 @@ async function pushVoyagePlansToCloudV2(plans) {
         name: String(plan.name || '').trim(),
         description: String(plan.description || '').trim(),
         ...(includeStatus ? { status: normalizeVoyagePlanStatus(plan.status) } : {}),
+        ...(includeFoodColumns ? {
+            meal_plan: (plan.mealPlan || []).map((entry, index) => sanitizeVoyageMealEntry(entry, index)),
+            provisioning_items: (plan.provisioningItems || []).map((entry, index) => sanitizeVoyageProvisioningItem(entry, index)),
+            budget_items: (plan.budgetItems || []).map((entry, index) => sanitizeVoyageBudgetItem(entry, index))
+        } : {}),
         created_at: plan.createdAt || nowIso,
         updated_at: plan.updatedAt || nowIso
     }));
 
-    let planPayload = buildPlanPayload(cloudVoyagePlansHasStatusColumn);
+    let planPayload = buildPlanPayload(cloudVoyagePlansHasStatusColumn, cloudVoyagePlansHasFoodColumns);
 
     let { error: insertPlansError } = await cloudClient
         .from(CLOUD_VOYAGE_PLANS_TABLE)
         .insert(planPayload);
     if (insertPlansError && cloudVoyagePlansHasStatusColumn && isCloudMissingVoyageStatusColumnError(insertPlansError)) {
         cloudVoyagePlansHasStatusColumn = false;
-        planPayload = buildPlanPayload(false);
+        planPayload = buildPlanPayload(false, cloudVoyagePlansHasFoodColumns);
+        ({ error: insertPlansError } = await cloudClient
+            .from(CLOUD_VOYAGE_PLANS_TABLE)
+            .insert(planPayload));
+    }
+    if (insertPlansError && cloudVoyagePlansHasFoodColumns && isCloudMissingVoyageFoodColumnError(insertPlansError)) {
+        cloudVoyagePlansHasFoodColumns = false;
+        planPayload = buildPlanPayload(cloudVoyagePlansHasStatusColumn, false);
         ({ error: insertPlansError } = await cloudClient
             .from(CLOUD_VOYAGE_PLANS_TABLE)
             .insert(planPayload));
@@ -34457,7 +38265,7 @@ async function connectCloud(config, { silent = false } = {}) {
                 void refreshCloudStatsTableCounts({ force: true });
             }
         } else {
-            setCloudStatus(t('Cloud connecté · authentification requise.', 'Nube conectada · autenticación requerida.'));
+            setCloudStatus(t('Cloud connecté · authentification requise pour la synchro. Mode local actif.', 'Nube conectada · autenticación requerida para la sincronización. Modo local activo.', 'Cloud connected · authentication required for sync. Local mode active.'));
         }
 
         return true;
@@ -35004,19 +38812,50 @@ function deleteRoute(index) {
     finalize();
 }
 
-function exportRoute(index) {
-    const saved = getSavedRoutes();
-    if (!saved || !saved[index]) return alert(t('Aucune route sélectionnée', 'Ninguna ruta seleccionada'));
-    const data = JSON.stringify(saved[index], null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
+function sanitizeExportFileNamePart(value, fallback = 'ceibo-export') {
+    const cleaned = String(value || '')
+        .trim()
+        .replace(/[^a-z0-9_-]+/gi, '_')
+        .replace(/^_+|_+$/g, '');
+    return cleaned || fallback;
+}
+
+function downloadTextFile(content, mimeType, fileName) {
+    const blob = new Blob([String(content || '')], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${saved[index].name.replace(/[^a-z0-9\-]/gi,'_')}.json`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+}
+
+function buildRoutesImportExportBundle() {
+    return {
+        type: 'ceibo-routes-voyages-waypoints-bundle',
+        schemaVersion: 1,
+        appBuildVersion: APP_BUILD_VERSION,
+        exportedAt: new Date().toISOString(),
+        routes: getSavedRoutes(),
+        voyages: Array.isArray(voyagePlans) ? voyagePlans : [],
+        waypoints: Array.isArray(waypointPhotoEntries) ? waypointPhotoEntries : []
+    };
+}
+
+function exportRoutesVoyagesWaypointsJson() {
+    const payload = buildRoutesImportExportBundle();
+    const totalEntries = payload.routes.length + payload.voyages.length + payload.waypoints.length;
+    if (totalEntries === 0) {
+        alert(t('Aucune donnée à exporter.', 'No hay datos para exportar.', 'No data to export.'));
+        return false;
+    }
+
+    const exportDate = String(payload.exportedAt || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+    const fileName = `${sanitizeExportFileNamePart(`ceibo_routes_voyages_waypoints_${exportDate}`, 'ceibo_routes_voyages_waypoints')}.json`;
+    downloadTextFile(JSON.stringify(payload, null, 2), 'application/json', fileName);
+    return true;
 }
 
 function escapeXml(value) {
@@ -35048,15 +38887,7 @@ function exportRouteGpx(index) {
     if (!saved || !saved[index]) return alert(t('Aucune route sélectionnée', 'Ninguna ruta seleccionada'));
 
     const gpx = routeToGpx(saved[index]);
-    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${saved[index].name.replace(/[^a-z0-9\-]/gi,'_')}.gpx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadTextFile(gpx, 'application/gpx+xml', `${sanitizeExportFileNamePart(saved[index].name, 'route')}.gpx`);
 }
 
 function parseGpxToRoute(gpxText, fileName = 'Route importée') {
@@ -35102,6 +38933,147 @@ function parseGpxToRoute(gpxText, fileName = 'Route importée') {
     };
 }
 
+function isRoutesImportExportBundle(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    if (String(value.type || '').trim() === 'ceibo-routes-voyages-waypoints-bundle') return true;
+    return Array.isArray(value.routes) || Array.isArray(value.voyages) || Array.isArray(value.waypoints);
+}
+
+function prepareImportedRoutes(routesToImport, existingRoutes = []) {
+    const existingIds = new Set((Array.isArray(existingRoutes) ? existingRoutes : []).map(route => String(route?.id || '').trim()).filter(Boolean));
+    const seenImportedIds = new Set();
+    const routeIdMap = new Map();
+    const routes = (Array.isArray(routesToImport) ? routesToImport : []).map((route, index) => {
+        const safeRoute = sanitizeSavedRoute(route, index);
+        const originalId = String(route?.id || safeRoute.id || '').trim();
+        let nextId = String(safeRoute.id || '').trim();
+        if (!nextId || existingIds.has(nextId) || seenImportedIds.has(nextId)) {
+            nextId = generateClientUuid();
+        }
+        existingIds.add(nextId);
+        seenImportedIds.add(nextId);
+        if (originalId && originalId !== nextId) {
+            routeIdMap.set(originalId, nextId);
+        }
+        return nextId === safeRoute.id ? safeRoute : { ...safeRoute, id: nextId };
+    });
+
+    return { routes, routeIdMap };
+}
+
+function prepareImportedWaypointEntries(entriesToImport, existingEntries = []) {
+    const existingIds = new Set((Array.isArray(existingEntries) ? existingEntries : []).map(entry => String(entry?.id || '').trim()).filter(Boolean));
+    const seenImportedIds = new Set();
+    const waypointIdMap = new Map();
+    const waypoints = (Array.isArray(entriesToImport) ? entriesToImport : [])
+        .map(normalizeWaypointPhotoEntry)
+        .filter(Boolean)
+        .map(entry => {
+            const originalId = String(entry?.id || '').trim();
+            let nextId = originalId;
+            if (!nextId || existingIds.has(nextId) || seenImportedIds.has(nextId)) {
+                nextId = generateClientUuid();
+            }
+            existingIds.add(nextId);
+            seenImportedIds.add(nextId);
+            if (originalId && originalId !== nextId) {
+                waypointIdMap.set(originalId, nextId);
+            }
+            return nextId === originalId ? entry : { ...entry, id: nextId };
+        });
+
+    return { waypoints, waypointIdMap };
+}
+
+function prepareImportedVoyagePlans(plansToImport, existingPlans = [], routeIdMap = new Map(), waypointIdMap = new Map()) {
+    const existingPlanIds = new Set((Array.isArray(existingPlans) ? existingPlans : []).map(plan => String(plan?.id || '').trim()).filter(Boolean));
+    return (Array.isArray(plansToImport) ? plansToImport : []).map((plan, index) => {
+        const safePlan = sanitizeVoyagePlan(plan, index);
+        let nextPlanId = String(safePlan.id || '').trim();
+        if (!nextPlanId || existingPlanIds.has(nextPlanId)) {
+            nextPlanId = generateClientUuid();
+        }
+        existingPlanIds.add(nextPlanId);
+
+        const seenItemIds = new Set();
+        const nextItems = safePlan.items.map((item, itemIndex) => {
+            const safeItem = sanitizeVoyagePlanItem(item, itemIndex);
+            let nextItemId = String(safeItem.id || '').trim();
+            if (!nextItemId || seenItemIds.has(nextItemId)) {
+                nextItemId = generateClientUuid();
+            }
+            seenItemIds.add(nextItemId);
+
+            return {
+                ...safeItem,
+                id: nextItemId,
+                routeId: safeItem.type === 'route'
+                    ? String(routeIdMap.get(String(safeItem.routeId || '').trim()) || safeItem.routeId || '').trim()
+                    : '',
+                waypointPhotoId: safeItem.type === 'stop'
+                    ? String(waypointIdMap.get(String(safeItem.waypointPhotoId || '').trim()) || safeItem.waypointPhotoId || '').trim()
+                    : ''
+            };
+        });
+
+        return { ...safePlan, id: nextPlanId, items: nextItems };
+    });
+}
+
+async function importRoutesVoyagesWaypointsBundle(bundle) {
+    const importedRoutesSource = Array.isArray(bundle?.routes) ? bundle.routes : [];
+    const importedVoyagesSource = Array.isArray(bundle?.voyages) ? bundle.voyages : [];
+    const importedWaypointsSource = Array.isArray(bundle?.waypoints) ? bundle.waypoints : [];
+
+    const { routes: importedRoutes, routeIdMap } = prepareImportedRoutes(importedRoutesSource, getSavedRoutes());
+    const { waypoints: importedWaypoints, waypointIdMap } = prepareImportedWaypointEntries(importedWaypointsSource, waypointPhotoEntries);
+    const importedVoyages = prepareImportedVoyagePlans(importedVoyagesSource, voyagePlans, routeIdMap, waypointIdMap);
+
+    if (importedRoutes.length > 0) {
+        setSavedRoutes(getSavedRoutes().concat(importedRoutes));
+    }
+    if (importedWaypoints.length > 0) {
+        setWaypointPhotoEntries(waypointPhotoEntries.concat(importedWaypoints), { refreshUi: false });
+    }
+    if (importedVoyages.length > 0) {
+        setVoyagePlans(voyagePlans.concat(importedVoyages), { persistLocal: true, markCloudDirty: true });
+    }
+
+    if (importedRoutes.length > 0 || importedWaypoints.length > 0 || importedVoyages.length > 0) {
+        routesCloudDirty = true;
+    }
+
+    refreshSavedList();
+    renderVoyageAgendaPanel();
+    updateVoyagePlanningSummary();
+    updateRoutingTabAvailability();
+    updateCloudDataSourceStatus('local (non synchronisé)', getSavedRoutes().length, waypointPhotoEntries.length);
+
+    if (isCloudReady()) {
+        await pushRoutesToCloud({
+            includeEngineLog: false,
+            includeWaypointPhotos: importedWaypoints.length > 0,
+            includeMaintenanceBoards: false,
+            includeArrivalAnalyses: false,
+            includeAgendaEvents: false,
+            includeVoyagePlans: importedVoyages.length > 0,
+            includeCrewDirectory: false
+        });
+        setCloudStatus(t(
+            `Cloud synchronisé · ${getSavedRoutes().length} route(s) · ${voyagePlans.length} voyage(s) · ${waypointPhotoEntries.length} waypoint(s)`,
+            `Nube sincronizada · ${getSavedRoutes().length} ruta(s) · ${voyagePlans.length} viaje(s) · ${waypointPhotoEntries.length} waypoint(s)`,
+            `Cloud synced · ${getSavedRoutes().length} route(s) · ${voyagePlans.length} trip(s) · ${waypointPhotoEntries.length} waypoint(s)`
+        ));
+        updateCloudDataSourceStatus('cloud', getSavedRoutes().length, waypointPhotoEntries.length);
+    }
+
+    return {
+        routes: importedRoutes.length,
+        voyages: importedVoyages.length,
+        waypoints: importedWaypoints.length
+    };
+}
+
 function handleImport(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -35109,38 +39081,74 @@ function handleImport(e) {
     reader.onload = async function(evt) {
         try {
             const content = String(evt.target.result || '');
-            const saved = [...getSavedRoutes()];
-
             const isLikelyGpx = file.name.toLowerCase().endsWith('.gpx') || content.trim().startsWith('<');
 
             if (isLikelyGpx) {
+                const saved = [...getSavedRoutes()];
                 const route = parseGpxToRoute(content, file.name);
                 saved.push(route);
+                setSavedRoutes(saved);
+                routesCloudDirty = true;
             } else {
                 const obj = JSON.parse(content);
-                if (Array.isArray(obj)) {
-                    obj.forEach(o => saved.push(o));
+                if (isRoutesImportExportBundle(obj)) {
+                    const importedCounts = await importRoutesVoyagesWaypointsBundle(obj);
+                    alert(t(
+                        `Import OK: ${importedCounts.routes} route(s), ${importedCounts.voyages} voyage(s), ${importedCounts.waypoints} waypoint(s).`,
+                        `Importación OK: ${importedCounts.routes} ruta(s), ${importedCounts.voyages} viaje(s), ${importedCounts.waypoints} waypoint(s).`,
+                        `Import OK: ${importedCounts.routes} route(s), ${importedCounts.voyages} trip(s), ${importedCounts.waypoints} waypoint(s).`
+                    ));
+                    return;
                 } else {
-                    saved.push(obj);
+                    const saved = [...getSavedRoutes()];
+                    if (Array.isArray(obj)) {
+                        obj.forEach(o => saved.push(o));
+                    } else {
+                        saved.push(obj);
+                    }
+                    setSavedRoutes(saved);
+                    routesCloudDirty = true;
                 }
             }
 
-            setSavedRoutes(saved);
             if (isCloudReady()) {
                 try {
                     await pushRoutesToCloud({
                         includeEngineLog: false,
                         includeWaypointPhotos: false,
-                        includeMaintenanceBoards: false
+                        includeMaintenanceBoards: false,
+                        includeArrivalAnalyses: false,
+                        includeAgendaEvents: false,
+                        includeVoyagePlans: false,
+                        includeCrewDirectory: false
                     });
-                    setCloudStatus(t(`Cloud synchronisé · ${saved.length} route(s)`, `Nube sincronizada · ${saved.length} ruta(s)`));
+                    setCloudStatus(t(`Cloud synchronisé · ${getSavedRoutes().length} route(s)`, `Nube sincronizada · ${getSavedRoutes().length} ruta(s)`));
+                    updateCloudDataSourceStatus('cloud', getSavedRoutes().length, waypointPhotoEntries.length);
                 } catch (error) {
                     setCloudStatus(t(`Import local OK, synchro cloud échouée: ${formatCloudError(error)}`, `Importación local OK, sincronización nube fallida: ${formatCloudError(error)}`), true);
+                    updateCloudDataSourceStatus('cache local (synchro en échec)', getSavedRoutes().length, waypointPhotoEntries.length);
                 }
+            } else {
+                updateCloudDataSourceStatus('local (non synchronisé)', getSavedRoutes().length, waypointPhotoEntries.length);
             }
             refreshSavedList();
+            updateRoutingTabAvailability();
             alert(t('Import OK', 'Importación OK'));
-        } catch (err) { alert(t('Fichier JSON/GPX invalide', 'Archivo JSON/GPX inválido')); }
+        } catch (err) {
+            const message = String(err?.message || '').trim();
+            const looksLikeFormatError = !message
+                || message.includes('GPX invalide')
+                || message.includes('Aucun point GPX trouvé')
+                || message.includes('Unexpected token');
+            if (looksLikeFormatError) {
+                alert(t('Fichier JSON/GPX invalide', 'Archivo JSON/GPX inválido'));
+            } else {
+                alert(t(`Import impossible: ${message}`, `Importación imposible: ${message}`, `Import failed: ${message}`));
+            }
+        }
+        finally {
+            if (e?.target) e.target.value = '';
+        }
     };
     reader.readAsText(file);
 }
