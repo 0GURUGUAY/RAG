@@ -1,25 +1,28 @@
 # CEIBO · Reporte de Funcionalidades
 
-Fecha: 27 de marzo de 2026  
+Fecha: 28 de abril de 2026  
 Autor del programa: Max Patissier
 
 ## Resumen ejecutivo
 
-CEIBO es una aplicación náutica integral para planificar, optimizar y ejecutar navegaciones con apoyo meteorológico, seguimiento en tiempo real, gestión operativa a bordo y sincronización cloud. Su propuesta de valor combina, en una sola interfaz:
+CEIBO es una aplicación náutica integral para preparar rutas y viajes, operar la navegación en tiempo real, gestionar mantenimiento y documentación técnica, y sincronizar toda la información entre dispositivos mediante cloud.
 
-- Planificación de rutas y edición visual sobre mapa.
-- Routage con polares y análisis meteo por tramos.
-- Diario de navegación y motor con trazabilidad detallada.
-- Gestión de mantenimiento técnico y gastos.
-- Gestión documental con búsqueda asistida por IA (RAG).
-- Sincronización multi-dispositivo mediante Supabase.
+Su valor diferencial es reunir en una sola interfaz:
+
+- Rutas, routage y meteorología operativa.
+- Agenda de viajes con etapas, escalas y tripulación.
+- Diario de navegación con GPS, checklist, alarmas y SignalK.
+- Mantenimiento técnico, proveedores, facturas y seguimiento motor.
+- Biblioteca documental con consulta asistida por IA (RAG).
+- Sincronización cloud multiusuario con estadísticas y control de tablas.
 
 ## 1. Interfaz principal por pestañas
 
-La aplicación organiza el flujo de trabajo en módulos funcionales claros:
+La aplicación organiza el flujo de trabajo en módulos claros:
 
 - Cloud.
 - Routes.
+- Voyages.
 - Routage.
 - Document.
 - Journal nav.
@@ -27,7 +30,12 @@ La aplicación organiza el flujo de trabajo en módulos funcionales claros:
 - Arrivée.
 - Waypoint.
 
-Este diseño permite pasar rápidamente de la planificación estratégica (ruta, meteo, seguridad) a la operación diaria (logs, mantenimiento, documentos, evidencias fotográficas).
+Además, la interfaz incorpora:
+
+- Selector de idioma FR / ES / EN.
+- Modo noche.
+- Panel lateral redimensionable y colapsable.
+- Acceso directo a la ayuda contextual.
 
 ## 2. Navegación y rutas
 
@@ -35,145 +43,238 @@ Este diseño permite pasar rápidamente de la planificación estratégica (ruta,
 
 Capacidades principales:
 
-- Crear, guardar, cargar, renombrar y buscar rutas.
+- Crear, guardar, cargar, buscar y actualizar rutas.
 - Reiniciar o invertir una ruta (ruta de retorno).
 - Importar rutas en JSON y GPX.
 - Exportar rutas en JSON y GPX.
+- Restaurar la última copia local automática.
 - Medición manual de distancias en millas náuticas sobre el mapa.
 
-### 2.2 Edición de waypoints
+### 2.2 Comentario externo y guía LLM
+
+- Generación de prompt LLM asociado a la ruta seleccionada.
+- Importación desde portapapeles de una respuesta externa.
+- Edición y persistencia del comentario enriquecido dentro de la ruta.
+
+### 2.3 Edición de waypoints
 
 - Inserción y ajuste de waypoints directamente en mapa.
-- Información contextual del waypoint seleccionado.
+- Recentrado y actualización de la ruta activa.
 - Integración con fotos de waypoint y metadatos asociados.
 
-## 3. Routage meteorológico avanzado
+## 3. Viajes y agenda
 
-### 3.1 Cálculo de ruta
+### 3.1 Plan de viaje
 
-- Cálculo de ruta con modelo polar (velocidad objetivo según ángulo y viento).
-- Parámetros de salida por fecha/hora.
-- Ajuste de estrategia de velas y tiempo de bordada.
-- Opción de contournement côte (evitación costera con espaciado configurable).
+- Creación de viajes con nombre, descripción y estado.
+- Estados disponibles: planificado, realizado, cancelado.
+- Construcción del viaje a partir de rutas existentes y escalas/fondeos.
+- Cálculo automático de cronología entre etapas y paradas.
 
-### 3.2 Inteligencia meteo
+### 3.2 Agenda y explotación operativa
 
-- Consulta y visualización de capas meteo (viento, lluvia, nubosidad, temperatura).
-- Análisis por ventana temporal (2, 3, 5 o 7 días).
-- Sugerencia de hora de salida meteo.
-- Sugerencia de rutas IA (perfil seguro / rendimiento).
-- Cálculo por segmentos para mejorar realismo en rutas largas.
+- Vista calendario de viajes programados.
+- Búsqueda por viaje, etapa o tripulante.
+- Generación de PDF mensual de compras a partir de la agenda visible.
+- Prompt LLM turístico del viaje para preparar escalas o recomendaciones.
 
-## 4. Registro operativo en navegación (Logbook)
+### 3.3 Gestión de tripulación
 
-### 4.1 Diario de navegación
+- Directorio de tripulantes.
+- Ficha con nombre, email, teléfono y comentarios.
+- Perfil alimentario, alergias, intolerancias y hábitos de desayuno.
+- Asociación de tripulantes a cada viaje.
 
-- Registro de entradas de navegación con datos de contexto.
-- Trazado GPS de sesión (trace samples) con persistencia local/cloud.
-- Enriquecimiento de puntos con meteo puntual, incluida temperatura por punto.
-- Visualización detallada al hacer clic en un punto de traza (telemetría y meteo).
+## 4. Routage meteorológico avanzado
 
-### 4.2 Exportación PDF por entrada de log
+### 4.1 Cálculo de ruta
 
-- Exportación de un informe PDF por cada entrada.
-- Cabecera con ruta y fecha.
-- Tabla resumen.
-- Tabla completa de puntos de traza para trazabilidad y archivo.
+- Cálculo de ruta con modelo polar.
+- Selección de fecha y hora de salida.
+- Uso de perfiles de velas / aparejo personalizados.
+- Contorneo de costa con espaciado configurable.
+- Ajustes interactivos mediante waypoints intermedios sobre el mapa.
 
-## 5. Motor, sensores y seguridad
+### 4.2 Inteligencia meteo
 
-### 5.1 Diario motor
+- Consulta de capas meteo y datos por segmentos.
+- Ventanas de análisis de 2, 3, 5 o 7 días.
+- Matriz de salida de 5 días para comparar ventanas favorables.
+- Apertura del panel meteo de routage y de la carta del cielo.
+- Recentrado de la ruta calculada y resumen de decisión de routage.
 
-- Registro de eventos y horas motor.
+### 4.3 Gestión de polares
+
+- Creación de perfiles polares personalizados.
+- Duplicación de perfiles existentes.
+- Edición por tabla o matriz JSON.
+- Activación directa del perfil desde el módulo de routage.
+
+## 5. Llegada y waypoints foto
+
+### 5.1 Análisis de llegada
+
+- Recomendación de fondeo en la zona final de la ruta.
+- Búsqueda de restaurantes y tiendas cercanas.
+- Carga de análisis memorizados previamente.
+- Sustitución rápida del destino final por un fondeo recomendado.
+
+### 5.2 Waypoints enriquecidos
+
+- Creación de waypoint a partir de foto con EXIF GPS.
+- Captura rápida desde móvil con “foto + waypoint auto”.
+- Importación desde Google Photos.
+- Posicionamiento manual sobre mini mapa cuando no hay GPS.
+- Campos de valoración, limpieza, profundidad, fondo y protección.
+- Reutilización del waypoint como punto de ruta.
+
+## 6. Registro operativo en navegación
+
+### 6.1 Diario de navegación
+
+- Inicio y parada de log GPS.
+- Persistencia de trazas y puntos de navegación.
+- Enriquecimiento meteo por punto.
+- Reapertura de una traza desde el listado del diario.
+- Formularios de entrada manual y edición de logs.
+
+### 6.2 Diseño operativo adaptable
+
+- Modo de visualización combinando menú, mapa, diario y checklist.
+- Pensado para pantallas limitadas como iPad.
+- Panel lateral colapsable para maximizar la zona operativa.
+
+### 6.3 Seguridad y alarmas
+
+- Alarma de garreo con centro de fondeo y radio de seguridad.
+- Botón de prueba de alarma.
+- Demanda de permiso de sensores de inclinación.
+
+### 6.4 Checklist de navegación
+
+- Checklist estándar, noche, mal tiempo y maniobra/puerto.
+- Añadir acciones personalizadas.
+- Reinicio y reaplicación de plantillas.
+
+## 7. Integración SignalK y datos live
+
+Conector dedicado para ingestión en tiempo real desde SignalK:
+
+- Posición, velocidad, rumbo y navegación.
+- Viento real y dirección de viento.
+- Barómetro, humedad, nubosidad, lluvia y temperaturas.
+- Supervisión live centralizada en Journal nav.
+- Auto-log configurable para iniciar el diario de forma automática.
+
+Beneficio clave: continuidad entre la instrumentación a bordo y el registro operativo CEIBO.
+
+## 8. Motor, audio y trazabilidad técnica
+
+### 8.1 Diario motor
+
+- Registro de horas motor, combustible añadido y notas.
+- Seguimiento de temperatura al inicio y final de uso.
+
+### 8.2 Audio motor
+
 - Captura de snapshots de sonido motor.
-- Ayuda a detección de régimen/estado de funcionamiento.
+- Clasificación de régimen: auto, idle, cruise y high.
+- Importación de WAV para análisis comparativo.
 
-### 5.2 Señales de navegación y alarmas
+### 8.3 Detección embarcada
 
-- Integración con sensores de movimiento y métricas de navegación.
-- Gestión de alarma de garreo (anchor drag) con confirmación y cooldown.
+- Modo beta de detección motor con iPad.
+- Indicadores de estado, vibración, velocidad y RPM estimadas.
 
-## 6. Integración SignalK
+## 9. Gestión documental y IA (RAG)
 
-Conector dedicado para ingestión en tiempo real desde servidor SignalK:
+### 9.1 Biblioteca documental
 
-- Posición, SOG, COG, escora y log.
-- Variables meteorológicas (temperatura, presión, humedad, precipitación, nubosidad).
-- Compatibilidad con múltiples rutas de plugins meteo.
-- Normalización de unidades para uso directo en UI y logs.
+- Alta de documentos con título, categoría, subcategoría, tags y descripción.
+- Visualización de archivos en panel dedicado.
+- Persistencia cloud por usuario.
 
-Beneficio clave: continuidad de datos entre instrumentación a bordo y módulos CEIBO.
+### 9.2 Consulta inteligente
 
-## 7. Gestión de mantenimiento técnico
+- Indexación de ficheros para consulta contextual.
+- Preguntas sobre la documentación desde la propia interfaz.
+- Modos Local, Híbrido y Externo.
+- Selección de estilo de respuesta.
+- Historial de preguntas y panel de explicaciones/fuentes.
 
-### 7.1 Esquemas y pastillas (pins)
+## 10. Gestión de mantenimiento técnico
 
-- Creación de esquemas visuales de zonas técnicas.
-- Colocación de pastillas por posición relativa (x/y %).
-- Clasificación por color y estado (activo, previsto, terminado).
+### 10.1 Esquemas y tareas visuales
 
-### 7.2 Proveedores y gastos
+- Importación de esquemas técnicos como imagen.
+- Colocación de marcadores por posición relativa.
+- Colores por prioridad y estados por avance.
+- Leyendas y lista de tareas por esquema.
 
-- Registro de proveedores de mantenimiento.
-- Registro de gastos/facturas.
-- Estructura de datos cloud preparada para seguimiento histórico.
+### 10.2 Facturas y gastos
 
-Resultado: visión consolidada del estado técnico y del coste de propiedad.
+- Carga de imágenes y PDF.
+- Escaneo inicial de factura.
+- Asistencia IA para comentario y lectura rápida.
+- Copia guiada desde la vista previa PDF hacia campos de formulario.
+- Registro de importe, proveedor, IBAN, líneas de trabajo y estado de pago.
 
-## 8. Módulo documental y IA (RAG)
+### 10.3 Proveedores
 
-### 8.1 Gestión documental
+- Directorio de proveedores con contacto, teléfono e IBAN.
+- Actualización y reutilización en los gastos.
 
-- Alta y clasificación de documentos por categoría/subcategoría.
-- Etiquetas, descripción, metadatos y almacenamiento cloud.
-- Políticas de seguridad por usuario autenticado.
+### 10.4 Diagnóstico SignalK
 
-### 8.2 Consulta inteligente
+- Página técnica de conexión, umbrales y eventos recientes.
+- Enlace rápido al monitor live de Journal nav.
 
-- Historial de preguntas.
-- Configuración de estilo de respuesta y proveedor.
-- Servicio local RAG para consulta contextual de documentación técnica.
+## 11. Cloud, autenticación y colaboración
 
-Valor operativo: acceso rápido al conocimiento embarcado sin búsqueda manual extensa.
-
-## 9. Cloud, autenticación y colaboración
-
-### 9.1 Cuenta y seguridad
+### 11.1 Cuenta y seguridad
 
 - Login email/password.
 - Creación de cuenta y cierre de sesión.
 - Cambio de contraseña.
-- Gestión de usuarios autorizados y roles.
+- Creación de usuarios autorizados por rol.
 
-### 9.2 Sincronización
+### 11.2 Sincronización
 
-- Sincronización automática periódica.
+- Sincronización automática de rutas, viajes, diarios, mantenimiento, documentos y waypoints.
 - Refresco manual de respaldo.
-- Indicadores de estado de sync y fuente de datos.
-- Estadísticas de tablas y uso de almacenamiento.
+- Estado de sincronización y procedencia de datos.
 
-### 9.3 Alertas Telegram
+### 11.3 Estadísticas cloud
 
-- Campos de usuario para chat_id y activación de alertas.
-- Base preparada para notificaciones operativas.
+- Contadores por tabla utilizada.
+- Seguimiento de almacenamiento usado.
+- Visibilidad sobre cuota cloud.
 
-## 10. Capas cartográficas y datos externos
+## 12. Cartografía, capas y datos externos
 
 - Capas base y satélite.
-- Capas marinas dedicadas (profundidad/riesgo según configuración).
-- Datos AIS con refresco, filtrado y representación de tráfico.
-- Soporte para importación de GRIB a JSON para explotación meteo.
+- Capas marinas de profundidades, peligros, fondeos, puertos y servicios.
+- Capa AIS live.
+- Capas OWM de isobaras, viento, dirección de viento, lluvia, nubes y temperatura.
+- Importación de GRIB / JSON meteo.
 
-## 11. Internacionalización y experiencia de uso
+## 13. Internacionalización y experiencia de uso
 
-- Soporte multiidioma (fr/es/en) con traducciones en interfaz.
-- Panel lateral por pestañas y subtabs para reducir complejidad operativa.
-- Botones de acción directos para operaciones críticas (calcular, guardar, exportar, sincronizar).
+- Soporte de interfaz en francés, español e inglés.
+- Modo noche.
+- Ayuda contextual en navegador.
+- Atajos y diseño adaptable a distintos tamaños de pantalla.
 
-## 12. Conclusión
+## 14. Conclusión
 
-CEIBO destaca como plataforma náutica de extremo a extremo: planifica rutas, interpreta meteo, incorpora telemetría, registra operación real, gestiona mantenimiento/documentación y sincroniza datos entre dispositivos.
+CEIBO ya no es solo un router náutico. Es una plataforma operativa completa que conecta la preparación de una travesía, su ejecución en mar, la gestión técnica del barco y la explotación documental posterior.
 
-Su evolución reciente refuerza especialmente la capa operativa del logbook (más detalle por punto y exportación PDF por entrada), acercando la aplicación a un estándar profesional de trazabilidad, análisis post-navegación y reporte.
+Su evolución reciente refuerza especialmente:
 
-En síntesis, CEIBO no es solo un router: es un centro de mando digital para la navegación moderna.
+- La agenda de viajes y tripulación.
+- El trabajo multiidioma.
+- La sincronización cloud ampliada.
+- La consulta documental asistida por IA.
+- La explotación del diario de navegación como centro operativo en vivo.
+
+En síntesis, CEIBO funciona como un centro de mando digital para navegación, mantenimiento y coordinación a bordo.

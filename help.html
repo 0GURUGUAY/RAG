@@ -209,132 +209,192 @@
 <body>
   <main class="wrap">
     <section class="hero">
-      <h1>Ayuda completa · CEIBO Router V5</h1>
-      <p class="subtitle">Guía práctica en español para planificar rutas, analizar meteorología, gestionar fondeos con fotos y exportar informes.</p>
+      <h1>Ayuda completa · CEIBO</h1>
+      <p class="subtitle">Guía práctica en español para planificar rutas y viajes, operar el diario de navegación, gestionar mantenimiento y consultar documentos con IA.</p>
       <p class="subtitle"><strong>Programa creado por Max Patissier.</strong></p>
       <nav class="toc" aria-label="Índice rápido">
         <a href="#cloud">Cloud</a>
+        <a href="#voyages">Viajes</a>
         <a href="#routes">Rutas</a>
         <a href="#routage">Navegación</a>
-        <a href="#arrivee">Llegada</a>
-        <a href="#waypoint">Waypoint</a>
+        <a href="#navlog">Diario</a>
+        <a href="#documentos">Documentos</a>
+        <a href="#maintenance">Mantenimiento</a>
+        <a href="#arrivee">Llegada y waypoint</a>
         <a href="#flujo">Flujo</a>
         <a href="#problemas">Problemas</a>
       </nav>
       <div class="kpi">
-        <div class="pill"><strong>5</strong>Pestañas principales</div>
-        <div class="pill"><strong>Meteo</strong>Viento, presión, oleaje, ETA</div>
-        <div class="pill"><strong>Fotos</strong>Fondeos geolocalizados</div>
-        <div class="pill"><strong>GPX/PDF</strong>Importar y exportar</div>
+        <div class="pill"><strong>9</strong>Pestañas principales</div>
+        <div class="pill"><strong>FR / ES / EN</strong>Cambio de idioma en el pie lateral</div>
+        <div class="pill"><strong>Cloud</strong>Sincronización multiusuario y multidispositivo</div>
+        <div class="pill"><strong>PDF / GPX / IA</strong>Exportes, agenda y consulta documental</div>
       </div>
     </section>
 
     <section class="grid">
       <article class="card half" id="cloud">
-        <h2>1) Pestaña CLOUD (primera al iniciar)</h2>
-        <span class="tag">Conectar</span>
+        <h2>1) Pestaña CLOUD</h2>
+        <span class="tag">Cuenta</span>
+        <span class="tag">Usuarios</span>
         <span class="tag">Sincronización auto</span>
-        <span class="tag">Mac + iPad</span>
+        <span class="tag">Estadísticas</span>
         <ul>
-          <li>Introduce tu <strong>contraseña cloud</strong> y pulsa <strong>Conectar cloud</strong>.</li>
-          <li>La app sincroniza <strong>rutas + fotos waypoint</strong> automáticamente.</li>
-          <li>Sincronización al volver a la app, al enfocar ventana y periódicamente.</li>
-          <li><strong>Actualizar cloud</strong> queda como refresco manual de respaldo.</li>
+          <li>Inicia sesión con email y contraseña desde la subpestaña <strong>Cuenta</strong>.</li>
+          <li>La app sincroniza automáticamente rutas, viajes, waypoints foto, mantenimiento, diarios y documentos.</li>
+          <li>La subpestaña <strong>Usuarios</strong> permite preparar usuarios autorizados y alertas Telegram.</li>
+          <li><strong>Actualizar nube</strong> sigue disponible como refresco manual de respaldo.</li>
+          <li><strong>Stats</strong> muestra tablas utilizadas, volumen ocupado y cuota cloud.</li>
+        </ul>
+      </article>
+
+      <article class="card half" id="voyages">
+        <h2>2) Pestaña VIAJES</h2>
+        <span class="tag">Agenda</span>
+        <span class="tag">Etapas</span>
+        <span class="tag">Tripulación</span>
+        <span class="tag">PDF mensual</span>
+        <ul>
+          <li>Crea un viaje combinando <strong>rutas existentes + escalas/fondeos</strong>.</li>
+          <li>Gestiona estado del viaje: <strong>planificado, realizado o cancelado</strong>.</li>
+          <li>Añade tripulantes, perfiles alimentarios, alergias y comentarios logísticos.</li>
+          <li>Vista <strong>Calendario</strong> para revisar el planning en la zona principal.</li>
+          <li>Genera <strong>PDF de compras mensuales</strong> a partir de la agenda visible.</li>
+          <li>Botón <strong>Prompt LLM</strong> para preparar una propuesta turística o de crucero.</li>
         </ul>
       </article>
 
       <article class="card half" id="routes">
-        <h2>2) Pestaña ROUTES</h2>
+        <h2>3) Pestaña RUTAS</h2>
         <span class="tag">Guardar</span>
         <span class="tag">Cargar</span>
         <span class="tag">Importar JSON/GPX</span>
-        <span class="tag">Exportar PDF</span>
+        <span class="tag">Comentario LLM</span>
         <ul>
           <li><strong>Guardar:</strong> crea o actualiza la ruta activa.</li>
           <li><strong>Cargar:</strong> abre una ruta guardada y la coloca en mapa.</li>
           <li><strong>Exportar / Exportar GPX:</strong> descarga en JSON o GPX.</li>
           <li><strong>Importar:</strong> admite archivos JSON y GPX.</li>
+          <li><strong>Restaurar última copia local:</strong> recupera el snapshot local más reciente.</li>
+          <li><strong>Prompt LLM + comentario ruta:</strong> copia un prompt externo y guarda la respuesta dentro de la ruta.</li>
           <li><strong>Medición NM:</strong> activa modo de medición manual sobre el mapa.</li>
+          <li><strong>Polares / velas:</strong> crea, duplica y activa perfiles para el módulo de navegación.</li>
         </ul>
       </article>
 
       <article class="card half" id="routage">
-        <h2>3) Pestaña ROUTAGE</h2>
+        <h2>4) Pestaña NAVEGACIÓN</h2>
         <span class="tag">Calcular</span>
-        <span class="tag">Sugerir salida</span>
+        <span class="tag">Matriz salida</span>
         <span class="tag">Evitar costa</span>
         <span class="tag">Velas</span>
         <ul>
-          <li>Configura fecha/hora de salida, modo de velas y tiempo de bordada.</li>
+          <li>Configura fecha/hora de salida, perfil polar activo y contorneo de costa.</li>
           <li><strong>Calcular:</strong> genera ruta con meteo por segmentos.</li>
-          <li><strong>Sugerencia salida:</strong> busca ventanas con viento útil y límite de seguridad.</li>
+          <li><strong>Calcular matriz salida (5 d):</strong> compara ventanas de salida con meteo.</li>
+          <li><strong>Abrir meteo de navegación:</strong> abre el panel meteo asociado al routage.</li>
+          <li><strong>Carta del cielo:</strong> usa GPS actual o centro del mapa.</li>
           <li>Si haces clic en la ruta, inserta un waypoint intermedio lógicamente.</li>
           <li>Arrastrar un WP actualiza la ruta (sin reinicio completo).</li>
         </ul>
       </article>
 
-      <article class="card half" id="arrivee">
-        <h2>4) Pestaña ARRIVÉE</h2>
-        <span class="tag">Mouillage</span>
-        <span class="tag">POI</span>
-        <span class="tag">Recomendación</span>
+      <article class="card half" id="navlog">
+        <h2>5) Pestaña DIARIO NAV</h2>
+        <span class="tag">GPS</span>
+        <span class="tag">SignalK</span>
+        <span class="tag">Checklist</span>
+        <span class="tag">Motor</span>
         <ul>
-          <li>Analiza zona de llegada con recomendaciones de fondeo.</li>
-          <li>Incluye restaurantes y tiendas cercanas (datos OSM/Overpass).</li>
-          <li>Un clic en “usar como WP final” reemplaza el destino final de la ruta.</li>
+          <li><strong>Iniciar log GPS</strong> crea una traza con puntos y datos meteo asociados.</li>
+          <li>El layout puede alternar <strong>menú, mapa, diario y checklist</strong> según el dispositivo.</li>
+          <li>La alarma de garreo permite fijar centro, radio de seguridad y prueba manual.</li>
+          <li>SignalK centraliza datos live, umbrales y diagnóstico desde esta pestaña.</li>
+          <li>El submódulo motor registra horas, combustible, temperaturas y snapshots de audio.</li>
+          <li>Los logs y viajes pueden exportarse en <strong>PDF</strong>; el viaje también puede prepararse para email de tripulación.</li>
         </ul>
       </article>
 
-      <article class="card half" id="waypoint">
-        <h2>5) Pestaña WAYPOINT (fotos)</h2>
-        <span class="tag">EXIF GPS</span>
-        <span class="tag">Mapa editable</span>
-        <span class="tag">Valoración</span>
-        <span class="tag">Ir</span>
+      <article class="card half" id="documentos">
+        <h2>6) Pestaña DOCUMENTOS</h2>
+        <span class="tag">Archivos</span>
+        <span class="tag">RAG</span>
+        <span class="tag">Gemini / externo</span>
+        <span class="tag">Historial</span>
         <ul>
-          <li><strong>📷 Prendre photo (WP auto):</strong> en móvil, toma foto y se crea un WP automáticamente (si hay GPS EXIF).</li>
-          <li>Sube foto de fondeo y lee coordenadas GPS si existen.</li>
-          <li>Si no hay GPS, define posición manual en mini mapa.</li>
-          <li>Rellena nombre del lugar, comentario, nota, profundidad y protección.</li>
-          <li>La ficha aparece en lista y también en el mapa principal.</li>
-          <li>Botón <strong>Ir</strong>: añade ese lugar como WP de ruta.</li>
+          <li>Sube documentos con título, categoría, subcategoría, etiquetas y descripción.</li>
+          <li>La subpestaña <strong>IA</strong> permite indexar archivos y hacer preguntas sobre la base documental.</li>
+          <li>Puede funcionar en modo <strong>local, híbrido o externo</strong>.</li>
+          <li>El historial conserva preguntas recientes y el panel derecho muestra respuesta, explicaciones y fuentes.</li>
+        </ul>
+      </article>
+
+      <article class="card half" id="maintenance">
+        <h2>7) Pestaña MANTENIMIENTO</h2>
+        <span class="tag">Esquemas</span>
+        <span class="tag">Facturas</span>
+        <span class="tag">Proveedores</span>
+        <span class="tag">SignalK</span>
+        <ul>
+          <li><strong>Tareas:</strong> importa un esquema, coloca marcadores por color y estado, y documenta intervenciones.</li>
+          <li><strong>Gastos y facturas:</strong> sube imágenes o PDF, usa escaneo/IA y relleno rápido desde la vista previa.</li>
+          <li><strong>Proveedores:</strong> registra contacto, teléfono, IBAN y notas.</li>
+          <li><strong>Motor</strong> y <strong>SignalK</strong> completan el seguimiento técnico y el diagnóstico.</li>
+        </ul>
+      </article>
+
+      <article class="card half" id="arrivee">
+        <h2>8) Pestañas LLEGADA y WAYPOINT</h2>
+        <span class="tag">Fondeo</span>
+        <span class="tag">POI</span>
+        <span class="tag">EXIF GPS</span>
+        <span class="tag">Google Photos</span>
+        <ul>
+          <li><strong>Llegada:</strong> analiza la zona final con recomendaciones de fondeo, restaurantes y tiendas cercanas.</li>
+          <li>Un clic en <strong>usar como WP final</strong> reemplaza el destino final de la ruta.</li>
+          <li><strong>Waypoint:</strong> permite crear fondeos con foto, GPS EXIF, mapa editable, protección, profundidad y valoración.</li>
+          <li><strong>📷 Tomar foto (WP auto)</strong> crea un waypoint rápidamente en móvil cuando hay geolocalización.</li>
+          <li><strong>Google Photos</strong> importa imágenes remotas para archivarlas como waypoint.</li>
+          <li>Botón <strong>Ir</strong>: añade ese lugar como waypoint de ruta.</li>
         </ul>
       </article>
 
       <article class="card third" id="flujo">
         <h2>Flujo recomendado</h2>
         <ol class="steps">
-          <li>Crear WP base en mapa (origen y destino).</li>
-          <li>Calcular ruta inicial.</li>
-          <li>Ajustar WP manuales y recalcular.</li>
-          <li>Guardar ruta con nombre claro.</li>
-          <li>Exportar GPX/PDF si hace falta.</li>
+          <li>Conectar cloud y elegir idioma si hace falta.</li>
+          <li>Preparar una ruta o reutilizar una existente.</li>
+          <li>Construir un viaje con etapas, escalas y tripulación.</li>
+          <li>Calcular navegación y revisar meteo/matriz de salida.</li>
+          <li>Navegar con Diario nav, SignalK y checklist.</li>
+          <li>Guardar evidencias: PDF, documentos, facturas y waypoints foto.</li>
         </ol>
       </article>
 
       <article class="card third">
-        <h2>Consejos meteo</h2>
+        <h2>Consejos prácticos</h2>
         <ul>
-          <li class="ok">Usa ventanas con viento estable y olas moderadas.</li>
-          <li class="warn">Si hay fallback meteo, revisa antes de zarpar.</li>
-          <li class="danger">Evita tramos largos sin revisar evolución.</li>
-          <li>En rutas largas, CEIBO añade WP automáticos para refinar meteo.</li>
+          <li class="ok">Activa el idioma adecuado desde el pie lateral: FR, ES o EN.</li>
+          <li class="ok">Mantén una ruta activa antes de entrar en navegación o llegada.</li>
+          <li class="warn">Si trabajas en iPad, puedes ocultar mapa o checklist para ganar espacio.</li>
+          <li class="danger">Antes de salir, valida meteo oficial, cartas y avisos a navegantes.</li>
         </ul>
       </article>
 
       <article class="card third" id="problemas">
         <h2>Resolución de problemas</h2>
         <ul>
-          <li><strong>No guarda foto:</strong> prueba JPG más ligero.</li>
-          <li><strong>No aparece icono:</strong> usa “Ver en mapa” desde la ficha.</li>
-          <li><strong>Error de red meteo:</strong> vuelve a intentar en 10–20 s.</li>
-          <li><strong>Ruta rara:</strong> añade WP manuales y recalcula.</li>
+          <li><strong>No sincroniza:</strong> revisa sesión cloud y usa “Actualizar nube”.</li>
+          <li><strong>No aparece una ruta o viaje:</strong> comprueba filtros y búsqueda en la pestaña correspondiente.</li>
+          <li><strong>Error meteo / OWM:</strong> revisa la clave API o reintenta en 10–20 s.</li>
+          <li><strong>Waypoint sin coordenadas:</strong> usa el mini mapa o importa una foto con EXIF GPS.</li>
+          <li><strong>RAG sin respuesta:</strong> verifica que los documentos estén indexados y que el modo IA sea correcto.</li>
         </ul>
       </article>
     </section>
 
     <p class="footer-note">
-      CEIBO Router es una ayuda a la decisión. Verifica siempre cartas, avisos a navegantes y pronóstico oficial antes de navegar. <strong>Creación de Max Patissier.</strong>
+      CEIBO es una ayuda a la decisión. Verifica siempre cartas, avisos a navegantes y pronóstico oficial antes de navegar. <strong>Creación de Max Patissier.</strong>
     </p>
   </main>
 </body>

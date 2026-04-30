@@ -3,7 +3,7 @@ import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojso
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260426-42';
+const APP_BUILD_VERSION = '20260430-43';
 const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
 const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
 const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
@@ -606,7 +606,7 @@ const MAINTENANCE_COLORS = {
 };
 const MAINTENANCE_TASK_STATUSES = {
     active: { key: 'active', fr: 'Actif', es: 'Activo' },
-    planned: { key: 'planned', fr: 'À prévoir', es: 'A prever' },
+    planned: { key: 'planned', fr: 'À prévoir', es: 'Previsto' },
     done: { key: 'done', fr: 'Fini', es: 'Terminado' }
 };
 const STRONG_WAVE_THRESHOLD_M = 1.8;
@@ -3618,8 +3618,17 @@ function buildVoyageAgendaWeeks(timeline, editableItemId = '') {
     return buildVoyageAgendaWeeksForRange(scheduledEntries, firstWeekStart, lastWeekStart, editableItemId);
 }
 
+function buildVoyageAgendaSequentialWeeks(timeline, referenceDate, weekCount, editableItemId = '') {
+    const referenceWeekStart = getStartOfLocalWeek(referenceDate);
+    const safeWeekCount = Math.max(1, Number(weekCount || 0) || 1);
+    if (!referenceWeekStart) return [];
+    const lastWeekStart = addDays(referenceWeekStart, (safeWeekCount - 1) * 7);
+    return buildVoyageAgendaWeeksForRange(timeline, referenceWeekStart, lastWeekStart, editableItemId);
+}
+
 function renderVoyageScheduleCalendar(timeline, editableItemId = '') {
     const weeks = buildVoyageAgendaWeeks(timeline, editableItemId);
+    const todayDateKey = formatLocalDateKey(startOfLocalDay(new Date()));
     if (!weeks.length) {
         return `
             <section class="voyage-calendar-card">
@@ -3646,7 +3655,7 @@ function renderVoyageScheduleCalendar(timeline, editableItemId = '') {
                     <section class="voyage-calendar-week">
                         <div class="voyage-calendar-week__title">${escapeHtml(week.label)}</div>
                         <div class="voyage-calendar-week__header">
-                            ${week.days.map(day => `<div class="voyage-calendar-week__day">${escapeHtml(formatVoyageAgendaDayLabel(day))}</div>`).join('')}
+                            ${week.days.map(day => `<div class="voyage-calendar-week__day${formatLocalDateKey(day) === todayDateKey ? ' is-current-day' : ''}">${escapeHtml(formatVoyageAgendaDayLabel(day))}</div>`).join('')}
                         </div>
                         <div class="voyage-calendar-week__body" data-voyage-week-start="${escapeHtml(formatDateTimeLocalInputValue(week.weekStart).slice(0, 10))}">
                             <div class="voyage-calendar-grid">
@@ -3843,16 +3852,18 @@ function renderVoyagesOverviewCalendar(planEntries) {
     const visibleMonthEnd = getEndOfLocalMonth(referenceDate);
     const firstWeekStart = getStartOfLocalWeek(visibleMonthStart);
     const lastWeekStart = getStartOfLocalWeek(visibleMonthEnd);
-    const weeks = buildVoyageAgendaWeeksForRange(calendarEntries, firstWeekStart, lastWeekStart, '');
+    const visibleWeekCount = Math.max(1, Math.round((lastWeekStart.getTime() - firstWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
+    const weeks = buildVoyageAgendaSequentialWeeks(calendarEntries, referenceDate, visibleWeekCount, '');
     const monthLabel = formatVoyageAgendaMonthLabel(referenceDate);
     const currentWeekStart = getStartOfLocalWeek(new Date());
+    const todayDateKey = formatLocalDateKey(startOfLocalDay(new Date()));
 
     return `
         <section class="voyage-calendar-card voyages-overview-calendar">
             <div class="voyage-calendar-card__header">
                 <div>
                     <div class="voyage-agenda-voyage__stat-label">${escapeHtml(t('Calendrier des voyages planifiés', 'Calendario de viajes planificados', 'Planned trips calendar'))}</div>
-                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(monthLabel)} · ${escapeHtml(t('Toutes les semaines du mois visible.', 'Todas las semanas del mes visible.', 'All weeks of the visible month.'))}</div>
+                    <div class="voyage-agenda-voyage__timeline-note">${escapeHtml(monthLabel)} · ${escapeHtml(t('Semaines affichées à partir de la date visible.', 'Semanas mostradas a partir de la fecha visible.', 'Weeks shown starting from the visible date.'))}</div>
                 </div>
                 <div class="voyage-calendar-nav" aria-label="${escapeHtml(t('Navigation du calendrier', 'Navegación del calendario', 'Calendar navigation'))}">
                     <button type="button" class="voyage-calendar-nav__btn" data-voyage-overview-nav="prev-week">${escapeHtml(t('Semaine précédente', 'Semana anterior', 'Previous week'))}</button>
@@ -3865,7 +3876,7 @@ function renderVoyagesOverviewCalendar(planEntries) {
                     <section class="voyage-calendar-week${currentWeekStart && week.weekStart.getTime() === currentWeekStart.getTime() ? ' is-current-week' : ''}">
                         <div class="voyage-calendar-week__title">${escapeHtml(week.label)}</div>
                         <div class="voyage-calendar-week__header">
-                            ${week.days.map(day => `<div class="voyage-calendar-week__day">${escapeHtml(formatVoyageAgendaDayLabel(day))}</div>`).join('')}
+                            ${week.days.map(day => `<div class="voyage-calendar-week__day${formatLocalDateKey(day) === todayDateKey ? ' is-current-day' : ''}">${escapeHtml(formatVoyageAgendaDayLabel(day))}</div>`).join('')}
                         </div>
                         <div class="voyage-calendar-week__body" data-voyage-week-start="${escapeHtml(formatDateTimeLocalInputValue(week.weekStart).slice(0, 10))}">
                             <div class="voyage-calendar-grid">
@@ -6304,7 +6315,11 @@ function saveVoyageStopAsWaypoint(planId, itemId) {
     routesCloudDirty = true;
     if (isCloudReady()) {
         void syncWaypointPhotosToCloud()
-            .then(() => setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`))
+            .then(() => setCloudStatus(t(
+                `Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`,
+                `Nube sincronizada · ${getSavedRoutes().length} ruta(s) + ${waypointPhotoEntries.length} foto(s)`,
+                `Cloud synced · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`
+            )))
             .catch(error => setCloudStatus(t(`Enregistrement local OK, synchro cloud échouée: ${formatCloudError(error)}`, `Guardado local OK, sincronización nube fallida: ${formatCloudError(error)}`), true));
     }
 
@@ -6418,7 +6433,7 @@ function setDepartureFromDateTimeInput(rawValue, options = {}) {
     updateDepartureDateTimeInput();
     saveDepartureDateTimeToStorage();
     if (!options?.suppressAiInvalidation) {
-        invalidateAiRouteAnalysisState(t('Analyse route + météo: date changée, clique Rafraîchir pour recalculer.', 'Analisis ruta + meteo: fecha cambiada, pulsa Actualizar para recalcular.'));
+        invalidateAiRouteAnalysisState(t('Analyse route + météo: date changée, clique Rafraîchir pour recalculer.', 'Análisis ruta + meteo: fecha cambiada, pulsa Actualizar para recalcular.'));
     }
 }
 
@@ -6679,17 +6694,17 @@ function applyLanguageToUi() {
     setElementText('#recenterBtn', t('Recentrer route', 'Centrar ruta'));
     setElementText('#routingActiveRouteLabel', t('Route active:', 'Ruta activa:', 'Active route:'));
     setElementText('#openWeatherFromRoutingBtn', t('Ouvrir météo routage', 'Abrir meteo de navegación'));
-    setElementText('#routingWeatherHint', t('Météo est accessible depuis Routage.', 'Meteo accesible desde Navegación.'));
+    setElementText('#routingWeatherHint', t('Météo est accessible depuis Routage.', 'La meteo está disponible desde Navegación.'));
     setElementText('#openSkyMapBtn', t('Carte du ciel', 'Carta del cielo', 'Sky map'));
     setElementText('#routingSkyHint', t('Utilise le GPS actuel si disponible, sinon le centre de la carte.', 'Usa el GPS actual si está disponible, si no el centro del mapa.', 'Uses current GPS when available, otherwise the map center.'));
     setElementText('#suggestAiRoutesBtn', t('Calculer matrice départ (5 j)', 'Calcular matriz de salida (5 d)'));
     setElementText('#refreshAiRoutesBtn', t('Rafraîchir', 'Actualizar'));
     setElementText('label[for="departureDateTimeInput"]', t('Départ (date + heure):', 'Salida (fecha + hora):'));
     setElementText('#routingPolarProfileSelectLabel', t('Polaire / gréement:', 'Polar / aparejo:', 'Polar / rig:'));
-    setElementText('label[for="autoWpSpacingInput"]', t('Contournement côte:', 'Rodeo costa:'));
+    setElementText('label[for="autoWpSpacingInput"]', t('Contournement côte:', 'Contorneo costero:'));
     setElementText('label[for="forecastWindowDaysSelect"]', t('Fenêtre analyse:', 'Ventana análisis:'));
     setElementText('#aiRouteDockTitle', t('Matrice départ + météo', 'Matriz salida + meteo'));
-    setElementText('#aiRouteSuggestionInfo', t('Analyse route + météo: en attente', 'Analisis ruta + meteo: en espera'));
+    setElementText('#aiRouteSuggestionInfo', t('Analyse route + météo: en attente', 'Análisis ruta + meteo: en espera'));
 
     setElementText('#autoWpSpacingInput option[value="off"]', t('Désactivé', 'Desactivado'));
     setElementText('#forecastWindowDaysSelect option[value="2"]', t('2 jours', '2 días'));
@@ -6820,7 +6835,7 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsRoutesLabel', t('Routes sauvegardées (routes)', 'Rutas guardadas (routes)'));
     setElementText('#cloudStatsRoutePointsLabel', t('Points de route (route_points)', 'Puntos de ruta (route_points)'));
     setElementText('#cloudStatsRouteCommentsLabel', t('Commentaires route (route_comments)', 'Comentarios ruta (route_comments)', 'Route comments (route_comments)'));
-    setElementText('#cloudStatsPhotosLabel', t('Photos waypoint (waypoint_photos)', 'Fotos waypoint (waypoint_photos)'));
+    setElementText('#cloudStatsPhotosLabel', t('Photos waypoint (waypoint_photos)', 'Fotos de waypoint (waypoint_photos)'));
     setElementText('#cloudStatsArrivalAnalysesLabel', t('Analyses d\'arrivée (arrival_analyses)', 'Análisis de llegada (arrival_analyses)', 'Arrival analyses (arrival_analyses)'));
     setElementText('#cloudStatsAgendaEventsLabel', t('Agenda (agenda_events)', 'Agenda (agenda_events)', 'Agenda events (agenda_events)'));
     setElementText('#cloudStatsVoyagePlansLabel', t('Voyages (voyage_plans)', 'Viajes (voyage_plans)', 'Voyages (voyage_plans)'));
@@ -6832,7 +6847,7 @@ function applyLanguageToUi() {
     setElementText('#cloudStatsMaintenancePinsLabel', t('Pastilles maintenance (maintenance_pins)', 'Marcadores mantenimiento (maintenance_pins)'));
     setElementText('#cloudStatsSuppliersLabel', t('Fournisseurs (maintenance_suppliers)', 'Proveedores (maintenance_suppliers)'));
     setElementText('#cloudStatsExpensesLabel', t('Dépenses/factures (maintenance_expenses)', 'Gastos/facturas (maintenance_expenses)'));
-    setElementText('#cloudStatsNavLabel', t('Journal navigation (nav_log_entries)', 'Diario navegación (nav_log_entries)'));
+    setElementText('#cloudStatsNavLabel', t('Journal navigation (nav_log_entries)', 'Diario de navegación (nav_log_entries)'));
     setElementText('#cloudStatsEngineLabel', t('Journal moteur (engine_log)', 'Diario motor (engine_log)'));
     setElementText('#cloudStatsEngineSoundLabel', t('Snapshots son moteur (engine_sound_snapshots)', 'Snapshots sonido motor (engine_sound_snapshots)', 'Engine sound snapshots (engine_sound_snapshots)'));
     setElementText('#cloudStatsPolarsLabel', t('Polaires / voilures (polar_profiles)', 'Polares / velas (polar_profiles)', 'Polars / sail plans (polar_profiles)'));
@@ -6858,7 +6873,7 @@ function applyLanguageToUi() {
     setElementText('#anchorDragClearBtn', t('Réinitialiser', 'Reiniciar'));
     setElementText('#anchorDragTestBtn', t('Test alarme', 'Probar alarma'));
     setElementText('#anchorDragStatus', t('Alarme mouillage: inactive', 'Alarma fondeo: inactiva'));
-    setElementText('#clearNavLogBtn', t('Effacer journal nav', 'Borrar diario nav'));
+    setElementText('#clearNavLogBtn', t('Effacer journal nav', 'Borrar diario de navegación'));
     setElementText('#navLogOpenCreateBtn', t('Ajouter', 'Añadir'));
     setElementText('#addManualNavLogBtn', t('Enregistrer entrée', 'Guardar entrada'));
     setElementText('#deleteNavLogBtn', t('Supprimer ce log', 'Eliminar este log', 'Delete this log'));
@@ -6866,7 +6881,7 @@ function applyLanguageToUi() {
     setElementText('#logWorkspaceTitle', t('Saisie journal', 'Edición diario'));
     setElementText('#logWorkspaceCloseBtn', t('Fermer', 'Cerrar', 'Close'));
     setElementText('#logWorkspacePlaceholder', t('Clique sur Ajouter pour ouvrir le formulaire', 'Haz clic en Añadir para abrir el formulario'));
-    setElementText('#navLogStatus', t('Journal navigation: en attente', 'Diario navegación: en espera'));
+    setElementText('#navLogStatus', t('Journal navigation: en attente', 'Diario de navegación: en espera'));
     setElementText('#navLogTraceHint', t('Astuce: clique une ligne du journal pour rouvrir sa trace sur la carte.', 'Consejo: toca una línea del diario para reabrir su traza en el mapa.'));
     setElementText('label[for="watchTimeInput"]', t('Heure du quart:', 'Hora de guardia:'));
     setElementText('label[for="watchEndTimeInput"]', t('Heure de fin (voyage/quart):', 'Hora de fin (viaje/guardia):'));
@@ -6901,9 +6916,9 @@ function applyLanguageToUi() {
     setElementText('#navChecklistTemplateSelect option[value="harbor"]', t('Port / manoeuvre', 'Puerto / maniobra'));
     setElementText('#navLiveWeatherSectionLabel', t('Météo SignalK', 'Meteo SignalK', 'SignalK weather'));
     setElementText('#maintenanceSignalKTitle', t('SignalK · configuration centralisée', 'SignalK · configuracion centralizada', 'SignalK central configuration'));
-    setElementText('#maintenanceSignalKHint', t('Le monitoring live est désormais centralisé dans Journal nav. Cette page sert à la connexion, aux seuils et au diagnostic.', 'El monitoreo live ahora está centralizado en Diario nav. Esta página sirve para la conexión, umbrales y diagnóstico.', 'Live monitoring is now centralized in Nav log. This page is for connection, thresholds, and diagnostics.'));
+    setElementText('#maintenanceSignalKHint', t('Le monitoring live est désormais centralisé dans Journal nav. Cette page sert à la connexion, aux seuils et au diagnostic.', 'La supervisión en vivo ahora está centralizada en Diario nav. Esta página sirve para la conexión, los umbrales y el diagnóstico.', 'Live monitoring is now centralized in Nav log. This page is for connection, thresholds, and diagnostics.'));
     setElementText('#maintenanceSignalKNavLogLinkTitle', t('Monitoring live unique', 'Monitoreo live unico', 'Single live monitoring'));
-    setElementText('#maintenanceSignalKNavLogLinkHint', t('Utilise Journal nav comme écran principal SignalK + navigation. Tu peux ensuite masquer menu, carte, log ou checklist selon l’écran disponible.', 'Usa Diario nav como pantalla principal SignalK + navegacion. Luego puedes ocultar menu, mapa, diario o checklist segun la pantalla disponible.', 'Use Nav log as the main SignalK + navigation screen. You can then hide menu, map, log, or checklist depending on the available screen.'));
+    setElementText('#maintenanceSignalKNavLogLinkHint', t('Utilise Journal nav comme écran principal SignalK + navigation. Tu peux ensuite masquer menu, carte, log ou checklist selon l’écran disponible.', 'Usa Diario nav como pantalla principal de SignalK + navegación. Después puedes ocultar menú, mapa, diario o checklist según la pantalla disponible.', 'Use Nav log as the main SignalK + navigation screen. You can then hide menu, map, log, or checklist depending on the available screen.'));
     setElementText('#maintenanceSignalKOpenNavLogBtn', t('Ouvrir Journal nav', 'Abrir Diario nav', 'Open Nav log'));
     setElementText('#navLiveTwsLabel', t('Vent réel (TWS)', 'Viento real (TWS)', 'True wind (TWS)'));
     setElementText('#navLiveTwdLabel', t('Direction vent (TWD)', 'Dirección viento (TWD)', 'Wind direction (TWD)'));
@@ -7017,7 +7032,7 @@ function applyLanguageToUi() {
     setElementText('label[for="maintenanceTaskStatusInput"]', t('État:', 'Estado:'));
     setElementText('#maintenanceTaskStatusInput option[value="active"]', t('Actif', 'Activo'));
     setElementText('#maintenanceTaskStatusInput option[value="done"]', t('Fini', 'Terminado'));
-    setElementText('#maintenanceTaskStatusInput option[value="planned"]', t('À prévoir', 'A prever'));
+    setElementText('#maintenanceTaskStatusInput option[value="planned"]', t('À prévoir', 'Previsto'));
     setElementText('label[for="maintenanceTaskPerformedDateInput"]', t('Date réalisation:', 'Fecha realización:'));
     setElementText('label[for="maintenanceLegendInput"]', t('Légende:', 'Leyenda:'));
     setElementPlaceholder('#maintenanceLegendInput', t('Ex: Changer turbine pompe eau', 'Ej: Cambiar impulsor bomba agua'));
@@ -7067,7 +7082,7 @@ function applyLanguageToUi() {
     setElementText('label[for="maintenanceExpensePaymentStatusSelect"]', t('État paiement:', 'Estado pago:'));
     setElementText('#maintenanceExpensePaymentStatusSelect option[value="new"]', t('Nouvelle / à payer', 'Nueva / pendiente'));
     setElementText('#maintenanceExpensePaymentStatusSelect option[value="pending"]', t('À payer', 'Pendiente'));
-    setElementText('#maintenanceExpensePaymentStatusSelect option[value="planned"]', t('À prévoir', 'A prever'));
+    setElementText('#maintenanceExpensePaymentStatusSelect option[value="planned"]', t('À prévoir', 'Previsto'));
     setElementText('#maintenanceExpensePaymentStatusSelect option[value="paid"]', t('Payé', 'Pagado'));
     setElementText('label[for="maintenanceExpenseSupplierInput"]', t('Fournisseur:', 'Proveedor:'));
     setElementText('label[for="maintenanceExpenseSupplierIbanInput"]', t('IBAN fournisseur:', 'IBAN proveedor:'));
@@ -7079,7 +7094,7 @@ function applyLanguageToUi() {
     setElementText('#maintenanceExpensesListLabel', t('Dépenses:', 'Gastos:'));
     setElementText('label[for="maintenanceSupplierNameInput"]', t('Nom fournisseur:', 'Nombre proveedor:'));
     setElementText('label[for="maintenanceSupplierContactInput"]', t('Contact:', 'Contacto:'));
-    setElementText('label[for="maintenanceSupplierPhoneInput"]', t('Téléphone urgence:', 'Teléfono urgencia:'));
+    setElementText('label[for="maintenanceSupplierPhoneInput"]', t('Téléphone urgence:', 'Teléfono de urgencia:'));
     setElementText('label[for="maintenanceSupplierIbanInput"]', t('IBAN:', 'IBAN:'));
     setElementText('label[for="maintenanceSupplierNoteInput"]', t('Note:', 'Nota:'));
     setElementText('#maintenanceSupplierNewBtn', t('Nouveau fournisseur', 'Nuevo proveedor'));
@@ -10514,7 +10529,7 @@ async function applyAutoProtectionSuggestion(lat, lng) {
 
     const status = document.getElementById('waypointPhotoStatus');
     if (status) {
-        status.textContent = `${status.textContent} · Protection suggérée: ${suggested.join(', ')}`;
+        status.textContent = `${status.textContent} · ${t('Protection suggérée', 'Protección sugerida', 'Suggested protection')}: ${suggested.join(', ')}`;
     }
 }
 
@@ -10696,8 +10711,16 @@ function setWaypointDraftCoordinates(lat, lng, options = {}) {
     const status = document.getElementById('waypointPhotoStatus');
     if (status) {
         status.textContent = editingWaypointPhotoId
-            ? `Modification du waypoint: ${lat.toFixed(5)}, ${lng.toFixed(5)}`
-            : `Coordonnées détectées: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            ? t(
+                `Modification du waypoint: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                `Modificación del waypoint: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                `Waypoint update: ${lat.toFixed(5)}, ${lng.toFixed(5)}`
+            )
+            : t(
+                `Coordonnées détectées: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                `Coordenadas detectadas: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                `Detected coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}`
+            );
     }
 
     updateWaypointGoogleMapPreview(lat, lng);
@@ -10964,7 +10987,11 @@ async function syncWaypointPhotosToCloud() {
 
     routesCloudDirty = false;
     cloudLastSeenUpdatedAtMs = Math.max(cloudLastSeenUpdatedAtMs, Date.now());
-    setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`);
+    setCloudStatus(t(
+        `Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`,
+        `Nube sincronizada · ${getSavedRoutes().length} ruta(s) + ${waypointPhotoEntries.length} foto(s)`,
+        `Cloud synced · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`
+    ));
     return true;
 }
 
@@ -11170,7 +11197,13 @@ function startEditWaypointPhoto(id) {
     };
 
     const status = document.getElementById('waypointPhotoStatus');
-    if (status) status.textContent = `Modification du waypoint: ${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`;
+    if (status) {
+        status.textContent = t(
+            `Modification du waypoint: ${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`,
+            `Modificación del waypoint: ${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`,
+            `Waypoint update: ${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`
+        );
+    }
 
     const preview = document.getElementById('waypointPhotoPreview');
     if (preview && entry.imageDataUrl) {
@@ -11761,7 +11794,11 @@ function removeWaypointPhotoById(id) {
 
     if (isCloudReady()) {
         syncWaypointPhotosToCloud()
-            .catch(error => setCloudStatus(`Photos locales OK, synchro cloud échouée: ${formatCloudError(error)}`, true));
+            .catch(error => setCloudStatus(t(
+                `Photos locales OK, synchro cloud échouée: ${formatCloudError(error)}`,
+                `Fotos locales OK, sincronización nube fallida: ${formatCloudError(error)}`,
+                `Local photos OK, cloud sync failed: ${formatCloudError(error)}`
+            ), true));
     }
 
     const marker = waypointPhotoMarkersById.get(id);
@@ -12395,7 +12432,11 @@ async function saveWaypointPhotoEntry() {
 
         if (isCloudReady()) {
             void syncWaypointPhotosToCloud()
-                .then(() => setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`))
+                .then(() => setCloudStatus(t(
+                    `Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`,
+                    `Nube sincronizada · ${getSavedRoutes().length} ruta(s) + ${waypointPhotoEntries.length} foto(s)`,
+                    `Cloud synced · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`
+                )))
                 .catch(error => setCloudStatus(t(`Modification locale OK, synchro cloud échouée: ${formatCloudError(error)}`, `Modificación local OK, sincronización nube fallida: ${formatCloudError(error)}`), true));
         }
         return;
@@ -12444,7 +12485,11 @@ async function saveWaypointPhotoEntry() {
 
     if (isCloudReady()) {
         void syncWaypointPhotosToCloud()
-            .then(() => setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`))
+            .then(() => setCloudStatus(t(
+                `Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`,
+                `Nube sincronizada · ${getSavedRoutes().length} ruta(s) + ${waypointPhotoEntries.length} foto(s)`,
+                `Cloud synced · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s)`
+            )))
             .catch(error => setCloudStatus(t(`Enregistrement local OK, synchro cloud échouée: ${formatCloudError(error)}`, `Guardado local OK, sincronización nube fallida: ${formatCloudError(error)}`), true));
     }
     } catch (error) {
@@ -14264,7 +14309,7 @@ function invalidateAiRouteAnalysisState(message = null) {
     const info = document.getElementById('aiRouteSuggestionInfo');
     const container = document.getElementById('aiRouteSuggestions');
     if (info) {
-        info.textContent = message || t('Analyse route + météo: en attente', 'Analisis ruta + meteo: en espera');
+        info.textContent = message || t('Analyse route + météo: en attente', 'Análisis ruta + meteo: en espera');
     }
     if (container) {
         container.innerHTML = '';
@@ -15139,7 +15184,7 @@ function renderAiRouteCandidates(matrixData, options = {}) {
         lastAiRouteCandidates = [];
         lastAiRouteMatrixCache = null;
         isAiRouteMatrixVisible = false;
-        info.textContent = t('Analyse route + météo: aucune option exploitable sur 5 jours.', 'Analisis ruta + meteo: ninguna opcion utilizable en 5 dias.');
+        info.textContent = t('Analyse route + météo: aucune option exploitable sur 5 jours.', 'Análisis ruta + meteo: ninguna opción utilizable en 5 días.');
         container.innerHTML = '';
         updateAiRouteRefreshButtonState();
         updateMapWorkspaceLayoutState();
@@ -15428,7 +15473,7 @@ async function suggestAiRouteOptions(options = {}) {
     if (info) {
         info.textContent = forceRefresh
             ? t('Recalcul route + météo en cours: cache météo vidé...', 'Recalculo ruta + meteo en curso: cache meteo vaciada...')
-            : t('Analyse route + météo sur 5 jours en cours...', 'Analisis ruta + meteo de 5 dias en curso...');
+            : t('Analyse route + météo sur 5 jours en cours...', 'Análisis ruta + meteo de 5 días en curso...');
     }
     beginAiTrafficSession('Assistant route + fenêtre météo 5 jours');
 
@@ -15534,7 +15579,7 @@ async function suggestAiRouteOptions(options = {}) {
         endAiTrafficSession('Analyse route + météo terminée');
     } catch (_error) {
         renderAiRouteCandidates(null);
-        if (info) info.textContent = t('Analyse route + météo: impossible de calculer des options pour le moment.', 'Analisis ruta + meteo: no se pueden calcular opciones por ahora.');
+        if (info) info.textContent = t('Analyse route + météo: impossible de calculer des options pour le moment.', 'Análisis ruta + meteo: no se pueden calcular opciones por ahora.');
         endAiTrafficSession('Erreur pendant l\'analyse route + météo');
     } finally {
         sailMode = originalSailMode;
@@ -20292,7 +20337,7 @@ function renderMaintenanceExpenses() {
             `<span class="maintenance-expense-col">${escapeHtml(({
                 new: t('Nouvelle / à payer', 'Nueva / pendiente'),
                 pending: t('À payer', 'Pendiente'),
-                planned: t('À prévoir', 'A prever'),
+                planned: t('À prévoir', 'Previsto'),
                 paid: t('Payé', 'Pagado')
             })[expense.paymentStatus] || expense.paymentStatus || '—')}</span>` +
             `<span class="maintenance-expense-col maintenance-expense-col--amount">${expense.totalAmount.toFixed(2)} ${escapeHtml(expense.currency)}</span>`;
@@ -20353,7 +20398,7 @@ function renderMaintenanceExpenseDetailPanel() {
     const paymentLabelMap = {
         new: t('Nouvelle / à payer', 'Nueva / pendiente'),
         pending: t('À payer', 'Pendiente'),
-        planned: t('À prévoir', 'A prever'),
+        planned: t('À prévoir', 'Previsto'),
         paid: t('Payé', 'Pagado')
     };
     const linesText = selectedExpense.lines.map(line => {
@@ -20402,7 +20447,7 @@ function renderMaintenanceExpenseDetailPanel() {
     [
         { value: 'new', label: t('Nouvelle / à payer', 'Nueva / pendiente') },
         { value: 'pending', label: t('À payer', 'Pendiente') },
-        { value: 'planned', label: t('À prévoir', 'A prever') },
+        { value: 'planned', label: t('À prévoir', 'Previsto') },
         { value: 'paid', label: t('Payé', 'Pagado') }
     ].forEach(item => {
         const option = document.createElement('option');
@@ -20774,7 +20819,7 @@ function renderMaintenanceSupplierDetailPanel() {
 
     const phoneInput = document.createElement('input');
     phoneInput.type = 'text';
-    phoneInput.placeholder = t('Téléphone urgence', 'Teléfono urgencia');
+    phoneInput.placeholder = t('Téléphone urgence', 'Teléfono de urgencia');
     phoneInput.value = String(draftValues?.emergencyPhone ?? selectedSupplier?.emergencyPhone ?? '');
     phoneInput.style.width = '100%';
     phoneInput.style.marginTop = '6px';
@@ -21975,7 +22020,11 @@ function setMaintenanceBoards(list, { persistLocal = true, refreshUi = true, syn
 
     if (syncCloud && isCloudReady()) {
         pushRoutesToCloud()
-            .then(() => setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s) + ${maintenanceBoards.length} schéma(s)`));
+            .then(() => setCloudStatus(t(
+                `Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s) + ${maintenanceBoards.length} schéma(s)`,
+                `Nube sincronizada · ${getSavedRoutes().length} ruta(s) + ${waypointPhotoEntries.length} foto(s) + ${maintenanceBoards.length} esquema(s)`,
+                `Cloud synced · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s) + ${maintenanceBoards.length} board(s)`
+            )));
     }
 
     if (refreshUi) {
@@ -21988,7 +22037,11 @@ function persistMaintenanceBoards({ syncCloud = true } = {}) {
 
     if (syncCloud && isCloudReady()) {
         pushRoutesToCloud()
-            .then(() => setCloudStatus(`Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s) + ${maintenanceBoards.length} schéma(s)`));
+            .then(() => setCloudStatus(t(
+                `Cloud synchronisé · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s) + ${maintenanceBoards.length} schéma(s)`,
+                `Nube sincronizada · ${getSavedRoutes().length} ruta(s) + ${waypointPhotoEntries.length} foto(s) + ${maintenanceBoards.length} esquema(s)`,
+                `Cloud synced · ${getSavedRoutes().length} route(s) + ${waypointPhotoEntries.length} photo(s) + ${maintenanceBoards.length} board(s)`
+            )));
     }
 }
 
@@ -22292,7 +22345,7 @@ function renderMaintenanceBoard() {
             statusSelect.style.fontSize = '10px';
             statusSelect.innerHTML =
                 `<option value="active">${t('Actif', 'Activo')}</option>` +
-                `<option value="planned">${t('À prévoir', 'A prever')}</option>` +
+                `<option value="planned">${t('À prévoir', 'Previsto')}</option>` +
                 `<option value="done">${t('Fini', 'Terminado')}</option>`;
             statusSelect.value = statusMeta.key;
             statusSelect.addEventListener('click', event => event.stopPropagation());
@@ -35595,7 +35648,7 @@ function setCloudStatus(message, isError = false, options = {}) {
 function getLocalizedCloudSourceLabel(sourceLabel) {
     const safeSource = String(sourceLabel || 'inconnu');
     const sourceLabelMap = {
-        'verrouillé (auth requise)': t('verrouillé (auth requise)', 'bloqueado (auth requerida)'),
+        'verrouillé (auth requise)': t('verrouillé (auth requise)', 'bloqueado (autenticación requerida)'),
         'attente authentification': t('attente authentification', 'esperando autenticación'),
         'cache local': t('cache local', 'caché local'),
         'cloud': t('cloud', 'nube'),

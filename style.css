@@ -1526,6 +1526,18 @@ body.is-resizing-sidebar #sidebarResizeHandle::before,
     border-left: 0;
 }
 
+.voyage-calendar-week__day.is-current-day {
+    color: #0f4f84;
+    background: linear-gradient(135deg, rgba(255, 208, 92, 0.34), rgba(255, 236, 178, 0.78));
+    box-shadow: inset 0 0 0 1px rgba(230, 163, 34, 0.24);
+}
+
+.voyage-agenda-panel--overview .voyage-calendar-week__day.is-current-day {
+    color: #fff4cf;
+    background: linear-gradient(135deg, rgba(255, 196, 61, 0.28), rgba(255, 153, 51, 0.22));
+    box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.34), 0 0 0 1px rgba(255, 209, 102, 0.12);
+}
+
 .voyage-calendar-week__body {
     position: relative;
     padding: 14px;
