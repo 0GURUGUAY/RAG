@@ -3,7 +3,7 @@ import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojso
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260430-43';
+const APP_BUILD_VERSION = '20260501-45';
 const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
 const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
 const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
@@ -279,6 +279,8 @@ const CLOUD_PROJECTS_TABLE = 'projects';
 const CLOUD_TELEGRAM_PROXY_FUNCTION = 'telegram-proxy';
 const CLOUD_AIS_PROXY_FUNCTION = 'ais-proxy';
 const CLOUD_VOYAGE_PDF_EMAIL_FUNCTION = 'voyage-pdf-email';
+const CLOUD_PUBLIC_TRACKER_FUNCTION = 'public-tracker';
+const NAV_PUBLIC_TRACKER_DEFAULT_HOURS = 72;
 const CLOUD_OWNER_ADMIN_EMAILS = new Set(['max.patissier@gmail.com']);
 const CLOUD_AUTO_PULL_INTERVAL_MS = 45000;
 const CLOUD_LOGBOOK_PUSH_DEBOUNCE_MS = 1800;
@@ -360,6 +362,8 @@ let cloudWhitelistCheckInFlight = false;
 let cloudLastSeenUpdatedAtMs = 0;
 let cloudDataSourceLabel = 'initialisation';
 let cloudLastStatusMessage = '';
+let navPublicShareInfo = null;
+let navPublicShareRequestInFlight = false;
 let navLogEntries = [];
 let navWatchId = null;
 let navPassiveWatchId = null;
@@ -6874,6 +6878,16 @@ function applyLanguageToUi() {
     setElementText('#anchorDragTestBtn', t('Test alarme', 'Probar alarma'));
     setElementText('#anchorDragStatus', t('Alarme mouillage: inactive', 'Alarma fondeo: inactiva'));
     setElementText('#clearNavLogBtn', t('Effacer journal nav', 'Borrar diario de navegación'));
+    setElementText('#navPublicShareTitle', t('Suivi public bateau', 'Seguimiento publico del barco', 'Public boat tracker'));
+    setElementText('#navPublicShareHint', t('Génère un lien public sécurisé pour partager la position et la route récente du bateau.', 'Genera un enlace publico seguro para compartir la posicion y la ruta reciente del barco.', 'Generate a secure public link to share the boat position and recent route.'));
+    setElementText('#navPublicShareUrlLabel', t('Lien public :', 'Enlace publico:', 'Public link:'));
+    setElementText('#navPublicShareCreateBtn', t('Créer le lien', 'Crear enlace', 'Create link'));
+    setElementText('#navPublicShareRotateBtn', t('Renouveler', 'Renovar', 'Rotate'));
+    setElementText('#navPublicShareCopyBtn', t('Copier', 'Copiar', 'Copy'));
+    setElementText('#navPublicShareOpenBtn', t('Ouvrir', 'Abrir', 'Open'));
+    setElementText('#navPublicShareDisableBtn', t('Désactiver', 'Desactivar', 'Disable'));
+    setElementPlaceholder('#navPublicShareUrlInput', t('Aucun lien public actif', 'Ningun enlace publico activo', 'No public link active'));
+    setElementText('#navPublicShareStatus', t('Connecte le cloud pour activer le partage public.', 'Conecta la nube para activar el seguimiento publico.', 'Connect cloud to enable public sharing.'));
     setElementText('#navLogOpenCreateBtn', t('Ajouter', 'Añadir'));
     setElementText('#addManualNavLogBtn', t('Enregistrer entrée', 'Guardar entrada'));
     setElementText('#deleteNavLogBtn', t('Supprimer ce log', 'Eliminar este log', 'Delete this log'));
@@ -24658,6 +24672,283 @@ async function getCloudAuthAccessToken(options = {}) {
     return String(data?.session?.access_token || '').trim();
 }
 
+function normalizeNavPublicShareInfo(rawShare) {
+    if (!rawShare || typeof rawShare !== 'object') return null;
+
+    const shareToken = String(rawShare.shareToken || rawShare.share_token || '').trim();
+    const isActive = rawShare.isActive !== false && rawShare.is_active !== false;
+    if (!shareToken || !isActive) return null;
+
+    const hours = Number(rawShare.historyHours || rawShare.history_hours || NAV_PUBLIC_TRACKER_DEFAULT_HOURS);
+    const safeHours = Number.isFinite(hours) && hours > 0 ? Math.round(hours) : NAV_PUBLIC_TRACKER_DEFAULT_HOURS;
+    const publicUrl = buildNavPublicTrackerShareUrl(shareToken, { hours: safeHours });
+
+    return {
+        id: String(rawShare.id || '').trim(),
+        title: String(rawShare.title || '').trim() || 'CEIBO live tracker',
+        shareToken,
+        isActive: true,
+        historyHours: safeHours,
+        updatedAt: String(rawShare.updatedAt || rawShare.updated_at || '').trim(),
+        lastAccessedAt: String(rawShare.lastAccessedAt || rawShare.last_accessed_at || '').trim(),
+        publicUrl
+    };
+}
+
+function buildNavPublicTrackerShareUrl(shareToken, options = {}) {
+    const token = String(shareToken || '').trim();
+    const supabaseUrl = String(options.supabaseUrl || cloudConfig?.url || '').trim();
+    const anonKey = String(options.anonKey || getCloudAnonKey()).trim();
+    if (!token || !supabaseUrl || !anonKey) return '';
+
+    let targetUrl;
+    try {
+        targetUrl = new URL('follow.html', window.location.href);
+    } catch (_error) {
+        return '';
+    }
+
+    const hours = Number(options.hours);
+    const params = new URLSearchParams();
+    params.set('token', token);
+    params.set('url', supabaseUrl);
+    params.set('anon', anonKey);
+    params.set('hours', String(Number.isFinite(hours) && hours > 0 ? Math.round(hours) : NAV_PUBLIC_TRACKER_DEFAULT_HOURS));
+    targetUrl.search = params.toString();
+    targetUrl.hash = '';
+    return targetUrl.toString();
+}
+
+function setNavPublicShareStatus(message, isError = false) {
+    const status = document.getElementById('navPublicShareStatus');
+    if (!status) return;
+    status.textContent = String(message || '');
+    status.style.color = isError ? '#ffb7b7' : '#cfeeff';
+}
+
+function renderNavPublicShareCard() {
+    const urlInput = document.getElementById('navPublicShareUrlInput');
+    const createBtn = document.getElementById('navPublicShareCreateBtn');
+    const rotateBtn = document.getElementById('navPublicShareRotateBtn');
+    const copyBtn = document.getElementById('navPublicShareCopyBtn');
+    const openBtn = document.getElementById('navPublicShareOpenBtn');
+    const disableBtn = document.getElementById('navPublicShareDisableBtn');
+    const meta = document.getElementById('navPublicShareMeta');
+
+    const isCloudSessionReady = !!cloudClient && !!cloudConfig && !!cloudAuthUser;
+    const hasShare = !!navPublicShareInfo?.publicUrl;
+
+    if (urlInput) {
+        urlInput.value = isCloudSessionReady && hasShare ? navPublicShareInfo.publicUrl : '';
+    }
+
+    if (createBtn) createBtn.disabled = navPublicShareRequestInFlight || !isCloudSessionReady;
+    if (rotateBtn) rotateBtn.disabled = navPublicShareRequestInFlight || !isCloudSessionReady || !hasShare;
+    if (copyBtn) copyBtn.disabled = navPublicShareRequestInFlight || !hasShare;
+    if (openBtn) openBtn.disabled = navPublicShareRequestInFlight || !hasShare;
+    if (disableBtn) disableBtn.disabled = navPublicShareRequestInFlight || !isCloudSessionReady || !hasShare;
+
+    if (meta) {
+        if (!isCloudSessionReady || !hasShare) {
+            meta.textContent = '';
+        } else {
+            const updatedLabel = navPublicShareInfo.updatedAt
+                ? formatDateTimeFr(navPublicShareInfo.updatedAt)
+                : t('Date inconnue', 'Fecha desconocida', 'Unknown date');
+            const accessedLabel = navPublicShareInfo.lastAccessedAt
+                ? formatDateTimeFr(navPublicShareInfo.lastAccessedAt)
+                : t('jamais ouvert', 'nunca abierto', 'never opened');
+            meta.textContent = t(
+                `Lien actif · mis à jour ${updatedLabel} · dernière ouverture ${accessedLabel}`,
+                `Enlace activo · actualizado ${updatedLabel} · ultima apertura ${accessedLabel}`,
+                `Link active · updated ${updatedLabel} · last opened ${accessedLabel}`
+            );
+        }
+    }
+
+    if (!isCloudSessionReady && !navPublicShareRequestInFlight) {
+        setNavPublicShareStatus(t(
+            'Connecte le cloud pour activer le partage public.',
+            'Conecta la nube para activar el seguimiento publico.',
+            'Connect cloud to enable public sharing.'
+        ));
+    } else if (isCloudSessionReady && !hasShare && !navPublicShareRequestInFlight) {
+        setNavPublicShareStatus(t(
+            'Aucun lien public actif pour ce projet.',
+            'Ningun enlace publico activo para este proyecto.',
+            'No active public link for this project.'
+        ));
+    }
+}
+
+async function callNavPublicTrackerFunction(action, payload = {}) {
+    if (!cloudClient || !cloudConfig || !cloudAuthUser) {
+        throw new Error(t('Connexion cloud requise.', 'Conexion nube requerida.', 'Cloud connection required.'));
+    }
+
+    const endpoint = getCloudFunctionUrl(CLOUD_PUBLIC_TRACKER_FUNCTION);
+    const anonKey = getCloudAnonKey();
+    if (!endpoint || !anonKey) {
+        throw new Error(t('Configuration cloud incomplète.', 'Configuracion nube incompleta.', 'Incomplete cloud configuration.'));
+    }
+
+    let projectId = await resolveCloudProjectIdUuid();
+    projectId = await ensureCloudProjectRow(projectId);
+    const accessToken = await getCloudAuthAccessToken();
+    if (!accessToken) {
+        throw new Error(t('Session cloud expirée.', 'Sesion nube expirada.', 'Cloud session expired.'));
+    }
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            apikey: anonKey,
+            Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+            action,
+            projectId,
+            title: 'CEIBO live tracker',
+            historyHours: NAV_PUBLIC_TRACKER_DEFAULT_HOURS,
+            creatorName: getCurrentCloudUserDisplayName(),
+            ...payload
+        })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.error) {
+        throw new Error(String(data?.error || response.statusText || 'public-tracker failed'));
+    }
+    return data;
+}
+
+async function refreshNavPublicTrackerShareStatus(options = {}) {
+    if (!cloudClient || !cloudConfig || !cloudAuthUser) {
+        navPublicShareInfo = null;
+        renderNavPublicShareCard();
+        return null;
+    }
+
+    navPublicShareRequestInFlight = true;
+    if (!options.silent) {
+        setNavPublicShareStatus(t('Vérification du lien public...', 'Verificando enlace publico...', 'Checking public link...'));
+    }
+    renderNavPublicShareCard();
+
+    try {
+        const data = await callNavPublicTrackerFunction('status');
+        navPublicShareInfo = normalizeNavPublicShareInfo(data?.share || null);
+        if (!navPublicShareInfo && !options.silent) {
+            setNavPublicShareStatus(t(
+                'Aucun lien public actif pour ce projet.',
+                'Ningun enlace publico activo para este proyecto.',
+                'No active public link for this project.'
+            ));
+        }
+        return navPublicShareInfo;
+    } catch (error) {
+        navPublicShareInfo = null;
+        if (!options.silent) {
+            setNavPublicShareStatus(t(
+                `Lien public indisponible: ${formatCloudError(error)}`,
+                `Enlace publico no disponible: ${formatCloudError(error)}`,
+                `Public link unavailable: ${formatCloudError(error)}`
+            ), true);
+        }
+        return null;
+    } finally {
+        navPublicShareRequestInFlight = false;
+        renderNavPublicShareCard();
+    }
+}
+
+async function createNavPublicTrackerShare(options = {}) {
+    navPublicShareRequestInFlight = true;
+    setNavPublicShareStatus(t('Création du lien public...', 'Creando enlace publico...', 'Creating public link...'));
+    renderNavPublicShareCard();
+
+    try {
+        const data = await callNavPublicTrackerFunction('create', {
+            rotateToken: options?.rotateToken === true
+        });
+        navPublicShareInfo = normalizeNavPublicShareInfo(data?.share || null);
+        if (!navPublicShareInfo?.publicUrl) {
+            throw new Error('public_url_missing');
+        }
+        setNavPublicShareStatus(t(
+            'Lien public prêt. Copie-le et partage-le avec tes amis.',
+            'Enlace publico listo. Copialo y compartelo con tus amigos.',
+            'Public link ready. Copy it and share it.'
+        ));
+        return navPublicShareInfo;
+    } catch (error) {
+        navPublicShareInfo = null;
+        setNavPublicShareStatus(t(
+            `Création du lien impossible: ${formatCloudError(error)}`,
+            `Creacion del enlace imposible: ${formatCloudError(error)}`,
+            `Unable to create link: ${formatCloudError(error)}`
+        ), true);
+        return null;
+    } finally {
+        navPublicShareRequestInFlight = false;
+        renderNavPublicShareCard();
+    }
+}
+
+async function disableNavPublicTrackerShare() {
+    navPublicShareRequestInFlight = true;
+    setNavPublicShareStatus(t('Désactivation du lien public...', 'Desactivando enlace publico...', 'Disabling public link...'));
+    renderNavPublicShareCard();
+
+    try {
+        await callNavPublicTrackerFunction('disable');
+        navPublicShareInfo = null;
+        setNavPublicShareStatus(t(
+            'Lien public désactivé.',
+            'Enlace publico desactivado.',
+            'Public link disabled.'
+        ));
+    } catch (error) {
+        setNavPublicShareStatus(t(
+            `Désactivation impossible: ${formatCloudError(error)}`,
+            `Desactivacion imposible: ${formatCloudError(error)}`,
+            `Unable to disable link: ${formatCloudError(error)}`
+        ), true);
+    } finally {
+        navPublicShareRequestInFlight = false;
+        renderNavPublicShareCard();
+    }
+}
+
+async function copyNavPublicTrackerShareUrl() {
+    const shareUrl = String(navPublicShareInfo?.publicUrl || '').trim();
+    if (!shareUrl) return false;
+
+    try {
+        if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(shareUrl);
+        } else {
+            window.prompt(t('Copier ce lien public :', 'Copiar este enlace publico:', 'Copy this public link:'), shareUrl);
+        }
+        setNavPublicShareStatus(t('Lien public copié.', 'Enlace publico copiado.', 'Public link copied.'));
+        return true;
+    } catch (error) {
+        setNavPublicShareStatus(t(
+            `Copie impossible: ${formatCloudError(error)}`,
+            `Copia imposible: ${formatCloudError(error)}`,
+            `Copy failed: ${formatCloudError(error)}`
+        ), true);
+        return false;
+    }
+}
+
+function openNavPublicTrackerShare() {
+    const shareUrl = String(navPublicShareInfo?.publicUrl || '').trim();
+    if (!shareUrl) return;
+    window.open(shareUrl, '_blank', 'noopener');
+}
+
 async function sendAnchorDragTelegramAlert(distanceM, speedKn) {
     try {
         if (!cloudClient || !cloudConfig || !cloudAuthUser) return false;
@@ -31512,6 +31803,39 @@ document.addEventListener('DOMContentLoaded', async function() {
         navLogOpenCreateBtn.addEventListener('click', openNavLogCreateForm);
     }
 
+    const navPublicShareCreateBtn = document.getElementById('navPublicShareCreateBtn');
+    if (navPublicShareCreateBtn) {
+        navPublicShareCreateBtn.addEventListener('click', () => {
+            void createNavPublicTrackerShare({ rotateToken: false });
+        });
+    }
+
+    const navPublicShareRotateBtn = document.getElementById('navPublicShareRotateBtn');
+    if (navPublicShareRotateBtn) {
+        navPublicShareRotateBtn.addEventListener('click', () => {
+            void createNavPublicTrackerShare({ rotateToken: true });
+        });
+    }
+
+    const navPublicShareCopyBtn = document.getElementById('navPublicShareCopyBtn');
+    if (navPublicShareCopyBtn) {
+        navPublicShareCopyBtn.addEventListener('click', () => {
+            void copyNavPublicTrackerShareUrl();
+        });
+    }
+
+    const navPublicShareOpenBtn = document.getElementById('navPublicShareOpenBtn');
+    if (navPublicShareOpenBtn) {
+        navPublicShareOpenBtn.addEventListener('click', openNavPublicTrackerShare);
+    }
+
+    const navPublicShareDisableBtn = document.getElementById('navPublicShareDisableBtn');
+    if (navPublicShareDisableBtn) {
+        navPublicShareDisableBtn.addEventListener('click', () => {
+            void disableNavPublicTrackerShare();
+        });
+    }
+
     const addManualNavLogBtn = document.getElementById('addManualNavLogBtn');
     if (addManualNavLogBtn) {
         addManualNavLogBtn.addEventListener('click', addManualNavigationLogEntry);
@@ -31577,6 +31901,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                 addNavChecklistItemFromInput();
             }
         });
+    }
+
+    renderNavPublicShareCard();
+    if (cloudClient && cloudConfig && cloudAuthUser) {
+        void refreshNavPublicTrackerShareStatus({ silent: true });
     }
 
     const navChecklistResetBtn = document.getElementById('navChecklistResetBtn');
@@ -38314,6 +38643,7 @@ async function connectCloud(config, { silent = false } = {}) {
             await importBundledDufourPolarProfilesIfNeeded();
             setCloudStatus(t(`Cloud connecté · ${routes.length} route(s) partagée(s)`, `Nube conectada · ${routes.length} ruta(s) compartida(s)`));
             refreshCloudSyncBadgeFromState();
+            void refreshNavPublicTrackerShareStatus({ silent: true });
             if (activeCloudSubtab === 'stats') {
                 void refreshCloudStatsTableCounts({ force: true });
             }

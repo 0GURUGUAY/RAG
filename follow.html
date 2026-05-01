@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEIBO Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #07131d;
+            --panel: rgba(10, 25, 36, 0.78);
+            --panel-border: rgba(128, 210, 255, 0.14);
+            --text: #eef7fb;
+            --muted: rgba(225, 240, 248, 0.68);
+            --accent: #ff8a3d;
+            --line: #74d4ff;
+            --danger: #ffb8b8;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Avenir Next", "Montserrat", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(20, 97, 139, 0.35), transparent 34%),
+                radial-gradient(circle at top right, rgba(255, 138, 61, 0.18), transparent 28%),
+                linear-gradient(180deg, #08131d 0%, #0d1e2b 46%, #08131d 100%);
+        }
+
+        .tracker-shell {
+            max-width: 1220px;
+            margin: 0 auto;
+            padding: 28px 18px 36px;
+        }
+
+        .tracker-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+            gap: 18px;
+            align-items: stretch;
+        }
+
+        .tracker-panel {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 24px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
+        }
+
+        .tracker-intro {
+            padding: 22px 24px;
+        }
+
+        .tracker-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            background: rgba(116, 212, 255, 0.12);
+            color: #c9efff;
+        }
+
+        h1 {
+            margin: 16px 0 10px;
+            font-size: clamp(32px, 4vw, 56px);
+            line-height: 0.98;
+            letter-spacing: -0.04em;
+        }
+
+        .tracker-intro p,
+        .tracker-empty,
+        .tracker-status,
+        .tracker-log-item {
+            color: var(--muted);
+        }
+
+        .tracker-stats {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            padding: 22px;
+        }
+
+        .tracker-stat {
+            padding: 16px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .tracker-stat__label {
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(224, 240, 250, 0.58);
+        }
+
+        .tracker-stat__value {
+            margin-top: 8px;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .tracker-content {
+            display: grid;
+            grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
+            gap: 18px;
+            margin-top: 18px;
+        }
+
+        #trackerMap {
+            width: 100%;
+            min-height: 560px;
+            border-radius: 24px;
+            overflow: hidden;
+        }
+
+        .tracker-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .tracker-block {
+            padding: 18px;
+        }
+
+        .tracker-block h2 {
+            margin: 0 0 12px;
+            font-size: 15px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .tracker-log-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .tracker-log-item {
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .tracker-log-item strong {
+            color: var(--text);
+        }
+
+        .tracker-status {
+            margin-top: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .tracker-status.is-error {
+            color: var(--danger);
+        }
+
+        .boat-dot {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, #fff4d9 0%, #ffcf7b 35%, #ff8a3d 100%);
+            border: 2px solid rgba(255, 255, 255, 0.92);
+            box-shadow: 0 0 0 8px rgba(255, 138, 61, 0.12);
+        }
+
+        .tracker-empty {
+            padding: 28px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        @media (max-width: 980px) {
+            .tracker-hero,
+            .tracker-content {
+                grid-template-columns: 1fr;
+            }
+
+            #trackerMap {
+                min-height: 420px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="tracker-shell">
+        <section class="tracker-hero">
+            <div class="tracker-panel tracker-intro">
+                <div class="tracker-kicker">CEIBO public tracker</div>
+                <h1 id="trackerTitle">Suivi du bateau</h1>
+                <p id="trackerSubtitle">Chargement des dernières positions et de la route récente.</p>
+                <div id="trackerStatus" class="tracker-status">Préparation du suivi public…</div>
+            </div>
+            <div class="tracker-panel tracker-stats">
+                <div class="tracker-stat">
+                    <div class="tracker-stat__label">Dernier point</div>
+                    <div id="trackerLastSeen" class="tracker-stat__value">--</div>
+                </div>
+                <div class="tracker-stat">
+                    <div class="tracker-stat__label">Vitesse</div>
+                    <div id="trackerSpeed" class="tracker-stat__value">--</div>
+                </div>
+                <div class="tracker-stat">
+                    <div class="tracker-stat__label">Cap</div>
+                    <div id="trackerHeading" class="tracker-stat__value">--</div>
+                </div>
+                <div class="tracker-stat">
+                    <div class="tracker-stat__label">Points affichés</div>
+                    <div id="trackerPointCount" class="tracker-stat__value">0</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="tracker-content">
+            <div class="tracker-panel">
+                <div id="trackerMap"></div>
+            </div>
+            <div class="tracker-sidebar">
+                <div class="tracker-panel tracker-block">
+                    <h2>Position</h2>
+                    <div id="trackerPosition" class="tracker-status">Aucune position disponible.</div>
+                </div>
+                <div class="tracker-panel tracker-block">
+                    <h2>Journal récent</h2>
+                    <div id="trackerLogs" class="tracker-log-list">
+                        <div class="tracker-empty">Aucune entrée récente pour le moment.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const shareToken = params.get('token') || '';
+        const supabaseUrl = (params.get('url') || '').replace(/\/+$/, '');
+        const anonKey = params.get('anon') || '';
+        const historyHours = Number(params.get('hours') || '72');
+
+        const titleNode = document.getElementById('trackerTitle');
+        const subtitleNode = document.getElementById('trackerSubtitle');
+        const statusNode = document.getElementById('trackerStatus');
+        const lastSeenNode = document.getElementById('trackerLastSeen');
+        const speedNode = document.getElementById('trackerSpeed');
+        const headingNode = document.getElementById('trackerHeading');
+        const pointCountNode = document.getElementById('trackerPointCount');
+        const positionNode = document.getElementById('trackerPosition');
+        const logsNode = document.getElementById('trackerLogs');
+
+        const map = L.map('trackerMap', { zoomControl: true, attributionControl: true }).setView([36.8, -4.3], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const trackLayer = L.layerGroup().addTo(map);
+        let refreshTimer = null;
+
+        function formatDate(value) {
+            const date = new Date(value || '');
+            return Number.isNaN(date.getTime())
+                ? '--'
+                : date.toLocaleString('fr-FR', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    timeZoneName: 'short'
+                });
+        }
+
+        function setStatus(message, isError = false) {
+            statusNode.textContent = message;
+            statusNode.classList.toggle('is-error', isError);
+        }
+
+        function formatKnots(value) {
+            return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} kn` : '--';
+        }
+
+        function formatDegrees(value) {
+            return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}°` : '--';
+        }
+
+        function renderLogs(logs) {
+            if (!Array.isArray(logs) || logs.length === 0) {
+                logsNode.innerHTML = '<div class="tracker-empty">Aucune entrée récente pour le moment.</div>';
+                return;
+            }
+
+            logsNode.innerHTML = logs.map(log => {
+                const eventText = String(log?.events || '').trim();
+                const watchCrew = String(log?.watchCrew || '').trim();
+                const creatorName = String(log?.creatorName || '').trim();
+                return `
+                    <div class="tracker-log-item">
+                        <strong>${formatDate(log?.timestamp)}</strong><br>
+                        ${watchCrew ? `Quart: ${watchCrew}<br>` : ''}
+                        ${creatorName ? `Par: ${creatorName}<br>` : ''}
+                        ${eventText ? eventText : 'Position enregistrée.'}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderPayload(payload) {
+            const title = payload?.title || 'Suivi du bateau';
+            titleNode.textContent = title;
+            document.title = `${title} · CEIBO`;
+
+            const latestPoint = payload?.latestPoint || null;
+            const track = Array.isArray(payload?.track) ? payload.track : [];
+            const recentLogs = Array.isArray(payload?.recentLogs) ? payload.recentLogs : [];
+
+            subtitleNode.textContent = `Dernières ${payload?.historyHours || historyHours} h de navigation partagées.`;
+            lastSeenNode.textContent = latestPoint?.timestamp ? formatDate(latestPoint.timestamp) : '--';
+            speedNode.textContent = formatKnots(latestPoint?.speedKn);
+            headingNode.textContent = formatDegrees(latestPoint?.headingDeg);
+            pointCountNode.textContent = String(track.length);
+            positionNode.textContent = latestPoint
+                ? `${latestPoint.lat.toFixed(5)}, ${latestPoint.lng.toFixed(5)}`
+                : 'Aucune position disponible.';
+
+            trackLayer.clearLayers();
+            if (track.length > 0) {
+                const latLngs = track.map(point => [Number(point.lat), Number(point.lng)]);
+                const polyline = L.polyline(latLngs, {
+                    color: '#74d4ff',
+                    weight: 4,
+                    opacity: 0.88
+                }).addTo(trackLayer);
+
+                const latestLatLng = latLngs[latLngs.length - 1];
+                L.marker(latestLatLng, {
+                    icon: L.divIcon({ className: '', html: '<div class="boat-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] })
+                }).addTo(trackLayer).bindPopup(`Dernier point<br>${formatDate(latestPoint.timestamp)}`);
+
+                map.fitBounds(polyline.getBounds(), { padding: [28, 28] });
+            }
+
+            renderLogs(recentLogs);
+            setStatus(`Mise à jour ${formatDate(payload?.generatedAt)}.`);
+        }
+
+        async function loadTracker() {
+            if (!shareToken || !supabaseUrl || !anonKey) {
+                setStatus('Lien public incomplet. Il manque le token ou la configuration Supabase.', true);
+                subtitleNode.textContent = 'Demande un lien complet généré depuis CEIBO.';
+                return;
+            }
+
+            setStatus('Chargement des positions en cours...');
+            try {
+                const endpoint = `${supabaseUrl}/functions/v1/public-tracker?token=${encodeURIComponent(shareToken)}&hours=${encodeURIComponent(String(historyHours || 72))}`;
+                const response = await fetch(endpoint, {
+                    headers: {
+                        apikey: anonKey
+                    }
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload?.error) {
+                    throw new Error(payload?.error || response.statusText || 'public tracker failed');
+                }
+                renderPayload(payload);
+            } catch (error) {
+                setStatus(`Suivi indisponible: ${String(error?.message || error)}`, true);
+            }
+        }
+
+        void loadTracker();
+        refreshTimer = window.setInterval(() => {
+            void loadTracker();
+        }, 60000);
+
+        window.addEventListener('beforeunload', () => {
+            if (refreshTimer) window.clearInterval(refreshTimer);
+        });
+    </script>
+</body>
+</html>

@@ -386,6 +386,24 @@
             <div id="anchorDragStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Alarme mouillage: inactive</div>
         </div>
 
+            <div class="cloud-config-card nav-public-share-card" style="margin-top:10px;">
+                <div class="cloud-config-title" id="navPublicShareTitle">Suivi public bateau</div>
+                <div id="navPublicShareHint" class="nav-public-share-hint">Génère un lien public sécurisé pour partager la position et la route récente du bateau.</div>
+                <label id="navPublicShareUrlLabel" for="navPublicShareUrlInput" class="nav-public-share-label">Lien public :</label>
+                <input id="navPublicShareUrlInput" class="nav-public-share-url" type="text" readonly placeholder="Aucun lien public actif">
+                <div class="button-row nav-public-share-actions" style="margin-top:8px; gap:6px;">
+                    <button id="navPublicShareCreateBtn" type="button" style="flex:1;">Créer le lien</button>
+                    <button id="navPublicShareRotateBtn" type="button" style="flex:1;">Renouveler</button>
+                </div>
+                <div class="button-row nav-public-share-actions" style="margin-top:8px; gap:6px;">
+                    <button id="navPublicShareCopyBtn" type="button" style="flex:1;">Copier</button>
+                    <button id="navPublicShareOpenBtn" type="button" style="flex:1;">Ouvrir</button>
+                    <button id="navPublicShareDisableBtn" type="button" style="flex:1;">Désactiver</button>
+                </div>
+                <div id="navPublicShareStatus" class="nav-public-share-status">Connecte le cloud pour activer le partage public.</div>
+                <div id="navPublicShareMeta" class="nav-public-share-meta"></div>
+            </div>
+
         <div class="button-row">
             <button id="navLogOpenCreateBtn" style="flex:1;">Ajouter</button>
         </div>
@@ -1246,7 +1264,7 @@
     <div id="sidebarFooterContainer">
         <div class="sidebar-footer">
             <span class="creator-credit">Programa creado por Max Patissier</span>
-            <span id="buildVersionBadge" class="build-version-badge">v20260430-43</span>
+            <span id="buildVersionBadge" class="build-version-badge">v20260501-45</span>
             <button id="nightModeToggleBtn" class="night-mode-btn" type="button" aria-pressed="false">Mode nuit: OFF</button>
             <div class="lang-switch" aria-label="Sélecteur de langue">
                 <button id="langFrBtn" class="lang-btn" type="button">FR</button>
