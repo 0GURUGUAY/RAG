@@ -1617,6 +1617,16 @@ body.is-resizing-sidebar #sidebarResizeHandle::before,
     border-style: solid;
 }
 
+.voyage-calendar-item--moon {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .voyage-calendar-item.is-derived {
     border-style: dashed;
     filter: saturate(0.82) brightness(1.03);
@@ -1701,6 +1711,23 @@ body.is-resizing-sidebar #sidebarResizeHandle::before,
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.voyage-calendar-item__title--moon {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-size: clamp(30px, 3vw, 44px);
+    line-height: 1;
+    text-align: center;
+    letter-spacing: 0;
+    text-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.voyage-calendar-item--moon .voyage-calendar-item__compact-marker,
+.voyage-calendar-item--moon.is-compact::after {
+    display: none;
 }
 
 .voyage-calendar-item__meta {

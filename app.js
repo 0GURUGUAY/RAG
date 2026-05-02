@@ -3,7 +3,7 @@ import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojso
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260501-45';
+const APP_BUILD_VERSION = '20260502-46';
 const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
 const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
 const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
@@ -11,6 +11,14 @@ const VOYAGE_ROUTE_SELECTION_RADIUS_NM = 80;
 const VOYAGE_WAYPOINT_SELECTION_RADIUS_NM = 30;
 const AGENDA_EVENT_DEFAULT_DURATION_MS = 60 * 60 * 1000;
 const AGENDA_EVENT_DURATION_OPTIONS_MS = [30, 60, 120].map(minutes => minutes * 60 * 1000);
+const MOON_SYNODIC_MONTH_MS = 29.530588853 * 24 * 60 * 60 * 1000;
+const MOON_REFERENCE_NEW_MOON_MS = Date.UTC(2000, 0, 6, 18, 14, 0);
+const MAIN_MOON_PHASES = Object.freeze([
+    { key: 'new', offset: 0, fr: 'Nouvelle lune', es: 'Luna nueva', en: 'New moon' },
+    { key: 'first-quarter', offset: 0.25, fr: 'Premier quartier', es: 'Cuarto creciente', en: 'First quarter' },
+    { key: 'full', offset: 0.5, fr: 'Pleine lune', es: 'Luna llena', en: 'Full moon' },
+    { key: 'last-quarter', offset: 0.75, fr: 'Dernier quartier', es: 'Cuarto menguante', en: 'Last quarter' }
+]);
 const VOYAGE_PLAN_STATUS_PLANNED = 'planned';
 const VOYAGE_PLAN_STATUS_COMPLETED = 'completed';
 const VOYAGE_PLAN_STATUS_CANCELLED = 'cancelled';
@@ -3578,17 +3586,27 @@ function buildVoyageAgendaWeeksForRange(timeline, firstWeekStart, lastWeekStart,
                 const clippedEnd = entry.arrival < weekEnd ? entry.arrival : weekEnd;
                 const leftPct = ((clippedStart.getTime() - weekStart.getTime()) / weekDurationMs) * 100;
                 const widthPct = Math.max(((clippedEnd.getTime() - clippedStart.getTime()) / weekDurationMs) * 100, 2.2);
-                const popupLabel = `${entry.title} · ${formatVoyageAgendaTimeLabel(entry.departure)} - ${formatVoyageAgendaTimeLabel(entry.arrival)}${entry.subtitle ? ` · ${entry.subtitle}` : ''}`;
+                const isMoonPhase = entry.type === 'moon';
+                const phaseMomentLabel = isMoonPhase && entry.item?.phaseMoment
+                    ? formatDateTimeLocalLabel(entry.item.phaseMoment)
+                    : '';
+                const popupLabel = isMoonPhase
+                    ? `${entry.title}${phaseMomentLabel ? ` · ${phaseMomentLabel}` : ''}${entry.subtitle ? ` · ${entry.subtitle}` : ''}`
+                    : `${entry.title} · ${formatVoyageAgendaTimeLabel(entry.departure)} - ${formatVoyageAgendaTimeLabel(entry.arrival)}${entry.subtitle ? ` · ${entry.subtitle}` : ''}`;
                 return {
                     id: entry.id,
                     type: entry.type,
                     title: entry.title,
+                    moonGlyph: isMoonPhase ? getMoonPhaseGlyph(entry.item?.phaseKey) : '',
                     subtitle: entry.subtitle,
                     isDerived: entry.type === 'route' ? !entry.item?.departureDateTime : false,
                     isScheduleEditable: entry.id === editableItemId,
                     canResizeDeparture: entry.type === 'stop' && entry.arrival >= weekStart && entry.arrival < weekEnd,
-                    startLabel: formatVoyageAgendaTimeLabel(entry.departure),
-                    endLabel: formatVoyageAgendaTimeLabel(entry.arrival),
+                    startLabel: isMoonPhase ? t('Jour entier', 'Todo el dia', 'All day') : formatVoyageAgendaTimeLabel(entry.departure),
+                    endLabel: isMoonPhase ? phaseMomentLabel : formatVoyageAgendaTimeLabel(entry.arrival),
+                    metaLabel: isMoonPhase
+                        ? `${t('Exacte', 'Exacta', 'Exact')}: ${phaseMomentLabel || t('Non calculee', 'No calculada', 'Not computed')}${entry.subtitle ? ` · ${entry.subtitle}` : ''}`
+                        : `${formatVoyageAgendaTimeLabel(entry.departure)} - ${formatVoyageAgendaTimeLabel(entry.arrival)}${entry.subtitle ? ` · ${entry.subtitle}` : ''}`,
                     dragHandleLabel: formatVoyageAgendaTimeLabel(entry.departure),
                     resizeHandleLabel: formatVoyageAgendaTimeLabel(entry.arrival),
                     leftPct,
@@ -3671,7 +3689,7 @@ function renderVoyageScheduleCalendar(timeline, editableItemId = '') {
                                         <article class="voyage-calendar-item voyage-calendar-item--${escapeHtml(item.type)}${item.isDerived ? ' is-derived' : ''}${item.isScheduleEditable ? ' is-schedule-editable' : ''}${item.isCompact ? ' is-compact' : ''}${activeVoyageMapItemId === item.id ? ' is-active' : ''}" data-voyage-map-item-id="${escapeHtml(item.id)}"${item.isScheduleEditable ? ' draggable="true"' : ''}${item.isCompact ? ` data-compact-popup="${escapeHtml(item.popupLabel || item.title || '')}" tabindex="0" title="${escapeHtml(item.popupLabel || item.title || '')}"` : ''} style="left:${escapeHtml(item.leftPct.toFixed(2))}%; width:${escapeHtml(item.widthPct.toFixed(2))}%;">
                                             ${item.isScheduleEditable ? `<div class="voyage-calendar-item__drag-handle" title="${escapeHtml(t('Glisser pour déplacer le départ', 'Arrastra para mover la salida', 'Drag to move departure'))}" data-handle-time="${escapeHtml(item.dragHandleLabel || '--:--')}">${escapeHtml(item.dragHandleLabel || '--:--')}</div>` : ''}
                                             ${item.isCompact ? `<div class="voyage-calendar-item__compact-marker" aria-hidden="true">+</div>` : ''}
-                                            <div class="voyage-calendar-item__title">${escapeHtml(item.title)}</div>
+                                            <div class="voyage-calendar-item__title${item.type === 'moon' ? ' voyage-calendar-item__title--moon' : ''}"${item.type === 'moon' ? ` aria-label="${escapeHtml(item.title)}" title="${escapeHtml(item.title)}"` : ''}>${item.type === 'moon' ? escapeHtml(item.moonGlyph || '🌙') : escapeHtml(item.title)}</div>
                                             <div class="voyage-calendar-item__meta">${escapeHtml(item.startLabel)} - ${escapeHtml(item.endLabel)}</div>
                                             ${item.canResizeDeparture ? `<button type="button" class="voyage-calendar-item__resize-handle" data-voyage-resize-handle="true" aria-label="${escapeHtml(t('Modifier le départ du mouillage', 'Modificar salida del fondeo', 'Adjust anchorage departure'))}" title="${escapeHtml(t('Tirer pour modifier le départ du mouillage', 'Tira para modificar la salida del fondeo', 'Drag to adjust anchorage departure'))}" data-handle-time="${escapeHtml(item.resizeHandleLabel || '--:--')}">${escapeHtml(item.resizeHandleLabel || '--:--')}</button>` : ''}
                                         </article>
@@ -3706,6 +3724,86 @@ function buildPlannedVoyageOverviewEntries(planEntries) {
             item: null
         }];
     });
+}
+
+function getMainMoonPhaseLabel(phaseDefinition) {
+    if (!phaseDefinition || typeof phaseDefinition !== 'object') return t('Phase lunaire', 'Fase lunar', 'Moon phase');
+    return t(phaseDefinition.fr || 'Phase lunaire', phaseDefinition.es || 'Fase lunar', phaseDefinition.en || 'Moon phase');
+}
+
+function getMoonPhaseGlyph(phaseKey) {
+    if (phaseKey === 'new') return '🌑';
+    if (phaseKey === 'first-quarter') return '🌓';
+    if (phaseKey === 'full') return '🌕';
+    if (phaseKey === 'last-quarter') return '🌗';
+    return '🌙';
+}
+
+function getMainMoonPhaseMomentsForRange(rangeStart, rangeEnd) {
+    if (!(rangeStart instanceof Date) || Number.isNaN(rangeStart.getTime()) || !(rangeEnd instanceof Date) || Number.isNaN(rangeEnd.getTime()) || rangeEnd < rangeStart) {
+        return [];
+    }
+
+    const rangeStartMs = rangeStart.getTime();
+    const rangeEndMs = rangeEnd.getTime();
+    return MAIN_MOON_PHASES.flatMap(phaseDefinition => {
+        const phaseOffsetMs = phaseDefinition.offset * MOON_SYNODIC_MONTH_MS;
+        const minCycle = Math.floor((rangeStartMs - MOON_REFERENCE_NEW_MOON_MS - phaseOffsetMs) / MOON_SYNODIC_MONTH_MS) - 1;
+        const maxCycle = Math.ceil((rangeEndMs - MOON_REFERENCE_NEW_MOON_MS - phaseOffsetMs) / MOON_SYNODIC_MONTH_MS) + 1;
+        const moments = [];
+
+        for (let cycleIndex = minCycle; cycleIndex <= maxCycle; cycleIndex += 1) {
+            const phaseDateTime = new Date(MOON_REFERENCE_NEW_MOON_MS + (cycleIndex * MOON_SYNODIC_MONTH_MS) + phaseOffsetMs);
+            if (Number.isNaN(phaseDateTime.getTime())) continue;
+            if (phaseDateTime < rangeStart || phaseDateTime > rangeEnd) continue;
+            moments.push({
+                key: phaseDefinition.key,
+                title: getMainMoonPhaseLabel(phaseDefinition),
+                phaseDateTime
+            });
+        }
+
+        return moments;
+    }).sort((left, right) => left.phaseDateTime.getTime() - right.phaseDateTime.getTime());
+}
+
+function buildMoonPhaseAgendaEntriesForRange(rangeStart, rangeEnd) {
+    const safeStart = startOfLocalDay(rangeStart);
+    const safeEnd = startOfLocalDay(rangeEnd);
+    if (!(safeStart instanceof Date) || Number.isNaN(safeStart.getTime()) || !(safeEnd instanceof Date) || Number.isNaN(safeEnd.getTime()) || safeEnd < safeStart) {
+        return [];
+    }
+
+    const searchStart = new Date(safeStart.getTime() - (2 * 24 * 60 * 60 * 1000));
+    const searchEnd = new Date(safeEnd.getTime() + (3 * 24 * 60 * 60 * 1000));
+    const seenEntryIds = new Set();
+
+    return getMainMoonPhaseMomentsForRange(searchStart, searchEnd).map(phase => {
+        const localDayStart = startOfLocalDay(phase.phaseDateTime);
+        if (!(localDayStart instanceof Date) || Number.isNaN(localDayStart.getTime()) || localDayStart < safeStart || localDayStart > safeEnd) {
+            return null;
+        }
+
+        const localDayEnd = addDays(localDayStart, 1);
+        const entryId = `moon-phase-${phase.key}-${formatLocalDateKey(localDayStart)}`;
+        if (seenEntryIds.has(entryId)) return null;
+        seenEntryIds.add(entryId);
+
+        return {
+            id: entryId,
+            eventId: '',
+            planId: '',
+            type: 'moon',
+            title: phase.title,
+            subtitle: t('Phase principale', 'Fase principal', 'Main phase'),
+            departure: localDayStart,
+            arrival: localDayEnd,
+            item: {
+                phaseKey: phase.key,
+                phaseMoment: phase.phaseDateTime
+            }
+        };
+    }).filter(Boolean);
 }
 
 function buildAgendaEventTimelineEntries() {
@@ -3834,7 +3932,16 @@ function resolveVoyageOverviewReferenceDate(overviewEntries) {
 function renderVoyagesOverviewCalendar(planEntries) {
     const overviewEntries = buildPlannedVoyageOverviewEntries(planEntries);
     const agendaEventEntries = buildAgendaEventTimelineEntries();
-    const calendarEntries = overviewEntries.concat(agendaEventEntries);
+    const baseCalendarEntries = overviewEntries.concat(agendaEventEntries);
+    const referenceDate = voyageOverviewReferenceDate instanceof Date && !Number.isNaN(voyageOverviewReferenceDate.getTime())
+        ? voyageOverviewReferenceDate
+        : resolveVoyageOverviewReferenceDate(baseCalendarEntries);
+    const visibleMonthStart = getStartOfLocalMonth(referenceDate);
+    const visibleMonthEnd = getEndOfLocalMonth(referenceDate);
+    const firstWeekStart = getStartOfLocalWeek(visibleMonthStart);
+    const lastWeekStart = getStartOfLocalWeek(visibleMonthEnd);
+    const moonPhaseEntries = buildMoonPhaseAgendaEntriesForRange(firstWeekStart, addDays(lastWeekStart, 6));
+    const calendarEntries = baseCalendarEntries.concat(moonPhaseEntries);
     if (!calendarEntries.length) {
         return `
             <section class="voyage-calendar-card voyages-overview-calendar">
@@ -3849,13 +3956,6 @@ function renderVoyagesOverviewCalendar(planEntries) {
             ${renderAgendaEventManager()}`;
     }
 
-    const referenceDate = voyageOverviewReferenceDate instanceof Date && !Number.isNaN(voyageOverviewReferenceDate.getTime())
-        ? voyageOverviewReferenceDate
-        : resolveVoyageOverviewReferenceDate(calendarEntries);
-    const visibleMonthStart = getStartOfLocalMonth(referenceDate);
-    const visibleMonthEnd = getEndOfLocalMonth(referenceDate);
-    const firstWeekStart = getStartOfLocalWeek(visibleMonthStart);
-    const lastWeekStart = getStartOfLocalWeek(visibleMonthEnd);
     const visibleWeekCount = Math.max(1, Math.round((lastWeekStart.getTime() - firstWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
     const weeks = buildVoyageAgendaSequentialWeeks(calendarEntries, referenceDate, visibleWeekCount, '');
     const monthLabel = formatVoyageAgendaMonthLabel(referenceDate);
@@ -3889,10 +3989,10 @@ function renderVoyagesOverviewCalendar(planEntries) {
                             <div class="voyage-calendar-items">
                                 ${week.items.map(item => `
                                     <div class="voyage-calendar-row">
-                                        <article class="voyage-calendar-item voyage-calendar-item--${escapeHtml(item.type === 'event' ? 'event' : 'route')}${item.isCompact ? ' is-compact' : ''}${selectedVoyagePlanId === item.planId ? ' is-active' : ''}${item.type === 'event' && item.eventId === selectedAgendaEventId ? ' is-active' : ''} voyages-overview-calendar__item${item.type === 'event' ? ' is-schedule-editable' : ''}" ${item.type === 'event' ? `data-agenda-event-action="edit" data-agenda-event-id="${escapeHtml(item.eventId || '')}" draggable="true"` : `data-voyage-plan-action="select" data-voyage-plan-id="${escapeHtml(item.planId || '')}"`}${item.isCompact ? ` data-compact-popup="${escapeHtml(item.popupLabel || item.title || '')}" tabindex="0" title="${escapeHtml(item.popupLabel || item.title || '')}"` : ''} style="left:${escapeHtml(item.leftPct.toFixed(2))}%; width:${escapeHtml(item.widthPct.toFixed(2))}%; ${escapeHtml(item.type === 'event' ? '--voyage-accent-start:#2f80ed;--voyage-accent-end:#1366d6;--voyage-accent-surface:rgba(47,128,237,0.18);--voyage-accent-soft:rgba(47,128,237,0.28);--voyage-accent-text:#e8f3ff' : getVoyageAccentStyle(item.planId || item.id || 'voyage'))}">
+                                        <article class="voyage-calendar-item voyage-calendar-item--${escapeHtml(item.type === 'event' ? 'event' : (item.type === 'moon' ? 'moon' : 'route'))}${item.isCompact ? ' is-compact' : ''}${selectedVoyagePlanId === item.planId ? ' is-active' : ''}${item.type === 'event' && item.eventId === selectedAgendaEventId ? ' is-active' : ''} voyages-overview-calendar__item${item.type === 'event' ? ' is-schedule-editable' : ''}" ${item.type === 'event' ? `data-agenda-event-action="edit" data-agenda-event-id="${escapeHtml(item.eventId || '')}" draggable="true"` : (item.type === 'moon' ? '' : `data-voyage-plan-action="select" data-voyage-plan-id="${escapeHtml(item.planId || '')}"`)}${item.isCompact ? ` data-compact-popup="${escapeHtml(item.type === 'moon' ? (item.moonGlyph || '🌙') : (item.popupLabel || item.title || ''))}" tabindex="0"${item.type === 'moon' ? '' : ` title="${escapeHtml(item.popupLabel || item.title || '')}"`}` : ''} style="left:${escapeHtml(item.leftPct.toFixed(2))}%; width:${escapeHtml(item.widthPct.toFixed(2))}%; ${escapeHtml(item.type === 'event' ? '--voyage-accent-start:#2f80ed;--voyage-accent-end:#1366d6;--voyage-accent-surface:rgba(47,128,237,0.18);--voyage-accent-soft:rgba(47,128,237,0.28);--voyage-accent-text:#e8f3ff' : (item.type === 'moon' ? '--voyage-accent-start:#54697e;--voyage-accent-end:#8197ab;--voyage-accent-surface:rgba(129,151,171,0.18);--voyage-accent-soft:rgba(129,151,171,0.28);--voyage-accent-text:#f3f8fc' : getVoyageAccentStyle(item.planId || item.id || 'voyage')))}">
                                             ${item.isCompact ? `<div class="voyage-calendar-item__compact-marker" aria-hidden="true">+</div>` : ''}
-                                            <div class="voyage-calendar-item__title">${escapeHtml(item.title)}</div>
-                                            <div class="voyage-calendar-item__meta">${escapeHtml(item.startLabel)} - ${escapeHtml(item.endLabel)}${item.subtitle ? ` · ${escapeHtml(item.subtitle)}` : ''}</div>
+                                            <div class="voyage-calendar-item__title${item.type === 'moon' ? ' voyage-calendar-item__title--moon' : ''}"${item.type === 'moon' ? ` aria-label="${escapeHtml(item.title)}"` : ''}>${item.type === 'moon' ? escapeHtml(item.moonGlyph || '🌙') : escapeHtml(item.title)}</div>
+                                            ${item.type === 'moon' ? '' : `<div class="voyage-calendar-item__meta">${escapeHtml(item.metaLabel || `${item.startLabel} - ${item.endLabel}${item.subtitle ? ` · ${item.subtitle}` : ''}`)}</div>`}
                                         </article>
                                     </div>`).join('')}
                             </div>
@@ -16754,6 +16854,7 @@ function buildVoyagePrintDocumentHtml(plan, timeline, options = {}) {
         .voyage-calendar-row { position: relative; min-height: 46px; }
         .voyage-calendar-item { position: absolute; top: 0; bottom: 0; min-height: 42px; padding: 8px 10px; border-radius: 12px; color: #fff; background: linear-gradient(135deg, #1481ba, #2b5f9e); }
         .voyage-calendar-item--stop { background: linear-gradient(135deg, #ff9f1c, #f25f29); }
+        .voyage-calendar-item--moon { background: linear-gradient(135deg, #54697e, #8197ab); }
         .voyage-calendar-item__drag-handle, .voyage-calendar-item__resize-handle { display: none !important; }
         .voyage-calendar-item__title { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .voyage-calendar-item__meta { margin-top: 3px; font-size: 10px; opacity: 0.92; }
