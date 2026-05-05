@@ -8,7 +8,7 @@ create table if not exists public.public_tracking_shares (
     creator_name text,
     title text not null default 'CEIBO live tracker',
     share_token text not null,
-    history_hours integer not null default 72,
+    history_hours integer not null default 168,
     is_active boolean not null default true,
     last_accessed_at timestamptz,
     created_at timestamptz not null default now(),
@@ -31,7 +31,7 @@ alter table public.public_tracking_shares
 
 alter table public.public_tracking_shares
     alter column title set default 'CEIBO live tracker',
-    alter column history_hours set default 72,
+    alter column history_hours set default 168,
     alter column is_active set default true,
     alter column created_at set default now(),
     alter column updated_at set default now();
@@ -39,7 +39,7 @@ alter table public.public_tracking_shares
 update public.public_tracking_shares
 set
     title = coalesce(nullif(title, ''), 'CEIBO live tracker'),
-    history_hours = greatest(1, least(coalesce(history_hours, 72), 720)),
+    history_hours = greatest(1, least(coalesce(history_hours, 168), 720)),
     is_active = coalesce(is_active, true),
     created_at = coalesce(created_at, now()),
     updated_at = coalesce(updated_at, now());

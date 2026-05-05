@@ -10,7 +10,7 @@
     <link rel="icon" type="image/jpeg" href="ceibo-favicon.jpg">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <link rel="stylesheet" href="style.css?v=20260329-41-joyfix1"/>
+    <link rel="stylesheet" href="style.css?v=20260504-47-weather-ticker"/>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -21,11 +21,13 @@
 <body>
 
 <div id="sidebar">
+    <div id="weatherTickerBar"></div>
     <div class="sidebar-tabs">
         <button id="cloudTabBtn" class="tab-btn active" type="button">Cloud</button>
         <button id="routesTabBtn" class="tab-btn" type="button">Routes</button>
         <button id="voyagesTabBtn" class="tab-btn" type="button">Voyages</button>
         <button id="routingTabBtn" class="tab-btn" type="button">Routage</button>
+        <button id="weatherTabBtn" class="tab-btn" type="button">Météo</button>
         <button id="documentTabBtn" class="tab-btn" type="button">Document</button>
         <button id="navLogTabBtn" class="tab-btn" type="button">Journal nav</button>
         <button id="maintenanceTabBtn" class="tab-btn" type="button">Maintenance</button>
@@ -515,49 +517,64 @@
     </div>
 
     <div id="weatherTab" class="tab-panel">
-        <div class="button-row">
-            <button id="backToRoutingBtn" style="flex:1;">Retour Routage</button>
+        <div class="weather-subtabs">
+            <button id="weatherOutlookSubtabBtn" type="button" class="weather-subtab-btn active">Prévisions</button>
+            <button id="weatherHistorySubtabBtn" type="button" class="weather-subtab-btn">Historique</button>
         </div>
-        <div class="button-row weather-pointer-row">
-            <button id="placeWeatherPointerBtn" style="flex:1;">Placer pointeur météo</button>
-            <button id="useMapCenterWeatherBtn" style="flex:1;">Centre carte → pointeur</button>
-            <button id="refreshWeatherOutlookBtn" style="flex:1;">Actualiser météo</button>
-        </div>
-        <div class="button-row">
-            <button id="weatherDiagnosticBtn" style="flex:1;">Analyse synoptique locale</button>
-        </div>
-        <div id="weatherDiagnosticStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Analyse synoptique: en attente</div>
-        <div id="weatherDiagnosticPanel"></div>
-        <div id="weatherApiConfigSection">
-            <label for="owmApiKeyInput" style="display:block; margin-top:10px; font-size:12px;">Clé API OpenWeatherMap (isobares):</label>
-            <input type="password" id="owmApiKeyInput" placeholder="Ta clé OWM" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+
+        <div id="weatherOutlookSubpanel" class="weather-subpanel active">
             <div class="button-row">
-                <button id="testOwmApiKeyBtn" style="flex:1;">Tester clé OWM</button>
+                <button id="backToRoutingBtn" style="flex:1;">Retour Routage</button>
+            </div>
+            <div class="button-row weather-pointer-row">
+                <button id="placeWeatherPointerBtn" style="flex:1;">Placer pointeur météo</button>
+                <button id="useMapCenterWeatherBtn" style="flex:1;">Centre carte → pointeur</button>
+                <button id="refreshWeatherOutlookBtn" style="flex:1;">Actualiser météo</button>
             </div>
             <div class="button-row">
-                <button id="saveOwmApiKeyBtn" style="flex:1;">Enregistrer clé OWM</button>
-                <button id="clearOwmApiKeyBtn" style="flex:1;">Supprimer clé OWM</button>
+                <button id="weatherDiagnosticBtn" style="flex:1;">Analyse synoptique locale</button>
             </div>
-            <div id="owmApiKeyStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Clé OWM: non testée</div>
-        </div>
-        <div id="weatherApiConfigSummary" style="margin-top:6px; font-size:12px; opacity:0.9; display:none;">API météo connectée.</div>
-        <div class="button-row">
-            <button id="toggleWeatherApiConfigBtn" style="flex:1; display:none;">Afficher API météo</button>
-        </div>
-        <div id="weatherOutlookStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo: en attente</div>
-        <div id="weatherOverlayLegend"></div>
-        <div id="weatherOutlookList"></div>
-        <div id="weatherGribSection" class="cloud-config-card" style="margin-top:10px;">
-            <div class="cloud-config-title">GRIB local</div>
-            <label for="weatherGribFileInput" style="display:block; margin-top:6px; font-size:12px;">Fichiers GRIB / JSON météo:</label>
-            <input type="file" id="weatherGribFileInput" accept=".grib,.grib2,.grb,.grb2,.json,.geojson,application/json" multiple style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+            <div id="weatherDiagnosticStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Analyse synoptique: en attente</div>
+            <div id="weatherDiagnosticPanel"></div>
+            <div id="weatherApiConfigSection">
+                <label for="owmApiKeyInput" style="display:block; margin-top:10px; font-size:12px;">Clé API OpenWeatherMap (isobares):</label>
+                <input type="password" id="owmApiKeyInput" placeholder="Ta clé OWM" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+                <div class="button-row">
+                    <button id="testOwmApiKeyBtn" style="flex:1;">Tester clé OWM</button>
+                </div>
+                <div class="button-row">
+                    <button id="saveOwmApiKeyBtn" style="flex:1;">Enregistrer clé OWM</button>
+                    <button id="clearOwmApiKeyBtn" style="flex:1;">Supprimer clé OWM</button>
+                </div>
+                <div id="owmApiKeyStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Clé OWM: non testée</div>
+            </div>
+            <div id="weatherApiConfigSummary" style="margin-top:6px; font-size:12px; opacity:0.9; display:none;">API météo connectée.</div>
             <div class="button-row">
-                <button id="weatherImportGribBtn" style="flex:1;">Importer GRIB/JSON</button>
-                <button id="weatherConvertGribBtn" style="flex:1;">Commande conversion</button>
-                <button id="weatherClearGribBtn" style="flex:1;">Effacer GRIB</button>
+                <button id="toggleWeatherApiConfigBtn" style="flex:1; display:none;">Afficher API météo</button>
             </div>
-            <div id="weatherGribStatus" class="cloud-status">GRIB: aucun fichier chargé.</div>
-            <div id="weatherGribHint" class="cloud-status">Astuce: sélectionne GRIB + JSON converti (même nom) en une fois pour chargement auto.</div>
+            <div id="weatherOutlookStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Météo: en attente</div>
+            <div id="weatherOverlayLegend"></div>
+            <div id="weatherOutlookList"></div>
+            <div id="weatherGribSection" class="cloud-config-card" style="margin-top:10px;">
+                <div class="cloud-config-title">GRIB local</div>
+                <label for="weatherGribFileInput" style="display:block; margin-top:6px; font-size:12px;">Fichiers GRIB / JSON météo:</label>
+                <input type="file" id="weatherGribFileInput" accept=".grib,.grib2,.grb,.grb2,.json,.geojson,application/json" multiple style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
+                <div class="button-row">
+                    <button id="weatherImportGribBtn" style="flex:1;">Importer GRIB/JSON</button>
+                    <button id="weatherConvertGribBtn" style="flex:1;">Commande conversion</button>
+                    <button id="weatherClearGribBtn" style="flex:1;">Effacer GRIB</button>
+                </div>
+                <div id="weatherGribStatus" class="cloud-status">GRIB: aucun fichier chargé.</div>
+                <div id="weatherGribHint" class="cloud-status">Astuce: sélectionne GRIB + JSON converti (même nom) en une fois pour chargement auto.</div>
+            </div>
+        </div>
+
+        <div id="weatherHistorySubpanel" class="weather-subpanel">
+            <div class="button-row">
+                <button id="weatherHistoryRefreshBtn" style="flex:1;">Actualiser historique</button>
+            </div>
+            <div id="weatherHistoryStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Historique météo: en attente</div>
+            <div id="weatherHistorySummary" class="cloud-status">Les snapshots météo cloud sont affichés dans la partie de droite.</div>
         </div>
     </div>
 
@@ -1418,6 +1435,10 @@
             </details>
         </div>
     </aside>
+    <aside id="weatherHistoryDockPanel" class="waypoint-dock-panel weather-history-dock-panel">
+        <div id="weatherHistoryDockTitle" class="waypoint-dock-panel__title">Historique météo cloud</div>
+        <div id="weatherHistoryTablePanel" class="waypoint-dock-panel__list weather-history-dock-panel__table"></div>
+    </aside>
     <aside id="aiRouteDockPanel" class="waypoint-dock-panel">
         <div id="aiRouteMatrixDockSection">
             <div id="aiRouteDockTitle" class="waypoint-dock-panel__title">Matrice départ + météo</div>
@@ -1452,6 +1473,8 @@
                 <div id="logWorkspacePlaceholder" class="maintenance-canvas-placeholder">Clique sur Ajouter pour ouvrir le formulaire</div>
 
                 <div id="navLogEditorPanel" style="display:none; padding:10px; overflow:auto;">
+                    <div id="navLogWeatherReplaySummary" style="display:none;"></div>
+
                     <label for="watchTimeInput" style="display:block; margin-top:0; font-size:12px;">Heure du quart:</label>
                     <input type="datetime-local" id="watchTimeInput" style="width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;">
 
@@ -1869,7 +1892,7 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=20260426-42"></script>
+<script type="module" src="app.js?v=20260504-47-weather-ticker"></script>
 
 </body>
 </html>

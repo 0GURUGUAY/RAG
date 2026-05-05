@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const SHARE_TABLE = 'public_tracking_shares';
 const NAV_LOG_TABLE = 'nav_log_entries';
-const DEFAULT_HISTORY_HOURS = 72;
+const DEFAULT_HISTORY_HOURS = 168;
 const MAX_HISTORY_HOURS = 720;
 const MAX_TRACK_POINTS = 2400;
 
