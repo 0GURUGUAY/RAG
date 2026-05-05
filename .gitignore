@@ -90,3 +90,4 @@ __pycache__/
 backup/
 supabase/.temp/
 .wrangler/
+.vercel/
