@@ -1,0 +1,1 @@
+# Weather analysis package for local and Vercel imports.
