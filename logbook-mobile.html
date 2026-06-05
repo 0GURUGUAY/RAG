@@ -1011,10 +1011,22 @@
             return Date.now() - startedAt;
         }
 
+        function hasFreshGpsFix(maxAgeMs = 45000) {
+            return Number.isFinite(state.currentFix?.fixTimeMs) && (Date.now() - state.currentFix.fixTimeMs) <= maxAgeMs;
+        }
+
         function render() {
             const isRunning = state.logging;
             const isLoggedIn = !!state.cloudUser?.email;
-            setRunBadge(isRunning ? 'Log en cours' : 'Log arrêté', isRunning ? 'running' : 'idle');
+            const gpsActive = hasFreshGpsFix();
+            setRunBadge(
+                isRunning
+                    ? (gpsActive ? 'Log en cours' : 'GPS à relancer')
+                    : 'Log arrêté',
+                isRunning
+                    ? (gpsActive ? 'running' : 'warning')
+                    : 'idle'
+            );
             if (ui.requestGpsBtn) ui.requestGpsBtn.disabled = state.finishInFlight;
             ui.startBtn.disabled = isRunning || state.finishInFlight;
             ui.finishBtn.disabled = !isRunning || state.finishInFlight;
@@ -1028,7 +1040,7 @@
             if (ui.authSummary) ui.authSummary.classList.toggle('hidden', !isLoggedIn);
             if (ui.authSummaryText) {
                 ui.authSummaryText.textContent = isLoggedIn
-                    ? `${formatAccount(state.cloudUser)}${state.logging ? ' · log en cours' : ''}`
+                    ? `${formatAccount(state.cloudUser)}${state.logging ? (gpsActive ? ' · log en cours' : ' · attente GPS') : ''}`
                     : '--';
             }
             ui.autoStartToggle.checked = !!state.autoStartEnabled;
@@ -1279,7 +1291,7 @@
         function handleGeolocationError(error) {
             const code = Number(error?.code);
             if (code === 1) {
-                setMainStatus('Accès GPS refusé. Autorise la localisation dans Safari pour cette page.', 'error');
+                setMainStatus('Accès GPS refusé par ce site. Dans Safari: aA > Réglages du site web > Localisation > Autoriser, puis touche GPS.', 'error');
             } else if (code === 2) {
                 setMainStatus('Position GPS indisponible pour le moment.', 'error');
             } else if (code === 3) {
@@ -1645,7 +1657,6 @@
             restoreSession();
             bindUi();
             render();
-            ensureWatchRunning();
             try {
                 await initCloud();
             } catch (error) {
@@ -1654,9 +1665,9 @@
             }
 
             if (state.logging) {
-                setMainStatus('Session restaurée. Le monitoring reprend.', 'info');
+                setMainStatus('Session restaurée. Touche GPS pour reprendre le suivi.', 'info');
             } else if (state.autoStartEnabled && state.lastStatusTone !== 'error') {
-                setMainStatus(`Auto start armé. Le log démarrera après ${AUTO_START_DISTANCE_M} m.`, 'info');
+                setMainStatus(`Auto start armé. Touche GPS pour activer le suivi, puis le log démarrera après ${AUTO_START_DISTANCE_M} m.`, 'info');
             }
 
             window.setInterval(tick, 1000);
