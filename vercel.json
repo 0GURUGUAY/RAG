@@ -1,9 +1,22 @@
 {
   "cleanUrls": false,
+  "functions": {
+    "api/**/*.py": {
+      "excludeFiles": "{.venv/**,backup/**,BK_FINAL/**,docs/**,photos/**,logo/**,arduino/**,grib/**,rag/**,supabase/**,*.pdf,*.html,*.js,*.css,ceibo_routes_voyages_waypoints_*.json,polaires_dufour56.json,app.20260315-*.js}"
+    }
+  },
   "rewrites": [
     {
       "source": "/",
       "destination": "/index.html"
+    },
+    {
+      "source": "/log",
+      "destination": "/logbook-mobile.html"
+    },
+    {
+      "source": "/mobile-log",
+      "destination": "/logbook-mobile.html"
     }
   ]
 }

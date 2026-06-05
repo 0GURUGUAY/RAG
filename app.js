@@ -3,7 +3,7 @@ import { feature as topojsonFeature } from 'https://cdn.jsdelivr.net/npm/topojso
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { SignalKClient } from './signalk.js';
 
-const APP_BUILD_VERSION = '20260502-46';
+const APP_BUILD_VERSION = '20260605-48';
 const VOYAGE_STOP_MIN_DURATION_DAYS = 1 / 24;
 const VOYAGE_STOP_DURATION_STEP_DAYS = 1 / 24;
 const VOYAGE_AGENDA_TIME_STEP_MINUTES = 10;
@@ -191,6 +191,7 @@ let documentRagLlmSettings = {
 };
 const LOCAL_RAG_API_URL = 'http://127.0.0.1:8765';
 const LOCAL_WEATHER_ANALYSIS_API_URL = 'http://127.0.0.1:8777';
+const VERCEL_WEATHER_ANALYSIS_API_URL = '/api';
 let documentCloudHydrationInFlight = false;
 let documentCloudHydratedOnce = false;
 let routesViewportFilterEnabled = false;
@@ -2053,6 +2054,7 @@ function clearWeatherForecastCache() {
 function updateDepartureDateTimeInput() {
     const input = document.getElementById('departureDateTimeInput');
     if (!input) return;
+    syncRoutingDepartureDateTimeInputConstraints();
     input.value = `${departureDate}T${normalizeHourTime(departureTime)}`;
 }
 
@@ -2112,6 +2114,42 @@ function formatDateTimeLocalInputValue(value) {
         String(parsed.getMonth() + 1).padStart(2, '0'),
         String(parsed.getDate()).padStart(2, '0')
     ].join('-') + `T${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+}
+
+function getRoutingDepartureMinimumDateTime(referenceDateTime = new Date()) {
+    const base = referenceDateTime instanceof Date && !Number.isNaN(referenceDateTime.getTime())
+        ? new Date(referenceDateTime.getTime())
+        : new Date();
+    base.setHours(0, 0, 0, 0);
+    return base;
+}
+
+function getRoutingDepartureMinimumInputValue(referenceDateTime = new Date()) {
+    return formatDateTimeLocalInputValue(getRoutingDepartureMinimumDateTime(referenceDateTime));
+}
+
+function isRoutingDepartureDateAllowed(value, referenceDateTime = new Date()) {
+    const normalized = normalizeDateTimeLocalValue(value);
+    if (!normalized) return false;
+    return normalized.slice(0, 10) >= getRoutingDepartureMinimumInputValue(referenceDateTime).slice(0, 10);
+}
+
+function getValidRoutingDepartureDateTimeValue(value, referenceDateTime = new Date()) {
+    const normalized = normalizeDateTimeLocalValue(value);
+    if (normalized && isRoutingDepartureDateAllowed(normalized, referenceDateTime)) return normalized;
+    return formatDateTimeLocalInputValue(getNextSuggestedDepartureDateTime(referenceDateTime));
+}
+
+function syncRoutingDepartureDateTimeInputConstraints(referenceDateTime = new Date()) {
+    const input = document.getElementById('departureDateTimeInput');
+    if (!input) return;
+    input.min = getRoutingDepartureMinimumInputValue(referenceDateTime);
+}
+
+function syncRoutePlanningDepartureInputConstraints(referenceDateTime = new Date()) {
+    const input = document.getElementById('voyageDepartureInput');
+    if (!input) return;
+    input.min = getRoutingDepartureMinimumInputValue(referenceDateTime);
 }
 
 function formatDateInputValue(value) {
@@ -3330,10 +3368,11 @@ function compareSavedRoutesByStartCoordinates(routeA, routeB, sortOrder = 'asc')
 }
 
 function getRoutePlanningFormValues() {
+    const agendaDepartureDateTime = normalizeDateTimeLocalValue(document.getElementById('voyageDepartureInput')?.value);
     return {
         voyageName: String(document.getElementById('voyageNameInput')?.value || '').trim(),
         voyageLeg: String(document.getElementById('voyageLegInput')?.value || '').trim(),
-        agendaDepartureDateTime: normalizeDateTimeLocalValue(document.getElementById('voyageDepartureInput')?.value),
+        agendaDepartureDateTime: agendaDepartureDateTime && isRoutingDepartureDateAllowed(agendaDepartureDateTime) ? agendaDepartureDateTime : '',
         agendaArrivalDateTime: normalizeDateTimeLocalValue(document.getElementById('voyageArrivalInput')?.value),
         sharedWith: sanitizeSharedWithValue(document.getElementById('voyageSharedWithInput')?.value),
         agendaNotes: String(document.getElementById('voyageNotesInput')?.value || '').trim()
@@ -3348,10 +3387,16 @@ function applyRoutePlanningForm(route) {
     const voyageArrivalInput = document.getElementById('voyageArrivalInput');
     const voyageSharedWithInput = document.getElementById('voyageSharedWithInput');
     const voyageNotesInput = document.getElementById('voyageNotesInput');
+    const normalizedAgendaDeparture = normalizeDateTimeLocalValue(safeRoute.agendaDepartureDateTime || '');
 
     if (voyageNameInput) voyageNameInput.value = String(safeRoute.voyageName || '');
     if (voyageLegInput) voyageLegInput.value = String(safeRoute.voyageLeg || '');
-    if (voyageDepartureInput) voyageDepartureInput.value = normalizeDateTimeLocalValue(safeRoute.agendaDepartureDateTime || '');
+    if (voyageDepartureInput) {
+        syncRoutePlanningDepartureInputConstraints();
+        voyageDepartureInput.value = normalizedAgendaDeparture && isRoutingDepartureDateAllowed(normalizedAgendaDeparture)
+            ? normalizedAgendaDeparture
+            : '';
+    }
     if (voyageArrivalInput) voyageArrivalInput.value = normalizeDateTimeLocalValue(safeRoute.agendaArrivalDateTime || '');
     if (voyageSharedWithInput) voyageSharedWithInput.value = String(safeRoute.sharedWith || '');
     if (voyageNotesInput) voyageNotesInput.value = String(safeRoute.agendaNotes || '');
@@ -7757,7 +7802,9 @@ function restoreDepartureDateTimeFromStorage() {
         const rawValue = String(localStorage.getItem(ROUTING_DEPARTURE_DATETIME_STORAGE_KEY) || '').trim();
         if (!rawValue || !rawValue.includes('T')) return false;
 
-        const [datePart, timePart] = rawValue.split('T');
+        const sanitizedValue = getValidRoutingDepartureDateTimeValue(rawValue);
+        const normalizedRawValue = normalizeDateTimeLocalValue(rawValue);
+        const [datePart, timePart] = sanitizedValue.split('T');
         if (!datePart) return false;
 
         const restoredDateTime = new Date(`${datePart}T${timePart || '12:00'}:00`);
@@ -7765,6 +7812,7 @@ function restoreDepartureDateTimeFromStorage() {
 
         departureDate = datePart;
         departureTime = normalizeHourTime(timePart || '12:00');
+        if (sanitizedValue !== normalizedRawValue) saveDepartureDateTimeToStorage();
         return true;
     } catch (_error) {
         return false;
@@ -7772,8 +7820,25 @@ function restoreDepartureDateTimeFromStorage() {
 }
 
 function setDepartureFromDateTimeInput(rawValue, options = {}) {
-    if (!rawValue || !rawValue.includes('T')) return;
-    const [datePart, timePart] = rawValue.split('T');
+    const normalizedValue = normalizeDateTimeLocalValue(rawValue);
+    if (!normalizedValue || !normalizedValue.includes('T')) return;
+    const input = document.getElementById('departureDateTimeInput');
+    syncRoutingDepartureDateTimeInputConstraints();
+    if (!isRoutingDepartureDateAllowed(normalizedValue)) {
+        const fallbackValue = getValidRoutingDepartureDateTimeValue('', new Date());
+        const [fallbackDatePart, fallbackTimePart] = fallbackValue.split('T');
+        departureDate = fallbackDatePart;
+        departureTime = normalizeHourTime(fallbackTimePart || '12:00');
+        updateDepartureDateTimeInput();
+        saveDepartureDateTimeToStorage();
+        if (input) {
+            input.setCustomValidity(t('Impossible de planifier un routing avant aujourd\'hui.', 'No se puede planificar un routing antes de hoy.', 'Routing cannot be planned before today.'));
+            input.reportValidity();
+        }
+        return;
+    }
+    if (input) input.setCustomValidity('');
+    const [datePart, timePart] = normalizedValue.split('T');
     if (datePart) departureDate = datePart;
     departureTime = normalizeHourTime(timePart || '12:00');
     updateDepartureDateTimeInput();
@@ -8915,7 +8980,7 @@ function startPassiveNavigationWatch() {
         resetNavAutoLogArming(navGpsLatestFix);
     }
 
-    navPassiveWatchId = navigator.geolocation.watchPosition(
+    requestCurrentPositionWithFallback(
         position => {
             handlePassiveNavigationFix(position);
         },
@@ -8923,13 +8988,45 @@ function startPassiveNavigationWatch() {
             if (activeTabName === 'navlog') {
                 setNavLogStatus(getGeolocationErrorMessage(error), true);
             }
-        },
-        {
-            enableHighAccuracy: true,
-            maximumAge: 3000,
-            timeout: 10000
         }
     );
+
+    const startWatch = (enableHighAccuracy = true) => {
+        navPassiveWatchId = navigator.geolocation.watchPosition(
+            position => {
+                handlePassiveNavigationFix(position);
+            },
+            error => {
+                const code = Number(error?.code);
+                const canRetryWithLowAccuracy = enableHighAccuracy && (code === 2 || code === 3);
+                if (canRetryWithLowAccuracy) {
+                    if (navPassiveWatchId !== null) {
+                        navigator.geolocation.clearWatch(navPassiveWatchId);
+                        navPassiveWatchId = null;
+                    }
+                    if (activeTabName === 'navlog') {
+                        setNavLogStatus(t(
+                            'GPS haute precision indisponible, passage en suivi standard...',
+                            'GPS de alta precision no disponible, cambio a seguimiento estandar...'
+                        ));
+                    }
+                    startWatch(false);
+                    return;
+                }
+
+                if (activeTabName === 'navlog') {
+                    setNavLogStatus(getGeolocationErrorMessage(error), true);
+                }
+            },
+            {
+                enableHighAccuracy,
+                maximumAge: enableHighAccuracy ? 3000 : 15000,
+                timeout: enableHighAccuracy ? 10000 : 20000
+            }
+        );
+    };
+
+    startWatch(true);
 
     if (activeTabName === 'navlog' && !isNavigationLoggingActive()) {
         setNavLogStatus(getAutoLogArmedStatusMessage('auto'));
@@ -32427,7 +32524,8 @@ function renderWeatherDiagnostic(payload) {
 }
 
 async function requestWeatherDiagnostic(lat, lon, horizonDays) {
-    const response = await fetch(`${LOCAL_WEATHER_ANALYSIS_API_URL}/weather/analyze`, {
+    const weatherAnalysisApiBaseUrl = await resolveWeatherAnalysisApiBaseUrl();
+    const response = await fetch(`${weatherAnalysisApiBaseUrl}/weather/analyze`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -32446,6 +32544,57 @@ async function requestWeatherDiagnostic(lat, lon, horizonDays) {
     }
 
     return response.json();
+}
+
+let weatherAnalysisApiBaseUrlPromise = null;
+
+async function canReachWeatherAnalysisApi(baseUrl) {
+    const safeBaseUrl = String(baseUrl || '').trim();
+    if (!safeBaseUrl) return false;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+
+    try {
+        const response = await fetch(`${safeBaseUrl}/weather/health`, {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        return response.ok;
+    } catch (_error) {
+        return false;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function resolveWeatherAnalysisApiBaseUrl() {
+    if (weatherAnalysisApiBaseUrlPromise) return weatherAnalysisApiBaseUrlPromise;
+
+    weatherAnalysisApiBaseUrlPromise = (async () => {
+        const host = String(window.location.hostname || '').trim().toLowerCase();
+        const candidates = [];
+
+        if (window.location.protocol !== 'file:') {
+            candidates.push(VERCEL_WEATHER_ANALYSIS_API_URL);
+        }
+        if (host === 'localhost' || host === '127.0.0.1') {
+            candidates.unshift(LOCAL_WEATHER_ANALYSIS_API_URL);
+        } else {
+            candidates.push(LOCAL_WEATHER_ANALYSIS_API_URL);
+        }
+
+        for (const candidate of candidates) {
+            if (await canReachWeatherAnalysisApi(candidate)) {
+                return candidate;
+            }
+        }
+
+        return candidates[0] || LOCAL_WEATHER_ANALYSIS_API_URL;
+    })();
+
+    return weatherAnalysisApiBaseUrlPromise;
 }
 
 async function refreshWeatherDiagnostic() {
@@ -32912,6 +33061,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     restoreDepartureDateTimeFromStorage();
     updateDepartureDateTimeInput();
     const departureDateTimeInput = document.getElementById("departureDateTimeInput");
+    syncRoutingDepartureDateTimeInputConstraints();
     const handleDepartureDateTimeChange = function(e) {
         setDepartureFromDateTimeInput(e.target.value);
     };
@@ -35081,6 +35231,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         node.addEventListener('input', () => updateVoyagePlanningSummary());
         node.addEventListener('change', () => updateVoyagePlanningSummary());
     });
+    syncRoutePlanningDepartureInputConstraints();
 
     const polarProfileManagerSelect = document.getElementById('polarProfileManagerSelect');
     if (polarProfileManagerSelect) {

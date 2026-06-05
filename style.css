@@ -3952,6 +3952,31 @@ button:disabled:hover {
     transition: background-color 160ms ease, border-color 160ms ease, opacity 160ms ease, box-shadow 160ms ease;
 }
 
+#navLogMobileLink {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(79, 209, 161, 0.16), rgba(88, 160, 255, 0.18));
+    border: 1px solid rgba(111, 193, 226, 0.28);
+    color: #e6f7ff;
+    text-decoration: none;
+    font-weight: 700;
+    transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+#navLogMobileLink:hover {
+    background: linear-gradient(135deg, rgba(79, 209, 161, 0.26), rgba(88, 160, 255, 0.24));
+    border-color: rgba(111, 193, 226, 0.46);
+}
+
+#navLogMobileLink:active {
+    transform: scale(0.99);
+}
+
 #startNavLogBtn.nav-gps-btn--active {
     background: #1f9d55;
     border-color: #188346;

@@ -91,3 +91,4 @@ backup/
 supabase/.temp/
 .wrangler/
 .vercel/
+.vercel

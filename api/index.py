@@ -1,0 +1,1 @@
+from weather.server import app

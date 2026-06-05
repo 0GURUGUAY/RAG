@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#07141d">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CEIBO Log">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="logbook-mobile.webmanifest">
+    <link rel="icon" href="ceibo-logbook-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="ceibo-favicon.jpg">
+    <title>CEIBO · Logbook Mobile · v20260605-48</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #07141d;
+            --bg-soft: #102533;
+            --panel: rgba(9, 29, 42, 0.88);
+            --panel-strong: rgba(14, 40, 57, 0.96);
+            --line: rgba(128, 190, 219, 0.18);
+            --text: #ecf7ff;
+            --muted: #95b2c2;
+            --accent: #4fd1a1;
+            --accent-strong: #2aa37d;
+            --warning: #f4b942;
+            --danger: #ff7c72;
+            --shadow: 0 24px 50px rgba(0, 0, 0, 0.28);
+            --radius: 22px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            min-height: 100%;
+            background:
+                radial-gradient(circle at top left, rgba(79, 209, 161, 0.18), transparent 32%),
+                radial-gradient(circle at top right, rgba(88, 160, 255, 0.16), transparent 28%),
+                linear-gradient(180deg, #07141d 0%, #091a25 45%, #061019 100%);
+            color: var(--text);
+            font-family: "Avenir Next", "SF Pro Display", "Segoe UI", sans-serif;
+        }
+
+        body {
+            padding: calc(18px + env(safe-area-inset-top, 0px)) 16px calc(20px + env(safe-area-inset-bottom, 0px));
+        }
+
+        a {
+            color: inherit;
+        }
+
+        .shell {
+            width: min(100%, 560px);
+            margin: 0 auto;
+        }
+
+        .hero,
+        .panel {
+            border: 1px solid var(--line);
+            background: var(--panel);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(14px);
+            border-radius: var(--radius);
+        }
+
+        .hero {
+            position: relative;
+            overflow: hidden;
+            padding: 22px 18px 18px;
+            background:
+                linear-gradient(155deg, rgba(79, 209, 161, 0.16), rgba(88, 160, 255, 0.08)),
+                var(--panel-strong);
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -28px -34px auto;
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(79, 209, 161, 0.24) 0%, rgba(79, 209, 161, 0) 70%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            color: #d5edf8;
+            font-size: 12px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 14px 0 10px;
+            font-size: clamp(28px, 7vw, 38px);
+            line-height: 1;
+            letter-spacing: -0.03em;
+        }
+
+        .lead {
+            margin: 0;
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.45;
+        }
+
+        .stack {
+            display: grid;
+            gap: 14px;
+            margin-top: 16px;
+        }
+
+        .status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            font-size: 13px;
+            font-weight: 600;
+            color: #deedf8;
+        }
+
+        .badge::before {
+            content: "";
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #8ba8b9;
+            box-shadow: 0 0 0 rgba(139, 168, 185, 0.28);
+        }
+
+        .badge[data-state="running"]::before {
+            background: var(--accent);
+            box-shadow: 0 0 0 8px rgba(79, 209, 161, 0.14);
+            animation: pulse 1.8s infinite;
+        }
+
+        .badge[data-state="error"]::before {
+            background: var(--danger);
+        }
+
+        .badge[data-state="warning"]::before {
+            background: var(--warning);
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(79, 209, 161, 0.26); }
+            70% { box-shadow: 0 0 0 11px rgba(79, 209, 161, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(79, 209, 161, 0); }
+        }
+
+        .panel {
+            padding: 16px;
+        }
+
+        .panel h2 {
+            margin: 0 0 6px;
+            font-size: 16px;
+            letter-spacing: -0.01em;
+        }
+
+        .hint {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        button,
+        .link-btn {
+            appearance: none;
+            border: 0;
+            border-radius: 18px;
+            min-height: 60px;
+            padding: 14px 16px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
+            text-decoration: none;
+        }
+
+        button:active,
+        .link-btn:active {
+            transform: scale(0.985);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, var(--accent), #1f7b68);
+            color: #042117;
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #eff4f8, #9fb9ca);
+            color: #0c1d2a;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .metric {
+            padding: 14px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .metric-value {
+            margin-top: 6px;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+        }
+
+        .metric-sub {
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .toggle-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .form-stack {
+            display: grid;
+            gap: 10px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .auth-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .field {
+            display: grid;
+            gap: 6px;
+        }
+
+        .field label {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .field input {
+            width: 100%;
+            min-height: 46px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            font: inherit;
+        }
+
+        .field input::placeholder {
+            color: #7f9aaa;
+        }
+
+        .field--wide {
+            grid-column: 1 / -1;
+        }
+
+        .auth-actions {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .auth-summary {
+            display: grid;
+            gap: 10px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(79, 209, 161, 0.08);
+            border: 1px solid rgba(79, 209, 161, 0.14);
+        }
+
+        .auth-summary strong {
+            font-size: 14px;
+        }
+
+        .auth-summary span {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .btn-auth,
+        .btn-secondary,
+        .btn-ghost {
+            min-height: 48px;
+            border-radius: 14px;
+            font-weight: 700;
+        }
+
+        .btn-auth {
+            background: linear-gradient(135deg, #56a9ff, #2e6cb1);
+            color: #eef7ff;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #e6f3ff;
+        }
+
+        .btn-ghost {
+            background: rgba(255, 124, 114, 0.08);
+            border: 1px solid rgba(255, 124, 114, 0.14);
+            color: #ffd7d3;
+        }
+
+        .toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .toggle strong {
+            display: block;
+            font-size: 14px;
+        }
+
+        .toggle span {
+            display: block;
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .toggle input {
+            width: 22px;
+            height: 22px;
+            accent-color: var(--accent);
+            flex: 0 0 auto;
+        }
+
+        .status-text {
+            min-height: 42px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #dcecf7;
+            font-size: 13px;
+            line-height: 1.45;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .status-text[data-tone="error"] {
+            color: #ffd8d4;
+            border-color: rgba(255, 124, 114, 0.26);
+            background: rgba(255, 124, 114, 0.08);
+        }
+
+        .mini-list {
+            display: grid;
+            gap: 8px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .mini-list li {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            font-size: 13px;
+        }
+
+        .mini-list li:last-child {
+            border-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .mini-list strong {
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .install-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 12px;
+            color: #dcecf8;
+        }
+
+        .install-pill::before {
+            content: "";
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8ba8b9;
+        }
+
+        .install-pill[data-installed="true"]::before {
+            background: var(--accent);
+        }
+
+        .link-btn {
+            min-height: auto;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #d9ebf7;
+        }
+
+        @media (max-width: 420px) {
+            .actions,
+            .metric-grid,
+            .auth-grid,
+            .auth-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <div class="eyebrow">CEIBO · iPhone log · v20260605-48</div>
+            <h1>Start / Finish</h1>
+            <p class="lead">Une page simple pour lancer un log GPS, le suivre en direct, puis l’enregistrer dans Supabase à la fin.</p>
+            <div class="stack">
+                <div class="status-row">
+                    <div id="runBadge" class="badge" data-state="idle">Log arrêté</div>
+                    <div id="cloudBadge" class="badge" data-state="warning">Cloud en attente</div>
+                </div>
+                <div id="mainStatus" class="status-text">Initialisation en cours…</div>
+            </div>
+        </section>
+
+        <section id="authPanel" class="panel stack">
+            <h2>Connexion</h2>
+            <p class="hint">Cette page mobile est autonome: connecte-toi ici une fois, puis utilise directement le log sans repasser par l’application complète.</p>
+            <div id="authForm" class="form-stack">
+                <div class="auth-grid">
+                    <div class="field field--wide">
+                        <label for="mobileCloudEmailInput">Email</label>
+                        <input id="mobileCloudEmailInput" type="email" placeholder="Email utilisateur" autocomplete="username email">
+                    </div>
+                    <div class="field field--wide">
+                        <label for="mobileCloudPasswordInput">Mot de passe</label>
+                        <input id="mobileCloudPasswordInput" type="password" placeholder="Mot de passe" autocomplete="current-password">
+                    </div>
+                </div>
+                <div class="auth-actions">
+                    <button id="mobileCloudSignInBtn" type="button" class="btn-auth">Connexion</button>
+                    <button id="mobileCloudSignUpBtn" type="button" class="btn-secondary">Créer compte</button>
+                    <button id="mobileCloudSignOutBtn" type="button" class="btn-ghost">Déconnexion</button>
+                </div>
+                <div id="mobileCloudAuthStatus" class="status-text">Compte non connecté.</div>
+            </div>
+            <div id="authSummary" class="auth-summary hidden">
+                <strong>Compte connecté</strong>
+                <span id="authSummaryText">--</span>
+                <button id="mobileCloudSignOutCompactBtn" type="button" class="btn-ghost">Déconnexion</button>
+            </div>
+        </section>
+
+        <section class="panel stack">
+            <h2>Contrôle</h2>
+            <p class="hint">Le bouton GPS relance explicitement la demande de localisation sur iPhone. Start démarre même hors ligne; si le cloud n'est pas disponible au Finish, le log reste stocké localement puis se synchronise au prochain login.</p>
+            <div class="actions">
+                <button id="requestGpsBtn" type="button" class="btn-secondary">GPS</button>
+                <button id="startBtn" type="button" class="btn-start">Start</button>
+                <button id="finishBtn" type="button" class="btn-stop">Finish</button>
+            </div>
+        </section>
+
+        <section class="panel stack">
+            <h2>Monitoring</h2>
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-label">Durée</div>
+                    <div id="elapsedValue" class="metric-value">00:00:00</div>
+                    <div class="metric-sub">Depuis le démarrage de la session</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Points</div>
+                    <div id="pointsValue" class="metric-value">0</div>
+                    <div class="metric-sub">Échantillons GPS capturés</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Distance</div>
+                    <div id="distanceValue" class="metric-value">0.00 NM</div>
+                    <div class="metric-sub">Distance cumulée sur la session</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Dernier fix</div>
+                    <div id="fixAgeValue" class="metric-value">--</div>
+                    <div id="speedValue" class="metric-sub">Vitesse -- kn</div>
+                </div>
+            </div>
+            <ul class="mini-list">
+                <li><strong>Position</strong><span id="positionValue">--</span></li>
+                <li><strong>Compte cloud</strong><span id="accountValue">--</span></li>
+                <li><strong>Dernier enregistrement</strong><span id="saveValue">--</span></li>
+            </ul>
+        </section>
+
+        <section class="panel stack">
+            <h2>Automatique</h2>
+            <div class="toggle-list">
+                <label class="toggle" for="autoStartToggle">
+                    <div>
+                        <strong>Auto start</strong>
+                        <span>Démarre automatiquement si le bateau se déplace de plus de 100 m.</span>
+                    </div>
+                    <input id="autoStartToggle" type="checkbox">
+                </label>
+                <label class="toggle" for="autoStopToggle">
+                    <div>
+                        <strong>Auto stop</strong>
+                        <span>Arrête automatiquement après 15 minutes quasi immobile.</span>
+                    </div>
+                    <input id="autoStopToggle" type="checkbox">
+                </label>
+            </div>
+        </section>
+
+        <section class="panel stack">
+            <h2>Accès</h2>
+            <p class="hint">Accès direct conseillé: utilise l’URL courte dédiée et ajoute-la à l’écran d’accueil de l’iPhone.</p>
+            <div id="installState" class="install-pill" data-installed="false">Mode navigateur</div>
+            <div id="installHint" class="status-text">Sur iPhone: Safari → Partager → Sur l’écran d’accueil pour l’ouvrir ensuite en plein écran.</div>
+            <div class="footer-links">
+                <a class="link-btn" href="/log">Ouvrir l’URL courte /log</a>
+                <a class="link-btn" href="index.html">Ouvrir CEIBO</a>
+            </div>
+        </section>
+    </main>
+
+    <script type="module">
+        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+        const DEFAULT_CLOUD_CONFIG = {
+            url: 'https://wtavqhpntfnsklbniqzf.supabase.co',
+            anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind0YXZxaHBudGZuc2tsYm5pcXpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NjkwNzMsImV4cCI6MjA4ODI0NTA3M30.v4T63RWtSjCHBGM5y4nFKdONpteviLSer-P_8vWAY68',
+            projectKey: 'ceibo-main'
+        };
+
+        const CLOUD_CONFIG_STORAGE_KEY = 'ceiboCloudConfigV1';
+        const MOBILE_PREFS_STORAGE_KEY = 'ceiboMobileLogPrefsV1';
+        const MOBILE_SESSION_STORAGE_KEY = 'ceiboMobileLogSessionV1';
+        const MOBILE_AUTH_STORAGE_KEY = 'ceiboMobileLogAuthV1';
+        const MOBILE_PENDING_UPLOADS_STORAGE_KEY = 'ceiboMobilePendingLogUploadsV1';
+        const NAV_LOG_TABLE = 'nav_log_entries';
+        const PROJECTS_TABLE = 'projects';
+        const AUTO_START_DISTANCE_M = 100;
+        const AUTO_STOP_IDLE_MS = 15 * 60 * 1000;
+        const AUTO_STOP_SPEED_THRESHOLD_KN = 0.7;
+        const AUTO_STOP_DRIFT_THRESHOLD_M = 15;
+        const SAMPLE_MIN_INTERVAL_MS = 15000;
+        const SAMPLE_MIN_DISTANCE_M = 20;
+
+        const ui = {
+            requestGpsBtn: document.getElementById('requestGpsBtn'),
+            startBtn: document.getElementById('startBtn'),
+            finishBtn: document.getElementById('finishBtn'),
+            runBadge: document.getElementById('runBadge'),
+            cloudBadge: document.getElementById('cloudBadge'),
+            mainStatus: document.getElementById('mainStatus'),
+            authStatus: document.getElementById('mobileCloudAuthStatus'),
+            authForm: document.getElementById('authForm'),
+            authSummary: document.getElementById('authSummary'),
+            authSummaryText: document.getElementById('authSummaryText'),
+            cloudEmailInput: document.getElementById('mobileCloudEmailInput'),
+            cloudPasswordInput: document.getElementById('mobileCloudPasswordInput'),
+            cloudSignInBtn: document.getElementById('mobileCloudSignInBtn'),
+            cloudSignUpBtn: document.getElementById('mobileCloudSignUpBtn'),
+            cloudSignOutBtn: document.getElementById('mobileCloudSignOutBtn'),
+            cloudSignOutCompactBtn: document.getElementById('mobileCloudSignOutCompactBtn'),
+            elapsedValue: document.getElementById('elapsedValue'),
+            pointsValue: document.getElementById('pointsValue'),
+            distanceValue: document.getElementById('distanceValue'),
+            fixAgeValue: document.getElementById('fixAgeValue'),
+            speedValue: document.getElementById('speedValue'),
+            positionValue: document.getElementById('positionValue'),
+            accountValue: document.getElementById('accountValue'),
+            saveValue: document.getElementById('saveValue'),
+            installState: document.getElementById('installState'),
+            installHint: document.getElementById('installHint'),
+            autoStartToggle: document.getElementById('autoStartToggle'),
+            autoStopToggle: document.getElementById('autoStopToggle')
+        };
+
+        const state = {
+            cloudConfig: null,
+            cloudClient: null,
+            cloudUser: null,
+            cloudAuthBound: false,
+            logging: false,
+            watchId: null,
+            currentFix: null,
+            armingFix: null,
+            sessionStartIso: '',
+            traceSamples: [],
+            distanceNm: 0,
+            lastSaveText: '',
+            lastInsertedId: '',
+            autoStartEnabled: true,
+            autoStopEnabled: false,
+            stationarySinceMs: 0,
+            lastStatusTone: 'info',
+            authStatusTone: 'info',
+            finishInFlight: false,
+            projectId: '',
+            isStandalone: false,
+            pendingUploads: [],
+            pendingSyncInFlight: false
+        };
+
+        function setAuthStatus(message, tone = 'info') {
+            if (!ui.authStatus) return;
+            ui.authStatus.textContent = String(message || '');
+            ui.authStatus.dataset.tone = tone === 'error' ? 'error' : 'info';
+            state.authStatusTone = tone;
+        }
+
+        function detectStandaloneMode() {
+            const mediaStandalone = typeof window.matchMedia === 'function'
+                ? window.matchMedia('(display-mode: standalone)').matches
+                : false;
+            const navigatorStandalone = window.navigator && 'standalone' in window.navigator
+                ? !!window.navigator.standalone
+                : false;
+            return mediaStandalone || navigatorStandalone;
+        }
+
+        function isUuidString(value) {
+            return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+        }
+
+        function normalizeEmail(email) {
+            return String(email || '').trim().toLowerCase();
+        }
+
+        function getCloudConfig() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(CLOUD_CONFIG_STORAGE_KEY) || 'null');
+                const url = String(parsed?.url || DEFAULT_CLOUD_CONFIG.url).trim();
+                const anonKey = String(parsed?.anonKey || DEFAULT_CLOUD_CONFIG.anonKey).trim();
+                const projectKey = String(parsed?.projectKey || DEFAULT_CLOUD_CONFIG.projectKey).trim();
+                if (!url || !anonKey || !projectKey) return null;
+                return { url, anonKey, projectKey };
+            } catch (_error) {
+                return { ...DEFAULT_CLOUD_CONFIG };
+            }
+        }
+
+        function loadPrefs() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(MOBILE_PREFS_STORAGE_KEY) || 'null');
+                state.autoStartEnabled = parsed?.autoStartEnabled !== false;
+                state.autoStopEnabled = !!parsed?.autoStopEnabled;
+            } catch (_error) {
+                state.autoStartEnabled = true;
+                state.autoStopEnabled = false;
+            }
+        }
+
+        function normalizePendingLogEntry(entry) {
+            if (!entry || typeof entry !== 'object') return null;
+            const traceSamples = Array.isArray(entry.trace_samples) ? entry.trace_samples : [];
+            const watchTimeIso = String(entry.watch_time_iso || '').trim();
+            const watchEndTimeIso = String(entry.watch_end_time_iso || '').trim();
+            if (!watchTimeIso || !watchEndTimeIso || !traceSamples.length) return null;
+            return {
+                watch_time_iso: watchTimeIso,
+                watch_end_time_iso: watchEndTimeIso,
+                trace_samples: traceSamples,
+                lat: Number.isFinite(Number(entry.lat)) ? Number(entry.lat) : null,
+                lng: Number.isFinite(Number(entry.lng)) ? Number(entry.lng) : null,
+                speed_kn: Number.isFinite(Number(entry.speed_kn)) ? Number(entry.speed_kn) : null,
+                heading_deg: Number.isFinite(Number(entry.heading_deg)) ? Number(entry.heading_deg) : null,
+                log_distance_nm: Number.isFinite(Number(entry.log_distance_nm)) ? Number(entry.log_distance_nm) : 0,
+                events: String(entry.events || '').trim() || 'Log iPhone',
+                source: 'mobile-web',
+                watch_crew: 'iPhone'
+            };
+        }
+
+        function loadPendingUploads() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(MOBILE_PENDING_UPLOADS_STORAGE_KEY) || '[]');
+                state.pendingUploads = Array.isArray(parsed)
+                    ? parsed.map(normalizePendingLogEntry).filter(Boolean)
+                    : [];
+            } catch (_error) {
+                state.pendingUploads = [];
+            }
+        }
+
+        function savePendingUploads() {
+            localStorage.setItem(MOBILE_PENDING_UPLOADS_STORAGE_KEY, JSON.stringify(state.pendingUploads));
+        }
+
+        function savePrefs() {
+            localStorage.setItem(MOBILE_PREFS_STORAGE_KEY, JSON.stringify({
+                autoStartEnabled: !!state.autoStartEnabled,
+                autoStopEnabled: !!state.autoStopEnabled
+            }));
+        }
+
+        function loadAuthDraft() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(MOBILE_AUTH_STORAGE_KEY) || 'null');
+                if (ui.cloudEmailInput && parsed?.email) {
+                    ui.cloudEmailInput.value = String(parsed.email || '');
+                }
+            } catch (_error) {
+                // ignore
+            }
+        }
+
+        function saveAuthDraft() {
+            localStorage.setItem(MOBILE_AUTH_STORAGE_KEY, JSON.stringify({
+                email: String(ui.cloudEmailInput?.value || '').trim().toLowerCase()
+            }));
+        }
+
+        function readCredentials() {
+            return {
+                email: String(ui.cloudEmailInput?.value || '').trim().toLowerCase(),
+                password: String(ui.cloudPasswordInput?.value || '').trim()
+            };
+        }
+
+        function serializeFix(fix) {
+            if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng)) return null;
+            return {
+                lat: fix.lat,
+                lng: fix.lng,
+                speedKn: Number.isFinite(fix.speedKn) ? fix.speedKn : null,
+                headingDeg: Number.isFinite(fix.headingDeg) ? fix.headingDeg : null,
+                fixTimeMs: Number.isFinite(fix.fixTimeMs) ? fix.fixTimeMs : Date.now()
+            };
+        }
+
+        function restoreSession() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(MOBILE_SESSION_STORAGE_KEY) || 'null');
+                if (!parsed || typeof parsed !== 'object') return;
+                state.logging = !!parsed.logging;
+                state.sessionStartIso = String(parsed.sessionStartIso || '');
+                state.traceSamples = Array.isArray(parsed.traceSamples) ? parsed.traceSamples : [];
+                state.distanceNm = Number.isFinite(Number(parsed.distanceNm)) ? Number(parsed.distanceNm) : 0;
+                state.currentFix = serializeFix(parsed.currentFix);
+                state.armingFix = serializeFix(parsed.armingFix);
+                state.lastSaveText = String(parsed.lastSaveText || '');
+                state.lastInsertedId = String(parsed.lastInsertedId || '');
+                state.stationarySinceMs = Number.isFinite(Number(parsed.stationarySinceMs)) ? Number(parsed.stationarySinceMs) : 0;
+            } catch (_error) {
+                clearSessionState();
+            }
+        }
+
+        function saveSession() {
+            localStorage.setItem(MOBILE_SESSION_STORAGE_KEY, JSON.stringify({
+                logging: !!state.logging,
+                sessionStartIso: state.sessionStartIso,
+                traceSamples: state.traceSamples,
+                distanceNm: state.distanceNm,
+                currentFix: serializeFix(state.currentFix),
+                armingFix: serializeFix(state.armingFix),
+                lastSaveText: state.lastSaveText,
+                lastInsertedId: state.lastInsertedId,
+                stationarySinceMs: state.stationarySinceMs
+            }));
+        }
+
+        function clearSessionState() {
+            state.logging = false;
+            state.sessionStartIso = '';
+            state.traceSamples = [];
+            state.distanceNm = 0;
+            state.stationarySinceMs = 0;
+            localStorage.removeItem(MOBILE_SESSION_STORAGE_KEY);
+        }
+
+        function restartGpsWatch() {
+            if (state.watchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(state.watchId);
+                state.watchId = null;
+            }
+            setMainStatus('Demande GPS en cours...', 'info');
+            ensureWatchRunning();
+            render();
+        }
+
+        function setMainStatus(message, tone = 'info') {
+            ui.mainStatus.textContent = String(message || '');
+            ui.mainStatus.dataset.tone = tone === 'error' ? 'error' : 'info';
+            state.lastStatusTone = tone;
+        }
+
+        function setRunBadge(text, status) {
+            ui.runBadge.textContent = text;
+            ui.runBadge.dataset.state = status;
+        }
+
+        function setCloudBadge(text, status) {
+            ui.cloudBadge.textContent = text;
+            ui.cloudBadge.dataset.state = status;
+        }
+
+        function formatDuration(ms) {
+            const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+            const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
+
+        function formatFixAge(ms) {
+            if (!Number.isFinite(ms) || ms < 0) return '--';
+            if (ms < 1000) return 'maintenant';
+            if (ms < 60000) return `${Math.floor(ms / 1000)} s`;
+            return `${Math.floor(ms / 60000)} min`;
+        }
+
+        function formatCoordinate(value, positiveSuffix, negativeSuffix) {
+            if (!Number.isFinite(value)) return '--';
+            const suffix = value >= 0 ? positiveSuffix : negativeSuffix;
+            return `${Math.abs(value).toFixed(5)} ${suffix}`;
+        }
+
+        function formatPosition(fix) {
+            if (!fix) return '--';
+            return `${formatCoordinate(fix.lat, 'N', 'S')} · ${formatCoordinate(fix.lng, 'E', 'W')}`;
+        }
+
+        function formatAccount(user) {
+            if (!user?.email) return 'Non connecté';
+            const label = String(user.user_metadata?.full_name || '').trim();
+            return label ? `${label} · ${user.email}` : String(user.email);
+        }
+
+        function toRad(value) {
+            return value * Math.PI / 180;
+        }
+
+        function toDeg(value) {
+            return value * 180 / Math.PI;
+        }
+
+        function normalizeCourseDegrees(value) {
+            const normalized = Number(value);
+            if (!Number.isFinite(normalized)) return null;
+            return ((normalized % 360) + 360) % 360;
+        }
+
+        function distanceNm(lat1, lon1, lat2, lon2) {
+            const r = 6371000;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat / 2) ** 2
+                + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return (r * c) / 1852;
+        }
+
+        function bearingDegrees(lat1, lon1, lat2, lon2) {
+            const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+            const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2))
+                - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+            return normalizeCourseDegrees(toDeg(Math.atan2(y, x)));
+        }
+
+        function buildFix(position, previousFix = null) {
+            const latitude = Number(position?.coords?.latitude);
+            const longitude = Number(position?.coords?.longitude);
+            const timestamp = Number.isFinite(Number(position?.timestamp)) ? Number(position.timestamp) : Date.now();
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+            const rawSpeed = position?.coords?.speed;
+            const nativeSpeedMs = typeof rawSpeed === 'number' && Number.isFinite(rawSpeed) ? rawSpeed : null;
+            const rawHeading = position?.coords?.heading;
+            const nativeHeadingDeg = typeof rawHeading === 'number' && Number.isFinite(rawHeading) ? rawHeading : null;
+
+            let derivedSpeedKn = null;
+            let derivedHeadingDeg = null;
+            if (previousFix && Number.isFinite(previousFix.lat) && Number.isFinite(previousFix.lng) && Number.isFinite(previousFix.fixTimeMs)) {
+                const deltaMs = Math.max(0, timestamp - previousFix.fixTimeMs);
+                const deltaHours = deltaMs / 3600000;
+                const deltaNm = distanceNm(previousFix.lat, previousFix.lng, latitude, longitude);
+                if (deltaHours > 0 && Number.isFinite(deltaNm)) {
+                    derivedSpeedKn = deltaNm / deltaHours;
+                }
+                if (deltaNm > 0.005) {
+                    derivedHeadingDeg = bearingDegrees(previousFix.lat, previousFix.lng, latitude, longitude);
+                }
+            }
+
+            return {
+                lat: latitude,
+                lng: longitude,
+                speedKn: Number.isFinite(nativeSpeedMs) ? nativeSpeedMs * 1.943844 : (Number.isFinite(derivedSpeedKn) ? derivedSpeedKn : null),
+                headingDeg: Number.isFinite(nativeHeadingDeg) ? normalizeCourseDegrees(nativeHeadingDeg) : derivedHeadingDeg,
+                fixTimeMs: timestamp
+            };
+        }
+
+        function shouldCaptureSample(fix, previousSample, force = false) {
+            if (!fix) return false;
+            if (force || !previousSample) return true;
+            const deltaMs = Math.max(0, Number(fix.fixTimeMs) - Number(previousSample.fixTimeMs));
+            const deltaM = distanceNm(previousSample.lat, previousSample.lng, fix.lat, fix.lng) * 1852;
+            return deltaMs >= SAMPLE_MIN_INTERVAL_MS || deltaM >= SAMPLE_MIN_DISTANCE_M;
+        }
+
+        function appendSample(fix, options = {}) {
+            if (!fix) return false;
+            const previousSample = state.traceSamples[state.traceSamples.length - 1] || null;
+            const shouldCapture = shouldCaptureSample(fix, previousSample, !!options.force);
+            if (!shouldCapture) return false;
+
+            let nextDistanceNm = state.distanceNm;
+            if (previousSample) {
+                nextDistanceNm += distanceNm(previousSample.lat, previousSample.lng, fix.lat, fix.lng);
+            }
+
+            state.traceSamples = state.traceSamples.concat({
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                timestamp: new Date(fix.fixTimeMs).toISOString(),
+                lat: fix.lat,
+                lng: fix.lng,
+                speedKn: Number.isFinite(fix.speedKn) ? fix.speedKn : null,
+                headingDeg: Number.isFinite(fix.headingDeg) ? fix.headingDeg : null,
+                heelDeg: null,
+                source: 'mobile-web'
+            });
+            state.distanceNm = nextDistanceNm;
+            saveSession();
+            return true;
+        }
+
+        function getSessionElapsedMs() {
+            if (!state.logging || !state.sessionStartIso) return 0;
+            const startedAt = Date.parse(state.sessionStartIso);
+            if (!Number.isFinite(startedAt)) return 0;
+            return Date.now() - startedAt;
+        }
+
+        function render() {
+            const isRunning = state.logging;
+            const isLoggedIn = !!state.cloudUser?.email;
+            setRunBadge(isRunning ? 'Log en cours' : 'Log arrêté', isRunning ? 'running' : 'idle');
+            if (ui.requestGpsBtn) ui.requestGpsBtn.disabled = state.finishInFlight;
+            ui.startBtn.disabled = isRunning || state.finishInFlight;
+            ui.finishBtn.disabled = !isRunning || state.finishInFlight;
+            if (ui.cloudSignInBtn) ui.cloudSignInBtn.disabled = state.finishInFlight || isLoggedIn;
+            if (ui.cloudSignUpBtn) ui.cloudSignUpBtn.disabled = state.finishInFlight || isLoggedIn;
+            if (ui.cloudSignOutBtn) ui.cloudSignOutBtn.disabled = state.finishInFlight || !isLoggedIn || state.logging;
+            if (ui.cloudSignOutCompactBtn) ui.cloudSignOutCompactBtn.disabled = state.finishInFlight || !isLoggedIn || state.logging;
+            if (ui.cloudEmailInput) ui.cloudEmailInput.disabled = state.finishInFlight || isLoggedIn;
+            if (ui.cloudPasswordInput) ui.cloudPasswordInput.disabled = state.finishInFlight || isLoggedIn;
+            if (ui.authForm) ui.authForm.classList.toggle('hidden', isLoggedIn);
+            if (ui.authSummary) ui.authSummary.classList.toggle('hidden', !isLoggedIn);
+            if (ui.authSummaryText) {
+                ui.authSummaryText.textContent = isLoggedIn
+                    ? `${formatAccount(state.cloudUser)}${state.logging ? ' · log en cours' : ''}`
+                    : '--';
+            }
+            ui.autoStartToggle.checked = !!state.autoStartEnabled;
+            ui.autoStopToggle.checked = !!state.autoStopEnabled;
+            ui.elapsedValue.textContent = formatDuration(getSessionElapsedMs());
+            ui.pointsValue.textContent = String(state.traceSamples.length);
+            ui.distanceValue.textContent = `${state.distanceNm.toFixed(2)} NM`;
+            const fixAge = state.currentFix?.fixTimeMs ? Date.now() - state.currentFix.fixTimeMs : NaN;
+            ui.fixAgeValue.textContent = formatFixAge(fixAge);
+            ui.speedValue.textContent = `Vitesse ${Number.isFinite(state.currentFix?.speedKn) ? state.currentFix.speedKn.toFixed(1) : '--'} kn`;
+            ui.positionValue.textContent = formatPosition(state.currentFix);
+            ui.accountValue.textContent = formatAccount(state.cloudUser);
+            ui.saveValue.textContent = state.pendingUploads.length > 0
+                ? `En attente de synchro: ${state.pendingUploads.length}`
+                : (state.lastSaveText || '--');
+            state.isStandalone = detectStandaloneMode();
+            if (ui.installState) {
+                ui.installState.dataset.installed = state.isStandalone ? 'true' : 'false';
+                ui.installState.textContent = state.isStandalone ? 'Mode app installée' : 'Mode navigateur';
+            }
+            if (ui.installHint) {
+                ui.installHint.textContent = state.isStandalone
+                    ? 'Le raccourci iPhone est actif. Cette page s’ouvre maintenant comme une mini app plein écran.'
+                    : 'Sur iPhone: Safari → Partager → Sur l’écran d’accueil pour l’ouvrir ensuite en plein écran.';
+            }
+        }
+
+        function updateCloudUi() {
+            if (state.cloudUser?.email) {
+                setCloudBadge('Cloud prêt', 'running');
+                setAuthStatus(`Connecté · ${formatAccount(state.cloudUser)}`, 'info');
+                if (!state.logging && !state.currentFix && state.lastStatusTone !== 'error') {
+                    setMainStatus('Compte cloud détecté. Le log peut démarrer.', 'info');
+                }
+            } else {
+                setCloudBadge('Connexion requise', 'warning');
+                if (state.authStatusTone !== 'error') {
+                    setAuthStatus('Compte non connecté. Utilise email + mot de passe ci-dessus.', 'info');
+                }
+                if (!state.logging && !state.currentFix && state.lastStatusTone !== 'error') {
+                    setMainStatus('Mode local actif. Le log peut démarrer; connecte-toi plus tard pour synchroniser.', 'info');
+                }
+            }
+            render();
+        }
+
+        function buildPendingLogEntry(reason) {
+            const lastSample = state.traceSamples[state.traceSamples.length - 1] || null;
+            const durationHours = getSessionElapsedMs() / 3600000;
+            const avgSpeed = durationHours > 0 ? state.distanceNm / durationHours : null;
+            const reasonLabel = reason === 'auto-stop' ? 'auto-stop' : (reason === 'auto-start' ? 'auto-start' : 'manual');
+            return {
+                watch_time_iso: state.sessionStartIso,
+                watch_end_time_iso: new Date().toISOString(),
+                trace_samples: state.traceSamples,
+                lat: Number.isFinite(lastSample?.lat) ? lastSample.lat : null,
+                lng: Number.isFinite(lastSample?.lng) ? lastSample.lng : null,
+                speed_kn: Number.isFinite(lastSample?.speedKn) ? lastSample.speedKn : avgSpeed,
+                heading_deg: Number.isFinite(lastSample?.headingDeg) ? lastSample.headingDeg : null,
+                log_distance_nm: Number.isFinite(state.distanceNm) ? state.distanceNm : 0,
+                events: `Log iPhone ${reasonLabel} · ${state.traceSamples.length} point(s) · ${(Number.isFinite(state.distanceNm) ? state.distanceNm : 0).toFixed(2)} NM`,
+                source: 'mobile-web',
+                watch_crew: 'iPhone'
+            };
+        }
+
+        function buildNavLogInsertPayload(entry) {
+            const safeEntry = normalizePendingLogEntry(entry);
+            if (!safeEntry) throw new Error('log mobile invalide');
+            return {
+                project_id: state.projectId,
+                creator_email: normalizeEmail(state.cloudUser?.email),
+                creator_name: String(state.cloudUser?.user_metadata?.full_name || state.cloudUser?.email?.split('@')[0] || 'Utilisateur').trim(),
+                watch_time_iso: safeEntry.watch_time_iso,
+                watch_end_time_iso: safeEntry.watch_end_time_iso,
+                trace_samples: safeEntry.trace_samples,
+                lat: safeEntry.lat,
+                lng: safeEntry.lng,
+                speed_kn: safeEntry.speed_kn,
+                heel_deg: null,
+                source: safeEntry.source,
+                watch_crew: safeEntry.watch_crew,
+                heading_deg: safeEntry.heading_deg,
+                wind_direction_deg: null,
+                wind_speed_kn: null,
+                sea_state: '',
+                sail_config: '',
+                barometer_hpa: null,
+                log_distance_nm: safeEntry.log_distance_nm,
+                events: safeEntry.events
+            };
+        }
+
+        function queuePendingLogEntry(entry) {
+            const safeEntry = normalizePendingLogEntry(entry);
+            if (!safeEntry) return;
+            state.pendingUploads = state.pendingUploads.concat(safeEntry);
+            savePendingUploads();
+        }
+
+        async function uploadPendingLogs() {
+            if (!state.cloudClient || !state.cloudUser?.email || state.pendingSyncInFlight || !state.pendingUploads.length) return;
+
+            state.pendingSyncInFlight = true;
+            try {
+                const projectId = await resolveProjectIdUuid();
+                await ensureProjectRow(projectId);
+
+                const remaining = [];
+                let syncedCount = 0;
+                for (const entry of state.pendingUploads) {
+                    const payload = buildNavLogInsertPayload(entry);
+                    const { error } = await state.cloudClient
+                        .from(NAV_LOG_TABLE)
+                        .insert(payload);
+                    if (error) {
+                        remaining.push(entry);
+                        continue;
+                    }
+                    syncedCount += 1;
+                }
+
+                state.pendingUploads = remaining;
+                savePendingUploads();
+                if (syncedCount > 0) {
+                    state.lastSaveText = `Synchro OK · ${syncedCount}`;
+                    if (!state.logging) {
+                        setMainStatus(`Synchro cloud OK: ${syncedCount} log(s) envoyé(s).`, 'info');
+                    }
+                }
+            } catch (error) {
+                if (!state.logging) {
+                    setMainStatus(`Synchro différée: ${String(error?.message || error)}`, 'error');
+                }
+            } finally {
+                state.pendingSyncInFlight = false;
+                render();
+            }
+        }
+
+        function buildEmailRedirectUrl() {
+            try {
+                const url = new URL(window.location.href);
+                url.hash = '';
+                return url.toString();
+            } catch (_error) {
+                return window.location.href;
+            }
+        }
+
+        async function signInCloud() {
+            if (!state.cloudClient) return;
+            const { email, password } = readCredentials();
+            saveAuthDraft();
+            if (!email || !password) {
+                setAuthStatus('Renseigne email + mot de passe.', 'error');
+                return;
+            }
+
+            setAuthStatus('Connexion en cours...');
+            try {
+                const { error } = await state.cloudClient.auth.signInWithPassword({ email, password });
+                if (error) throw error;
+                if (ui.cloudPasswordInput) ui.cloudPasswordInput.value = '';
+                setAuthStatus(`Connexion OK (${email})`);
+                await refreshCloudSession();
+            } catch (error) {
+                setAuthStatus(`Connexion impossible: ${String(error?.message || error)}`, 'error');
+            }
+        }
+
+        async function signUpCloud() {
+            if (!state.cloudClient) return;
+            const { email, password } = readCredentials();
+            saveAuthDraft();
+            if (!email || !password) {
+                setAuthStatus('Renseigne email + mot de passe.', 'error');
+                return;
+            }
+            if (password.length < 8) {
+                setAuthStatus('Mot de passe trop court (minimum 8 caractères).', 'error');
+                return;
+            }
+
+            setAuthStatus('Création compte en cours...');
+            try {
+                const { data, error } = await state.cloudClient.auth.signUp({
+                    email,
+                    password,
+                    options: { emailRedirectTo: buildEmailRedirectUrl() }
+                });
+                if (error) throw error;
+                if (data?.user && !data?.session) {
+                    setAuthStatus(`Compte créé (${email}). Vérifie l’email de confirmation.`);
+                } else {
+                    if (ui.cloudPasswordInput) ui.cloudPasswordInput.value = '';
+                    setAuthStatus(`Compte créé et connecté (${email}).`);
+                    await refreshCloudSession();
+                }
+            } catch (error) {
+                const message = String(error?.message || error || 'erreur inconnue');
+                if (message.toLowerCase().includes('already')) {
+                    setAuthStatus(`Compte déjà existant pour ${email}. Utilise Connexion.`, 'error');
+                    return;
+                }
+                setAuthStatus(`Création compte impossible: ${message}`, 'error');
+            }
+        }
+
+        async function signOutCloud() {
+            if (!state.cloudClient) return;
+            if (state.logging) {
+                setAuthStatus('Termine le log avant de te déconnecter.', 'error');
+                return;
+            }
+            setAuthStatus('Déconnexion en cours...');
+            try {
+                const { error } = await state.cloudClient.auth.signOut();
+                if (error) throw error;
+                if (ui.cloudPasswordInput) ui.cloudPasswordInput.value = '';
+                setAuthStatus('Déconnecté.');
+                await refreshCloudSession();
+            } catch (error) {
+                setAuthStatus(`Déconnexion impossible: ${String(error?.message || error)}`, 'error');
+            }
+        }
+
+        function handleFix(position) {
+            const previousFix = state.currentFix;
+            const nextFix = buildFix(position, previousFix);
+            if (!nextFix) return;
+            state.currentFix = nextFix;
+
+            if (state.logging) {
+                appendSample(nextFix);
+                handleAutoStop(nextFix);
+                setMainStatus(`Log actif · ${state.traceSamples.length} point(s) · ${state.distanceNm.toFixed(2)} NM`, 'info');
+            } else if (state.autoStartEnabled) {
+                maybeAutoStart(nextFix);
+            } else {
+                state.armingFix = nextFix;
+            }
+
+            saveSession();
+            render();
+        }
+
+        function handleGeolocationError(error) {
+            const code = Number(error?.code);
+            if (code === 1) {
+                setMainStatus('Accès GPS refusé. Autorise la localisation dans Safari pour cette page.', 'error');
+            } else if (code === 2) {
+                setMainStatus('Position GPS indisponible pour le moment.', 'error');
+            } else if (code === 3) {
+                setMainStatus('Le GPS met trop de temps à répondre.', 'error');
+            } else {
+                setMainStatus(`Erreur GPS: ${String(error?.message || 'inconnue')}`, 'error');
+            }
+            render();
+        }
+
+        function requestCurrentPositionWithFallback(onSuccess, onError) {
+            if (!navigator.geolocation) {
+                onError({ code: 2, message: 'geolocation-unavailable' });
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                onSuccess,
+                primaryError => {
+                    const code = Number(primaryError?.code);
+                    const canRetryWithLowAccuracy = code === 2 || code === 3;
+                    if (!canRetryWithLowAccuracy) {
+                        onError(primaryError);
+                        return;
+                    }
+
+                    setMainStatus('GPS haute précision indisponible, nouvelle tentative standard...', 'info');
+
+                    navigator.geolocation.getCurrentPosition(
+                        onSuccess,
+                        onError,
+                        {
+                            enableHighAccuracy: false,
+                            maximumAge: 60000,
+                            timeout: 20000
+                        }
+                    );
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 12000
+                }
+            );
+        }
+
+        function ensureWatchRunning() {
+            if (state.watchId !== null) return;
+            if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(String(window.location.hostname || '').trim())) {
+                setMainStatus('Cette page doit être ouverte en HTTPS pour utiliser le GPS sur iPhone.', 'error');
+                return;
+            }
+            if (!navigator.geolocation) {
+                setMainStatus('La géolocalisation n’est pas disponible sur cet appareil.', 'error');
+                return;
+            }
+
+            requestCurrentPositionWithFallback(handleFix, handleGeolocationError);
+
+            const startWatch = (enableHighAccuracy = true) => {
+                state.watchId = navigator.geolocation.watchPosition(
+                    handleFix,
+                    error => {
+                        const code = Number(error?.code);
+                        const canRetryWithLowAccuracy = enableHighAccuracy && (code === 2 || code === 3);
+                        if (canRetryWithLowAccuracy) {
+                            if (state.watchId !== null) {
+                                navigator.geolocation.clearWatch(state.watchId);
+                                state.watchId = null;
+                            }
+                            setMainStatus('GPS haute précision indisponible, passage en suivi standard...', 'info');
+                            startWatch(false);
+                            return;
+                        }
+                        handleGeolocationError(error);
+                    },
+                    {
+                        enableHighAccuracy,
+                        maximumAge: enableHighAccuracy ? (state.logging ? 0 : 5000) : 15000,
+                        timeout: enableHighAccuracy ? 12000 : 20000
+                    }
+                );
+            };
+
+            startWatch(true);
+        }
+
+        function maybeAutoStart(fix) {
+            if (!fix || state.logging || !state.autoStartEnabled) return;
+            if (!state.armingFix) {
+                state.armingFix = fix;
+                setMainStatus(`Auto start armé. Le log démarrera après ${AUTO_START_DISTANCE_M} m.`, 'info');
+                return;
+            }
+
+            const deltaM = distanceNm(state.armingFix.lat, state.armingFix.lng, fix.lat, fix.lng) * 1852;
+            if (!Number.isFinite(deltaM)) {
+                state.armingFix = fix;
+                return;
+            }
+
+            if (deltaM >= AUTO_START_DISTANCE_M) {
+                startLogging('auto-start');
+            }
+        }
+
+        function handleAutoStop(fix) {
+            if (!state.autoStopEnabled || !state.logging || !fix) return;
+            const lastSample = state.traceSamples[state.traceSamples.length - 1] || null;
+            const referenceSample = state.traceSamples[Math.max(0, state.traceSamples.length - 2)] || lastSample;
+            const driftM = lastSample && referenceSample
+                ? distanceNm(referenceSample.lat, referenceSample.lng, fix.lat, fix.lng) * 1852
+                : 0;
+            const slow = !Number.isFinite(fix.speedKn) || fix.speedKn <= AUTO_STOP_SPEED_THRESHOLD_KN;
+
+            if (slow && driftM <= AUTO_STOP_DRIFT_THRESHOLD_M) {
+                if (!state.stationarySinceMs) {
+                    state.stationarySinceMs = Date.now();
+                }
+            } else {
+                state.stationarySinceMs = 0;
+            }
+
+            if (state.stationarySinceMs && (Date.now() - state.stationarySinceMs) >= AUTO_STOP_IDLE_MS) {
+                void finishLogging('auto-stop');
+            }
+        }
+
+        function startLogging(reason = 'manual') {
+            if (state.logging) return;
+
+            state.logging = true;
+            state.sessionStartIso = new Date().toISOString();
+            state.traceSamples = [];
+            state.distanceNm = 0;
+            state.stationarySinceMs = 0;
+            state.armingFix = null;
+            if (state.currentFix) {
+                appendSample(state.currentFix, { force: true });
+            }
+            ensureWatchRunning();
+            setMainStatus(reason === 'auto-start'
+                ? 'Log démarré automatiquement.'
+                : (state.cloudUser?.email
+                    ? 'Log démarré. Le monitoring suit maintenant la session.'
+                    : 'Log démarré en local. Connecte-toi plus tard si tu veux synchroniser automatiquement.'), 'info');
+            saveSession();
+            render();
+        }
+
+        async function resolveProjectIdUuid() {
+            if (isUuidString(state.projectId)) return state.projectId;
+            const projectKey = String(state.cloudConfig?.projectKey || '').trim();
+            if (!projectKey) return '';
+            if (isUuidString(projectKey)) {
+                state.projectId = projectKey;
+                return state.projectId;
+            }
+
+            let h1 = 0x811c9dc5;
+            let h2 = 0x01000193;
+            let h3 = 0x9e3779b9;
+            let h4 = 0x85ebca6b;
+
+            for (let index = 0; index < projectKey.length; index += 1) {
+                const code = projectKey.charCodeAt(index);
+                h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
+                h2 = Math.imul(h2 ^ (code + index), 0x27d4eb2d) >>> 0;
+                h3 = Math.imul(h3 ^ (code + index * 7), 0x165667b1) >>> 0;
+                h4 = Math.imul(h4 ^ (code + index * 13), 0x9e3779b1) >>> 0;
+            }
+
+            const hex = [h1, h2, h3, h4].map(value => value.toString(16).padStart(8, '0')).join('').split('');
+            hex[12] = '4';
+            hex[16] = ['8', '9', 'a', 'b'][parseInt(hex[16], 16) % 4];
+            const normalized = hex.join('');
+            state.projectId = `${normalized.slice(0, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}-${normalized.slice(16, 20)}-${normalized.slice(20, 32)}`;
+            return state.projectId;
+        }
+
+        async function ensureProjectRow(projectId) {
+            if (!isUuidString(projectId)) throw new Error('project_id invalide');
+
+            const { data: existing, error: existingError } = await state.cloudClient
+                .from(PROJECTS_TABLE)
+                .select('id')
+                .eq('id', projectId)
+                .maybeSingle();
+
+            if (!existingError && existing?.id) return projectId;
+
+            const projectKey = String(state.cloudConfig?.projectKey || 'ceibo-main').trim() || 'ceibo-main';
+            const { error: insertError } = await state.cloudClient
+                .from(PROJECTS_TABLE)
+                .insert({ id: projectId, project_key: projectKey, name: projectKey });
+
+            if (insertError) {
+                const code = String(insertError?.code || '').toUpperCase();
+                const message = String(insertError?.message || '').toLowerCase();
+                if (!(code === '23505' || message.includes('duplicate key'))) {
+                    throw insertError;
+                }
+            }
+            return projectId;
+        }
+
+        async function finishLogging(reason = 'manual') {
+            if (!state.logging || state.finishInFlight) return;
+
+            state.finishInFlight = true;
+            render();
+
+            try {
+                if (state.currentFix) {
+                    appendSample(state.currentFix, { force: true });
+                }
+                const pendingEntry = buildPendingLogEntry(reason);
+                if (!state.cloudUser?.email) {
+                    queuePendingLogEntry(pendingEntry);
+                    clearSessionState();
+                    state.armingFix = state.currentFix;
+                    setMainStatus('Log arrêté. Connecte-toi plus tard pour synchroniser en base.', 'info');
+                    return;
+                }
+                const projectId = await resolveProjectIdUuid();
+                await ensureProjectRow(projectId);
+                const payload = buildNavLogInsertPayload(pendingEntry);
+                const { data, error } = await state.cloudClient
+                    .from(NAV_LOG_TABLE)
+                    .insert(payload)
+                    .select('id, created_at')
+                    .single();
+
+                if (error) throw error;
+
+                state.lastInsertedId = String(data?.id || '');
+                state.lastSaveText = data?.created_at
+                    ? `OK · ${new Date(data.created_at).toLocaleString('fr-FR')}`
+                    : 'OK';
+                clearSessionState();
+                state.armingFix = state.currentFix;
+                setMainStatus(reason === 'auto-stop'
+                    ? 'Log arrêté automatiquement et enregistré en base.'
+                    : 'Log arrêté et enregistré en base.', 'info');
+            } catch (error) {
+                queuePendingLogEntry(buildPendingLogEntry(reason));
+                clearSessionState();
+                state.armingFix = state.currentFix;
+                setMainStatus(`Enregistrement cloud impossible: log gardé localement (${String(error?.message || error)}).`, 'error');
+            } finally {
+                state.finishInFlight = false;
+                saveSession();
+                render();
+            }
+        }
+
+        async function refreshCloudSession() {
+            if (!state.cloudClient) return;
+            const { data, error } = await state.cloudClient.auth.getSession();
+            if (error) throw error;
+            state.cloudUser = data?.session?.user || null;
+            updateCloudUi();
+        }
+
+        async function initCloud() {
+            state.cloudConfig = getCloudConfig();
+            if (!state.cloudConfig) {
+                setCloudBadge('Cloud incomplet', 'error');
+                setMainStatus('Configuration cloud introuvable.', 'error');
+                return;
+            }
+
+            state.cloudClient = createClient(state.cloudConfig.url, state.cloudConfig.anonKey, {
+                auth: {
+                    persistSession: true,
+                    autoRefreshToken: true,
+                    detectSessionInUrl: true,
+                    storageKey: `ceibo-supabase-${state.cloudConfig.projectKey}`
+                }
+            });
+
+            if (!state.cloudAuthBound) {
+                state.cloudAuthBound = true;
+                state.cloudClient.auth.onAuthStateChange((_event, session) => {
+                    state.cloudUser = session?.user || null;
+                    updateCloudUi();
+                    void uploadPendingLogs();
+                });
+            }
+
+            await refreshCloudSession();
+            await uploadPendingLogs();
+        }
+
+        function bindUi() {
+            if (ui.requestGpsBtn) {
+                ui.requestGpsBtn.addEventListener('click', () => {
+                    restartGpsWatch();
+                });
+            }
+            ui.startBtn.addEventListener('click', () => {
+                restartGpsWatch();
+                startLogging('manual');
+            });
+            ui.finishBtn.addEventListener('click', () => {
+                void finishLogging('manual');
+            });
+            ui.autoStartToggle.addEventListener('change', () => {
+                state.autoStartEnabled = ui.autoStartToggle.checked;
+                savePrefs();
+                if (state.autoStartEnabled && state.currentFix && !state.logging) {
+                    state.armingFix = state.currentFix;
+                    setMainStatus(`Auto start armé. Le log démarrera après ${AUTO_START_DISTANCE_M} m.`, 'info');
+                }
+                render();
+            });
+            ui.autoStopToggle.addEventListener('change', () => {
+                state.autoStopEnabled = ui.autoStopToggle.checked;
+                if (!state.autoStopEnabled) state.stationarySinceMs = 0;
+                savePrefs();
+                render();
+            });
+            if (ui.cloudEmailInput) {
+                ui.cloudEmailInput.addEventListener('input', saveAuthDraft);
+            }
+            if (ui.cloudSignInBtn) {
+                ui.cloudSignInBtn.addEventListener('click', () => {
+                    void signInCloud();
+                });
+            }
+            if (ui.cloudSignUpBtn) {
+                ui.cloudSignUpBtn.addEventListener('click', () => {
+                    void signUpCloud();
+                });
+            }
+            if (ui.cloudSignOutBtn) {
+                ui.cloudSignOutBtn.addEventListener('click', () => {
+                    void signOutCloud();
+                });
+            }
+            if (ui.cloudSignOutCompactBtn) {
+                ui.cloudSignOutCompactBtn.addEventListener('click', () => {
+                    void signOutCloud();
+                });
+            }
+            if (ui.cloudPasswordInput) {
+                ui.cloudPasswordInput.addEventListener('keydown', event => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void signInCloud();
+                    }
+                });
+            }
+        }
+
+        function tick() {
+            render();
+        }
+
+        async function init() {
+            loadPrefs();
+            loadAuthDraft();
+            restoreSession();
+            bindUi();
+            render();
+            ensureWatchRunning();
+            try {
+                await initCloud();
+            } catch (error) {
+                setCloudBadge('Cloud erreur', 'error');
+                setMainStatus(`Connexion cloud impossible: ${String(error?.message || error)}`, 'error');
+            }
+
+            if (state.logging) {
+                setMainStatus('Session restaurée. Le monitoring reprend.', 'info');
+            } else if (state.autoStartEnabled && state.lastStatusTone !== 'error') {
+                setMainStatus(`Auto start armé. Le log démarrera après ${AUTO_START_DISTANCE_M} m.`, 'info');
+            }
+
+            window.setInterval(tick, 1000);
+            render();
+        }
+
+        void init();
+    </script>
+</body>
+</html>

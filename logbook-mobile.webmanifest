@@ -1,0 +1,20 @@
+{
+  "name": "CEIBO Logbook Mobile",
+  "short_name": "CEIBO Log",
+  "description": "Logbook mobile CEIBO pour iPhone avec Start, Finish et enregistrement cloud.",
+  "lang": "fr",
+  "start_url": "/logbook-mobile.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07141d",
+  "theme_color": "#07141d",
+  "icons": [
+    {
+      "src": "/ceibo-logbook-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

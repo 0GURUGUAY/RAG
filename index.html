@@ -10,7 +10,7 @@
     <link rel="icon" type="image/jpeg" href="ceibo-favicon.jpg">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <link rel="stylesheet" href="style.css?v=20260504-47-weather-ticker"/>
+    <link rel="stylesheet" href="style.css?v=20260605-48"/>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -329,6 +329,9 @@
             <button id="requestMotionPermissionBtn" style="flex:1;">Activer capteur inclinaison</button>
         </div>
         <div id="navLogStatus" style="margin-top:6px; font-size:12px; opacity:0.9;">Journal navigation: en attente</div>
+        <div class="button-row" style="margin-top:8px;">
+            <a id="navLogMobileLink" href="/log">Vue iPhone · Start / Finish</a>
+        </div>
 
         <div class="cloud-config-card" style="margin-top:10px;">
             <div class="cloud-config-title">Source de données navigation</div>
@@ -1281,7 +1284,7 @@
     <div id="sidebarFooterContainer">
         <div class="sidebar-footer">
             <span class="creator-credit">Programa creado por Max Patissier</span>
-            <span id="buildVersionBadge" class="build-version-badge">v20260501-45</span>
+            <span id="buildVersionBadge" class="build-version-badge">v20260605-48</span>
             <button id="nightModeToggleBtn" class="night-mode-btn" type="button" aria-pressed="false">Mode nuit: OFF</button>
             <div class="lang-switch" aria-label="Sélecteur de langue">
                 <button id="langFrBtn" class="lang-btn" type="button">FR</button>
@@ -1892,7 +1895,7 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=20260504-47-weather-ticker"></script>
+<script type="module" src="app.js?v=20260605-48"></script>
 
 </body>
 </html>
