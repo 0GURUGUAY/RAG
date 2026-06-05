@@ -7,7 +7,7 @@ from weather.server import WeatherAnalyzeRequest, run_analysis
 app = FastAPI(title='CEIBO Weather Analyze', version='1.0.0')
 
 
-@app.post('/')
+@app.post('/api/weather/analyze')
 def analyze(payload: WeatherAnalyzeRequest):
     try:
         return run_analysis(payload.lat, payload.lon, payload.horizon_days, payload.language)
