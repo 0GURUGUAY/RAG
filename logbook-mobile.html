@@ -408,6 +408,45 @@
             background: rgba(255, 124, 114, 0.08);
         }
 
+        .recovery-panel {
+            display: grid;
+            gap: 10px;
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 185, 66, 0.24);
+            background: rgba(255, 185, 66, 0.08);
+        }
+
+        .recovery-panel.hidden {
+            display: none !important;
+        }
+
+        .recovery-panel strong {
+            font-size: 14px;
+        }
+
+        .recovery-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .recovery-list {
+            display: grid;
+            gap: 6px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .recovery-list strong {
+            color: #dcecf7;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
         .mini-list {
             display: grid;
             gap: 8px;
@@ -475,6 +514,7 @@
 
         @media (max-width: 420px) {
             .actions,
+            .recovery-actions,
             .metric-grid,
             .auth-grid,
             .auth-actions {
@@ -495,6 +535,19 @@
                     <div id="cloudBadge" class="badge" data-state="warning">Cloud en attente</div>
                 </div>
                 <div id="mainStatus" class="status-text">Initialisation en cours…</div>
+                <div id="gpsRecoveryPanel" class="recovery-panel hidden">
+                    <strong>Récupération GPS</strong>
+                    <div class="hint">Si Safari reste bloqué, relance la demande GPS ou réinitialise la session restaurée avant de recommencer.</div>
+                    <div class="recovery-actions">
+                        <button id="requestGpsTopBtn" type="button" class="btn-secondary">Relancer GPS</button>
+                        <button id="resetGpsStateBtn" type="button" class="btn-ghost">Réinitialiser session</button>
+                    </div>
+                    <ul class="recovery-list">
+                        <li><strong>Permission site</strong><span id="gpsPermissionValue">--</span></li>
+                        <li><strong>Dernière erreur</strong><span id="gpsErrorValue">--</span></li>
+                        <li><strong>Contexte</strong><span id="gpsContextValue">--</span></li>
+                    </ul>
+                </div>
             </div>
         </section>
 
@@ -624,11 +677,17 @@
 
         const ui = {
             requestGpsBtn: document.getElementById('requestGpsBtn'),
+            requestGpsTopBtn: document.getElementById('requestGpsTopBtn'),
+            resetGpsStateBtn: document.getElementById('resetGpsStateBtn'),
             startBtn: document.getElementById('startBtn'),
             finishBtn: document.getElementById('finishBtn'),
             runBadge: document.getElementById('runBadge'),
             cloudBadge: document.getElementById('cloudBadge'),
             mainStatus: document.getElementById('mainStatus'),
+            gpsRecoveryPanel: document.getElementById('gpsRecoveryPanel'),
+            gpsPermissionValue: document.getElementById('gpsPermissionValue'),
+            gpsErrorValue: document.getElementById('gpsErrorValue'),
+            gpsContextValue: document.getElementById('gpsContextValue'),
             authStatus: document.getElementById('mobileCloudAuthStatus'),
             authForm: document.getElementById('authForm'),
             authSummary: document.getElementById('authSummary'),
@@ -676,7 +735,10 @@
             projectId: '',
             isStandalone: false,
             pendingUploads: [],
-            pendingSyncInFlight: false
+            pendingSyncInFlight: false,
+            geolocationPermissionState: 'unknown',
+            lastGeolocationErrorCode: null,
+            lastGeolocationErrorMessage: ''
         };
 
         function setAuthStatus(message, tone = 'info') {
@@ -847,12 +909,43 @@
             localStorage.removeItem(MOBILE_SESSION_STORAGE_KEY);
         }
 
+        async function refreshGeolocationPermissionState() {
+            try {
+                if (!navigator.permissions || typeof navigator.permissions.query !== 'function') {
+                    state.geolocationPermissionState = 'indisponible';
+                    return;
+                }
+                const status = await navigator.permissions.query({ name: 'geolocation' });
+                state.geolocationPermissionState = String(status?.state || 'inconnu');
+            } catch (_error) {
+                state.geolocationPermissionState = 'indisponible';
+            }
+        }
+
+        function resetBlockedGpsState() {
+            if (state.watchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(state.watchId);
+                state.watchId = null;
+            }
+            clearSessionState();
+            state.currentFix = null;
+            state.armingFix = null;
+            state.lastGeolocationErrorCode = null;
+            state.lastGeolocationErrorMessage = '';
+            saveSession();
+            setMainStatus('Session GPS réinitialisée. Touche Relancer GPS puis accepte Safari si demandé.', 'info');
+            render();
+        }
+
         function restartGpsWatch() {
             if (state.watchId !== null && navigator.geolocation) {
                 navigator.geolocation.clearWatch(state.watchId);
                 state.watchId = null;
             }
+            state.lastGeolocationErrorCode = null;
+            state.lastGeolocationErrorMessage = '';
             setMainStatus('Demande GPS en cours...', 'info');
+            void refreshGeolocationPermissionState();
             ensureWatchRunning();
             render();
         }
@@ -1019,6 +1112,7 @@
             const isRunning = state.logging;
             const isLoggedIn = !!state.cloudUser?.email;
             const gpsActive = hasFreshGpsFix();
+            const isGpsBlocked = state.lastGeolocationErrorCode === 1;
             setRunBadge(
                 isRunning
                     ? (gpsActive ? 'Log en cours' : 'GPS à relancer')
@@ -1056,6 +1150,22 @@
             ui.saveValue.textContent = state.pendingUploads.length > 0
                 ? `En attente de synchro: ${state.pendingUploads.length}`
                 : (state.lastSaveText || '--');
+            if (ui.gpsRecoveryPanel) {
+                ui.gpsRecoveryPanel.classList.toggle('hidden', !(isGpsBlocked || (isRunning && !gpsActive)));
+            }
+            if (ui.gpsPermissionValue) {
+                ui.gpsPermissionValue.textContent = state.geolocationPermissionState;
+            }
+            if (ui.gpsErrorValue) {
+                ui.gpsErrorValue.textContent = state.lastGeolocationErrorCode
+                    ? `${state.lastGeolocationErrorCode}${state.lastGeolocationErrorMessage ? ` · ${state.lastGeolocationErrorMessage}` : ''}`
+                    : '--';
+            }
+            if (ui.gpsContextValue) {
+                ui.gpsContextValue.textContent = isRunning
+                    ? (gpsActive ? 'log actif avec fix récent' : 'log restauré ou actif sans fix récent')
+                    : 'pas de log actif';
+            }
             state.isStandalone = detectStandaloneMode();
             if (ui.installState) {
                 ui.installState.dataset.installed = state.isStandalone ? 'true' : 'false';
@@ -1290,7 +1400,14 @@
 
         function handleGeolocationError(error) {
             const code = Number(error?.code);
+            state.lastGeolocationErrorCode = Number.isFinite(code) ? code : null;
+            state.lastGeolocationErrorMessage = String(error?.message || '').trim();
+            if (code === 1 && state.watchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(state.watchId);
+                state.watchId = null;
+            }
             if (code === 1) {
+                state.geolocationPermissionState = 'denied';
                 setMainStatus('Accès GPS refusé par ce site. Dans Safari: aA > Réglages du site web > Localisation > Autoriser, puis touche GPS.', 'error');
             } else if (code === 2) {
                 setMainStatus('Position GPS indisponible pour le moment.', 'error');
@@ -1592,6 +1709,16 @@
                     restartGpsWatch();
                 });
             }
+            if (ui.requestGpsTopBtn) {
+                ui.requestGpsTopBtn.addEventListener('click', () => {
+                    restartGpsWatch();
+                });
+            }
+            if (ui.resetGpsStateBtn) {
+                ui.resetGpsStateBtn.addEventListener('click', () => {
+                    resetBlockedGpsState();
+                });
+            }
             ui.startBtn.addEventListener('click', () => {
                 restartGpsWatch();
                 startLogging('manual');
@@ -1655,6 +1782,7 @@
             loadPrefs();
             loadAuthDraft();
             restoreSession();
+            await refreshGeolocationPermissionState();
             bindUi();
             render();
             try {
